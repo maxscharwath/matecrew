@@ -383,6 +383,25 @@
     "yourShare": "Votre part",
     "youPaidLabel": "Vous avez payé"
   },
+  "profile": {
+    "title": "Profil",
+    "subtitle": "Gérer vos informations personnelles.",
+    "avatar": "Avatar",
+    "changeAvatar": "Changer l'avatar",
+    "removeAvatar": "Supprimer",
+    "name": "Nom",
+    "namePlaceholder": "Votre nom",
+    "language": "Langue",
+    "defaultOffice": "Bureau par défaut",
+    "defaultOfficeDescription": "Le bureau vers lequel vous serez redirigé après connexion.",
+    "offices": "Vos bureaux",
+    "goToOffice": "Ouvrir",
+    "default": "Par défaut",
+    "setAsDefault": "Définir par défaut",
+    "saving": "Enregistrement...",
+    "saveChanges": "Enregistrer les modifications",
+    "profileSaved": "Profil enregistré"
+  },
   "slack": {
     "newMessage": "Nouveau message de MateCrew",
     "mateOfTheDay": ":coffee: *Maté du jour — {office}*\n:calendar: {date}\n\nQui veut un maté aujourd'hui ?",

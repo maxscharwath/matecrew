@@ -41,7 +41,7 @@ interface DailyRequest {
 
 interface OtherRequester {
   name: string;
-  image: string | null;
+  image?: string;
   status: "REQUESTED" | "SERVED";
 }
 
@@ -100,7 +100,7 @@ function RequesterAvatars({
                   r.status === "SERVED" ? "ring-green-500!" : ""
                 }
               >
-                {r.image && <AvatarImage src={r.image} alt={r.name} />}
+                <AvatarImage src={r.image} alt={r.name} />
                 <AvatarFallback>{getInitials(r.name)}</AvatarFallback>
               </Avatar>
             </TooltipTrigger>

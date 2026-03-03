@@ -27,7 +27,7 @@ interface DailyRequest {
     id: string;
     name: string;
     email: string;
-    image: string | null;
+    image?: string;
   };
 }
 
@@ -200,9 +200,7 @@ export function RunnerView({
                   className="flex items-center gap-3 py-2.5"
                 >
                   <Avatar size="sm">
-                    {r.user.image && (
-                      <AvatarImage src={r.user.image} alt={r.user.name} />
-                    )}
+                    <AvatarImage src={r.user.image} alt={r.user.name} />
                     <AvatarFallback>{getInitials(r.user.name)}</AvatarFallback>
                   </Avatar>
                   <span className={`flex-1 text-sm ${r.status === "SERVED" ? "text-muted-foreground line-through" : "font-medium"}`}>

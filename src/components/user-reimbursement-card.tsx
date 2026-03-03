@@ -12,6 +12,7 @@ import {
   Check,
   FileText,
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -25,6 +26,7 @@ interface UserPaymentLine {
   lineId: string;
   direction: "pay" | "receive";
   otherUserName: string;
+  otherUserImage?: string;
   amount: number;
   status: string;
 }
@@ -196,18 +198,20 @@ export function UserReimbursementCard({
                           {t('reimbursements.youPayLabel')}
                         </span>
                         <ArrowRight className="size-4 text-muted-foreground" />
-                        <span className="flex size-7 items-center justify-center rounded-full bg-green-100 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                          {getInitial(l.otherUserName)}
-                        </span>
+                        <Avatar size="sm">
+                          <AvatarImage src={l.otherUserImage} alt={l.otherUserName} />
+                          <AvatarFallback>{getInitial(l.otherUserName)}</AvatarFallback>
+                        </Avatar>
                         <span className="text-sm font-medium">
                           {l.otherUserName}
                         </span>
                       </>
                     ) : (
                       <>
-                        <span className="flex size-7 items-center justify-center rounded-full bg-red-100 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                          {getInitial(l.otherUserName)}
-                        </span>
+                        <Avatar size="sm">
+                          <AvatarImage src={l.otherUserImage} alt={l.otherUserName} />
+                          <AvatarFallback>{getInitial(l.otherUserName)}</AvatarFallback>
+                        </Avatar>
                         <span className="text-sm font-medium">
                           {l.otherUserName}
                         </span>

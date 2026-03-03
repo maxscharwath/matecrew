@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { ReimbursementPeriodCard } from "@/components/reimbursement-period-card";
 import { GenerateMissingPeriodsButton } from "./generate-button";
@@ -20,8 +21,8 @@ export default async function ReimbursementsPage({ params }: Props) {
     include: {
       lines: {
         include: {
-          fromUser: { select: { name: true } },
-          toUser: { select: { name: true } },
+          fromUser: { select: { name: true, image: true } },
+          toUser: { select: { name: true, image: true } },
         },
       },
     },
@@ -43,13 +44,17 @@ export default async function ReimbursementsPage({ params }: Props) {
           id: period.id,
           startDate: period.startDate.toISOString(),
           endDate: period.endDate.toISOString(),
-          lines: period.lines.map((l) => ({
-            id: l.id,
-            fromUserName: l.fromUser.name,
-            toUserName: l.toUser.name,
-            amount: l.amount.toNumber(),
-            status: l.status,
-          })),
+          lines: await Promise.all(
+            period.lines.map(async (l) => ({
+              id: l.id,
+              fromUserName: l.fromUser.name,
+              fromUserImage: await resolveAvatarUrl(l.fromUser.image),
+              toUserName: l.toUser.name,
+              toUserImage: await resolveAvatarUrl(l.toUser.image),
+              amount: l.amount.toNumber(),
+              status: l.status,
+            })),
+          ),
         },
         shares: result.shares,
         totalConsumption: result.totalConsumption,

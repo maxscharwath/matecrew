@@ -45,14 +45,16 @@ enum PaymentStatus {
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
-  image         String?
-  locale        String    @default("fr")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  name            String
+  email           String    @unique
+  emailVerified   Boolean   @default(false)
+  image           String?
+  locale          String    @default("fr")
+  defaultOfficeId String?
+  defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   sessions      Session[]
   accounts      Account[]
@@ -121,6 +123,7 @@ model Office {
   updatedAt DateTime @updatedAt
 
   memberships          Membership[]
+  defaultForUsers      User[]               @relation("DefaultOffice")
   dailyRequests        DailyRequest[]
   stock                Stock?
   purchaseBatches      PurchaseBatch[]

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
 import { PurchaseForm } from "@/components/purchase-form";
 import { PurchaseList } from "@/components/purchase-list";
 import { getTranslations } from "next-intl/server";
@@ -18,7 +19,7 @@ export default async function PurchasesPage({ params }: Props) {
       where: { officeId },
       orderBy: { purchasedAt: "desc" },
       include: {
-        paidBy: { select: { name: true } },
+        paidBy: { select: { name: true, image: true } },
         invoices: { select: { id: true, filename: true } },
       },
     }),
@@ -34,17 +35,20 @@ export default async function PurchasesPage({ params }: Props) {
     name: m.user.name,
   }));
 
-  const serializedBatches = batches.map((b) => ({
-    id: b.id,
-    status: b.status as "ORDERED" | "DELIVERED",
-    purchasedAt: b.purchasedAt.toISOString(),
-    qty: b.qty,
-    unitPrice: b.unitPrice.toNumber(),
-    totalPrice: b.totalPrice.toNumber(),
-    paidByName: b.paidBy.name,
-    notes: b.notes,
-    invoices: b.invoices,
-  }));
+  const serializedBatches = await Promise.all(
+    batches.map(async (b) => ({
+      id: b.id,
+      status: b.status as "ORDERED" | "DELIVERED",
+      purchasedAt: b.purchasedAt.toISOString(),
+      qty: b.qty,
+      unitPrice: b.unitPrice.toNumber(),
+      totalPrice: b.totalPrice.toNumber(),
+      paidByName: b.paidBy.name,
+      paidByImage: await resolveAvatarUrl(b.paidBy.image),
+      notes: b.notes,
+      invoices: b.invoices,
+    })),
+  );
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 p-8">

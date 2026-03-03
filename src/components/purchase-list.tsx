@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations, useLocale } from "next-intl";
 import { Download, PackageCheck } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,6 +33,7 @@ interface PurchaseBatch {
   unitPrice: number;
   totalPrice: number;
   paidByName: string;
+  paidByImage?: string;
   notes: string | null;
   invoices: Invoice[];
 }
@@ -113,7 +115,15 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
               <TableCell className="text-right font-medium">
                 CHF {batch.totalPrice.toFixed(2)}
               </TableCell>
-              <TableCell>{batch.paidByName}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Avatar size="sm">
+                    <AvatarImage src={batch.paidByImage} alt={batch.paidByName} />
+                    <AvatarFallback>{batch.paidByName.charAt(0).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  {batch.paidByName}
+                </div>
+              </TableCell>
               <TableCell className="max-w-[200px] truncate text-muted-foreground">
                 {batch.notes ?? "—"}
               </TableCell>

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
 import { getTodayDate, getDayOfWeek } from "@/lib/date";
 import { getSessionsForDay, getActiveSession, getMostRecentSession, isSessionOpen } from "@/lib/session-utils";
 import { RunnerView } from "@/components/runner-view";
@@ -44,10 +45,20 @@ export default async function RunnerPage({ params }: Props) {
     isOpen: isSessionOpen(s, office.timezone),
   }));
 
+  const resolvedRequests = await Promise.all(
+    requests.map(async (r) => ({
+      ...r,
+      user: {
+        ...r.user,
+        image: await resolveAvatarUrl(r.user.image),
+      },
+    })),
+  );
+
   return (
     <div className="mx-auto max-w-4xl p-8">
       <RunnerView
-        requests={requests}
+        requests={resolvedRequests}
         date={today}
         officeId={officeId}
         todaySessions={sessionTabs}

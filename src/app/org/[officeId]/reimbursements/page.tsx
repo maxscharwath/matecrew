@@ -2,6 +2,7 @@ import { TrendingDown, TrendingUp, Scale, Eye, CupSoda, Banknote } from "lucide-
 import { getTranslations } from "next-intl/server";
 import { requireMembership } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { UserReimbursementCard } from "@/components/user-reimbursement-card";
 import {
@@ -68,8 +69,8 @@ export default async function UserReimbursementsPage({ params }: Props) {
           OR: [{ fromUserId: userId }, { toUserId: userId }],
         },
         include: {
-          fromUser: { select: { name: true } },
-          toUser: { select: { name: true } },
+          fromUser: { select: { name: true, image: true } },
+          toUser: { select: { name: true, image: true } },
         },
       },
     },
@@ -85,24 +86,19 @@ export default async function UserReimbursementsPage({ params }: Props) {
 
       const userShare = result.shares.find((s) => s.userId === userId);
 
-      const userLines = period.lines.map((l) => {
-        if (l.fromUserId === userId) {
+      const userLines = await Promise.all(
+        period.lines.map(async (l) => {
+          const other = l.fromUserId === userId ? l.toUser : l.fromUser;
           return {
             lineId: l.id,
-            direction: "pay" as const,
-            otherUserName: l.toUser.name,
+            direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
+            otherUserName: other.name,
+            otherUserImage: await resolveAvatarUrl(other.image),
             amount: l.amount.toNumber(),
             status: l.status,
           };
-        }
-        return {
-          lineId: l.id,
-          direction: "receive" as const,
-          otherUserName: l.fromUser.name,
-          amount: l.amount.toNumber(),
-          status: l.status,
-        };
-      });
+        }),
+      );
 
       return {
         id: period.id,

@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
 import { getTodayDate } from "@/lib/date";
 import { getActiveSession, getNextSession, isSessionOpen } from "@/lib/session-utils";
 import { RequestView } from "@/components/request-view";
@@ -44,13 +45,15 @@ export default async function RequestPage({ params }: Props) {
     }),
   ]);
 
-  const otherRequesters = todayRequests
-    .filter((r) => r.user.id !== session.user.id)
-    .map((r) => ({
-      name: r.user.name,
-      image: r.user.image,
-      status: r.status as "REQUESTED" | "SERVED",
-    }));
+  const otherRequesters = await Promise.all(
+    todayRequests
+      .filter((r) => r.user.id !== session.user.id)
+      .map(async (r) => ({
+        name: r.user.name,
+        image: await resolveAvatarUrl(r.user.image),
+        status: r.status as "REQUESTED" | "SERVED",
+      })),
+  );
 
   const cutoffPassed = activeSession
     ? !isSessionOpen(activeSession, office.timezone)

@@ -3,6 +3,8 @@ import { getTranslations, getLocale } from "next-intl/server";
 import { ArrowRight } from "lucide-react";
 import { requireMembership } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
+import { resolveAvatarUrl } from "@/lib/r2-helpers";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Card,
   CardContent,
@@ -93,7 +95,7 @@ export default async function DashboardPage({ params }: Props) {
       select: {
         paidByUserId: true,
         totalPrice: true,
-        paidBy: { select: { id: true, name: true } },
+        paidBy: { select: { id: true, name: true, image: true } },
       },
     }),
     prisma.reimbursementPeriod.findFirst({
@@ -105,8 +107,8 @@ export default async function DashboardPage({ params }: Props) {
             OR: [{ fromUserId: userId }, { toUserId: userId }],
           },
           include: {
-            fromUser: { select: { name: true } },
-            toUser: { select: { name: true } },
+            fromUser: { select: { name: true, image: true } },
+            toUser: { select: { name: true, image: true } },
           },
         },
       },
@@ -124,7 +126,7 @@ export default async function DashboardPage({ params }: Props) {
   const netOwed = Math.round((userShare - userPaid) * 100) / 100;
 
   // Breakdown: who does the user owe money to
-  const payerTotals = new Map<string, { name: string; total: number }>();
+  const payerTotals = new Map<string, { name: string; image: string | null; total: number }>();
   for (const b of monthBatches) {
     if (b.paidByUserId === userId) continue;
     const existing = payerTotals.get(b.paidByUserId);
@@ -136,15 +138,22 @@ export default async function DashboardPage({ params }: Props) {
     } else {
       payerTotals.set(b.paidByUserId, {
         name: b.paidBy.name,
+        image: b.paidBy.image,
         total: userShareOfBatch,
       });
     }
   }
 
-  const owesTo = [...payerTotals.values()]
-    .filter((p) => p.total > 0.01)
-    .map((p) => ({ name: p.name, amount: Math.round(p.total * 100) / 100 }))
-    .sort((a, b) => b.amount - a.amount);
+  const owesTo = await Promise.all(
+    [...payerTotals.values()]
+      .filter((p) => p.total > 0.01)
+      .sort((a, b) => b.total - a.total)
+      .map(async (p) => ({
+        name: p.name,
+        image: await resolveAvatarUrl(p.image),
+        amount: Math.round(p.total * 100) / 100,
+      })),
+  );
 
   const hasPurchaseData = totalCost > 0;
 
@@ -153,14 +162,19 @@ export default async function DashboardPage({ params }: Props) {
     ? formatPeriodLabel(latestPeriod.startDate, latestPeriod.endDate, locale)
     : null;
   const periodLines = latestPeriod
-    ? latestPeriod.lines.map((l) => ({
-        id: l.id,
-        direction: l.fromUserId === userId ? ("pay" as const) : ("receive" as const),
-        otherUserName:
-          l.fromUserId === userId ? l.toUser.name : l.fromUser.name,
-        amount: l.amount.toNumber(),
-        status: l.status,
-      }))
+    ? await Promise.all(
+        latestPeriod.lines.map(async (l) => {
+          const other = l.fromUserId === userId ? l.toUser : l.fromUser;
+          return {
+            id: l.id,
+            direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
+            otherUserName: other.name,
+            otherUserImage: await resolveAvatarUrl(other.image),
+            amount: l.amount.toNumber(),
+            status: l.status,
+          };
+        }),
+      )
     : [];
   const periodPaidCount = periodLines.filter((l) => l.status === "PAID").length;
 
@@ -271,7 +285,13 @@ export default async function DashboardPage({ params }: Props) {
                   key={entry.name}
                   className="flex items-center justify-between rounded-md border px-3 py-2"
                 >
-                  <span className="text-sm font-medium">{entry.name}</span>
+                  <div className="flex items-center gap-2">
+                    <Avatar size="sm">
+                      <AvatarImage src={entry.image} alt={entry.name} />
+                      <AvatarFallback>{entry.name.charAt(0).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-medium">{entry.name}</span>
+                  </div>
                   <span className="text-sm text-red-600 dark:text-red-400">
                     CHF {entry.amount.toFixed(2)}
                   </span>
@@ -307,6 +327,10 @@ export default async function DashboardPage({ params }: Props) {
                       className="flex items-center justify-between rounded-md border px-3 py-2"
                     >
                       <div className="flex items-center gap-2">
+                        <Avatar size="sm">
+                          <AvatarImage src={l.otherUserImage} alt={l.otherUserName} />
+                          <AvatarFallback>{l.otherUserName.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
                         <span className="text-sm font-medium">
                           {l.direction === "pay"
                             ? t('dashboard.youPayUser', { name: l.otherUserName })

@@ -16,6 +16,7 @@ import {
   Check,
   Undo2,
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -47,7 +48,9 @@ import {
 interface Line {
   id: string;
   fromUserName: string;
+  fromUserImage?: string;
   toUserName: string;
+  toUserImage?: string;
   amount: number;
   status: string;
 }
@@ -343,9 +346,10 @@ export function ReimbursementPeriodCard({
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <span className="flex size-7 items-center justify-center rounded-full bg-red-100 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                          {getInitial(l.fromUserName)}
-                        </span>
+                        <Avatar size="sm">
+                          <AvatarImage src={l.fromUserImage} alt={l.fromUserName} />
+                          <AvatarFallback>{getInitial(l.fromUserName)}</AvatarFallback>
+                        </Avatar>
                         <span className="text-sm font-medium">
                           {l.fromUserName}
                         </span>
@@ -353,9 +357,10 @@ export function ReimbursementPeriodCard({
                         <span className="text-sm font-medium">
                           {l.toUserName}
                         </span>
-                        <span className="flex size-7 items-center justify-center rounded-full bg-green-100 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                          {getInitial(l.toUserName)}
-                        </span>
+                        <Avatar size="sm">
+                          <AvatarImage src={l.toUserImage} alt={l.toUserName} />
+                          <AvatarFallback>{getInitial(l.toUserName)}</AvatarFallback>
+                        </Avatar>
                         <Badge
                           variant={l.status === "PAID" ? "default" : "secondary"}
                           className="ml-1 text-[10px] px-1.5 py-0"

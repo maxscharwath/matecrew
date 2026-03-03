@@ -48,6 +48,21 @@ export function buildInvoiceKey(
   return `invoices/${purchaseBatchId}/${uuid}-${sanitized}`;
 }
 
+export function buildAvatarKey(userId: string, filename: string): string {
+  const sanitized = filename.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
+  const uuid = crypto.randomUUID();
+  return `avatars/${userId}/${uuid}-${sanitized}`;
+}
+
+/** Resolve a user `image` field to a displayable URL. */
+export async function resolveAvatarUrl(
+  image: string | null | undefined,
+): Promise<string | undefined> {
+  if (!image) return undefined;
+  if (image.startsWith("avatars/")) return getR2SignedUrl(image);
+  return image;
+}
+
 const PDF_VERSION = "v2";
 
 export function buildSettlementKey(periodId: string): string {
