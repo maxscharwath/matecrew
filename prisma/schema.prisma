@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum Role {
+  EMPLOYEE
+  RUNNER
+  ADMIN
+}
+
+enum RequestStatus {
+  REQUESTED
+  SERVED
+}
+
+enum ConsumptionSource {
+  DAILY_REQUEST
+  MANUAL
+}
+
+// ─── Better Auth models ─────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // App-specific fields
+  roles    Role[]  @default([EMPLOYEE])
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id])
+
+  sessions      Session[]
+  accounts      Account[]
+
+  // App relations
+  dailyRequests      DailyRequest[]
+  consumptionEntries ConsumptionEntry[]
+  orderedBatches     PurchaseBatch[]    @relation("OrderedBy")
+  paidBatches        PurchaseBatch[]    @relation("PaidBy")
+  reimbursementsFrom ReimbursementLine[] @relation("ReimbursementFrom")
+  reimbursementsTo   ReimbursementLine[] @relation("ReimbursementTo")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+}
+
+// ─── App models ─────────────────────────────────────────
+
+model Office {
+  id                String  @id @default(cuid())
+  name              String  @unique
+  timezone          String  @default("Europe/Zurich")
+  slackWebhookUrl   String?
+  slackChannelLabel String?
+  dailyPostTime     String  @default("10:00") // HH:mm format
+  lowStockThreshold Int     @default(5)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  dailyRequests      DailyRequest[]
+  stock              Stock?
+  purchaseBatches    PurchaseBatch[]
+  consumptionEntries ConsumptionEntry[]
+  reimbursementPeriods ReimbursementPeriod[]
+}
+
+model DailyRequest {
+  id        String        @id @default(cuid())
+  date      DateTime      @db.Date
+  officeId  String
+  office    Office        @relation(fields: [officeId], references: [id])
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  status    RequestStatus @default(REQUESTED)
+  createdAt DateTime      @default(now())
+
+  @@unique([date, officeId, userId])
+}
+
+model Stock {
+  officeId   String   @id
+  office     Office   @relation(fields: [officeId], references: [id])
+  currentQty Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+model PurchaseBatch {
+  id             String   @id @default(cuid())
+  officeId       String
+  office         Office   @relation(fields: [officeId], references: [id])
+  purchasedAt    DateTime @default(now())
+  orderedByUserId String
+  orderedBy      User     @relation("OrderedBy", fields: [orderedByUserId], references: [id])
+  paidByUserId   String
+  paidBy         User     @relation("PaidBy", fields: [paidByUserId], references: [id])
+  qty            Int
+  unitPrice      Decimal  @db.Decimal(10, 2)
+  totalPrice     Decimal  @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  invoices           InvoiceFile[]
+  consumptionEntries ConsumptionEntry[]
+}
+
+model InvoiceFile {
+  id              String        @id @default(cuid())
+  purchaseBatchId String
+  purchaseBatch   PurchaseBatch @relation(fields: [purchaseBatchId], references: [id])
+  storageKey      String
+  filename        String
+  mimeType        String
+  uploadedAt      DateTime      @default(now())
+}
+
+model ConsumptionEntry {
+  id              String            @id @default(cuid())
+  officeId        String
+  office          Office            @relation(fields: [officeId], references: [id])
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  date            DateTime          @db.Date
+  qty             Int               @default(1)
+  source          ConsumptionSource @default(DAILY_REQUEST)
+  purchaseBatchId String?
+  purchaseBatch   PurchaseBatch?    @relation(fields: [purchaseBatchId], references: [id])
+  createdAt       DateTime          @default(now())
+}
+
+model ReimbursementPeriod {
+  id        String    @id @default(cuid())
+  officeId  String
+  office    Office    @relation(fields: [officeId], references: [id])
+  startDate DateTime  @db.Date
+  endDate   DateTime  @db.Date
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  lines ReimbursementLine[]
+}
+
+model ReimbursementLine {
+  id         String              @id @default(cuid())
+  periodId   String
+  period     ReimbursementPeriod @relation(fields: [periodId], references: [id])
+  fromUserId String
+  fromUser   User                @relation("ReimbursementFrom", fields: [fromUserId], references: [id])
+  toUserId   String
+  toUser     User                @relation("ReimbursementTo", fields: [toUserId], references: [id])
+  amount     Decimal             @db.Decimal(10, 2)
+  currency   String              @default("CHF")
+}
