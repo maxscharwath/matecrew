@@ -10,8 +10,7 @@ datasource db {
 // ─── Enums ──────────────────────────────────────────────
 
 enum Role {
-  EMPLOYEE
-  RUNNER
+  USER
   ADMIN
 }
 
@@ -138,7 +137,7 @@ model Membership {
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   officeId String
   office   Office   @relation(fields: [officeId], references: [id])
-  roles    Role[]   @default([EMPLOYEE])
+  roles    Role[]   @default([USER])
   createdAt DateTime @default(now())
 
   @@unique([userId, officeId])

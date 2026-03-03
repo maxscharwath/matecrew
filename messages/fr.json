@@ -24,8 +24,8 @@
     "signInDescription": "Connectez-vous à votre compte MateCrew",
     "signUpTitle": "Créer un compte",
     "signUpDescription": "Rejoignez MateCrew pour suivre votre consommation de maté",
-    "signInWithMicrosoft": "Se connecter avec Microsoft",
-    "signUpWithMicrosoft": "S'inscrire avec Microsoft",
+    "signInWith": "Se connecter avec {provider}",
+    "signUpWith": "S'inscrire avec {provider}",
     "email": "Email",
     "emailPlaceholder": "vous@entreprise.com",
     "password": "Mot de passe",
@@ -51,11 +51,13 @@
     "stock": "Stock",
     "purchases": "Achats",
     "settlements": "Règlements",
+    "members": "Membres",
     "switchOffice": "Changer de bureau"
   },
   "home": {
     "noOfficeTitle": "Pas de bureau",
-    "noOfficeDescription": "Vous n'êtes membre d'aucun bureau. Veuillez contacter un administrateur."
+    "noOfficeDescription": "Vous n'êtes membre d'aucun bureau.",
+    "createOffice": "Créer un bureau"
   },
   "dashboard": {
     "title": "Tableau de bord",
@@ -305,6 +307,44 @@
     "paymentsCompleted": "{paid}/{total} paiements complétés",
     "exportPdf": "Exporter PDF"
   },
+  "members": {
+    "title": "Membres",
+    "subtitle": "Gérer les membres et leurs rôles.",
+    "addMember": "Ajouter un membre",
+    "addMemberDescription": "Ajouter un utilisateur existant par son adresse email.",
+    "email": "Email",
+    "emailPlaceholder": "utilisateur@entreprise.com",
+    "roles": "Rôles",
+    "adding": "Ajout...",
+    "addButton": "Ajouter",
+    "memberAdded": "Membre ajouté",
+    "name": "Nom",
+    "actions": "Actions",
+    "editRoles": "Modifier les rôles",
+    "rolesUpdated": "Rôles mis à jour",
+    "removeMember": "Retirer",
+    "removeMemberTitle": "Retirer le membre ?",
+    "removeMemberDescription": "Retirer {name} de ce bureau ? L'accès sera révoqué immédiatement.",
+    "memberRemoved": "Membre retiré",
+    "you": "(vous)",
+    "noMembers": "Aucun membre.",
+    "roleLabels": {
+      "ADMIN": "Admin",
+      "USER": "Utilisateur"
+    }
+  },
+  "office": {
+    "createOffice": "Créer un bureau",
+    "createTitle": "Créer un nouveau bureau",
+    "createSubtitle": "Configurez un nouveau bureau pour gérer le maté de votre équipe.",
+    "details": "Détails du bureau",
+    "name": "Nom du bureau",
+    "namePlaceholder": "ex. Bureau Lausanne",
+    "timezone": "Fuseau horaire",
+    "creating": "Création...",
+    "create": "Créer le bureau",
+    "officeCreated": "Bureau créé !"
+  },
   "confirmDialog": {
     "cancel": "Annuler",
     "processing": "Traitement..."
@@ -346,6 +386,11 @@
     "noConsumptionForPeriod": "Aucune consommation pour {month}/{year}.",
     "invalidFileType": "Type de fichier invalide : {name}. Autorisés : PDF, PNG, JPG.",
     "fileTooLarge": "Fichier trop volumineux : {name}. Max 10 Mo.",
+    "atLeastOneRole": "Au moins un rôle est requis",
+    "cannotRemoveLastAdmin": "Impossible de retirer le dernier admin de ce bureau",
+    "userNotFound": "Aucun utilisateur trouvé avec cette adresse email",
+    "alreadyMember": "Cet utilisateur est déjà membre de ce bureau",
+    "invalidEmail": "Adresse email invalide",
     "nameRequired": "Le nom est requis",
     "invalidUrl": "URL invalide",
     "cannotBeZero": "Ne peut pas être zéro",

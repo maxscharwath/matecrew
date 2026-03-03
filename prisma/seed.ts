@@ -32,7 +32,7 @@ async function createUser(name: string, email: string, password: string) {
 async function createMembership(
   userId: string,
   officeId: string,
-  roles: ("ADMIN" | "RUNNER" | "EMPLOYEE")[]
+  roles: ("ADMIN" | "USER")[]
 ) {
   await prisma.membership.upsert({
     where: { userId_officeId: { userId, officeId } },
@@ -81,13 +81,13 @@ async function main() {
 
   const admin = await createUser("Admin", "admin@matecrew.local", "admin123");
   // Admin gets membership in BOTH offices (demo org switching)
-  await createMembership(admin.id, createdOffices["Lausanne"].id, ["ADMIN", "EMPLOYEE"]);
-  await createMembership(admin.id, createdOffices["Genève"].id, ["ADMIN", "EMPLOYEE"]);
+  await createMembership(admin.id, createdOffices["Lausanne"].id, ["ADMIN", "USER"]);
+  await createMembership(admin.id, createdOffices["Genève"].id, ["ADMIN", "USER"]);
   console.log("    → Memberships: Lausanne (Admin), Genève (Admin)");
 
-  const runner = await createUser("Marie Runner", "marie@matecrew.local", "runner123");
-  await createMembership(runner.id, createdOffices["Lausanne"].id, ["RUNNER", "EMPLOYEE"]);
-  console.log("    → Membership: Lausanne (Runner)");
+  const marie = await createUser("Marie Runner", "marie@matecrew.local", "runner123");
+  await createMembership(marie.id, createdOffices["Lausanne"].id, ["USER"]);
+  console.log("    → Membership: Lausanne (User)");
 
   const employees = [
     { name: "Alice Dupont", email: "alice@matecrew.local", office: "Lausanne" },
@@ -98,8 +98,8 @@ async function main() {
   const createdEmployees = [];
   for (const emp of employees) {
     const user = await createUser(emp.name, emp.email, "employee123");
-    await createMembership(user.id, createdOffices[emp.office].id, ["EMPLOYEE"]);
-    console.log(`    → Membership: ${emp.office} (Employee)`);
+    await createMembership(user.id, createdOffices[emp.office].id, ["USER"]);
+    console.log(`    → Membership: ${emp.office} (User)`);
     createdEmployees.push(user);
   }
 
@@ -140,7 +140,7 @@ async function main() {
   // ─── Sample daily requests (last 5 days) ───────────────
   console.log("\nDaily requests:");
 
-  const allLausanneUsers = [admin, runner, ...createdEmployees.filter((_, i) => i < 2)];
+  const allLausanneUsers = [admin, marie, ...createdEmployees.filter((_, i) => i < 2)];
   const today = new Date();
   let requestCount = 0;
 
@@ -286,7 +286,7 @@ async function main() {
   console.log("\n✓ Seed complete!");
   console.log("\nTest accounts:");
   console.log("  admin@matecrew.local   / admin123    (Admin in Lausanne + Genève)");
-  console.log("  marie@matecrew.local   / runner123   (Runner in Lausanne)");
+  console.log("  marie@matecrew.local   / runner123   (User in Lausanne)");
   console.log("  alice@matecrew.local   / employee123 (Employee in Lausanne)");
   console.log("  bob@matecrew.local     / employee123 (Employee in Lausanne)");
   console.log("  claire@matecrew.local  / employee123 (Employee in Genève)");

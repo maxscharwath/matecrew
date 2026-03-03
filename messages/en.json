@@ -24,8 +24,8 @@
     "signInDescription": "Sign in to your MateCrew account",
     "signUpTitle": "Create Account",
     "signUpDescription": "Join MateCrew to track your maté consumption",
-    "signInWithMicrosoft": "Sign in with Microsoft",
-    "signUpWithMicrosoft": "Sign up with Microsoft",
+    "signInWith": "Sign in with {provider}",
+    "signUpWith": "Sign up with {provider}",
     "email": "Email",
     "emailPlaceholder": "you@company.com",
     "password": "Password",
@@ -51,11 +51,13 @@
     "stock": "Stock",
     "purchases": "Purchases",
     "settlements": "Settlements",
+    "members": "Members",
     "switchOffice": "Switch office"
   },
   "home": {
     "noOfficeTitle": "No Office",
-    "noOfficeDescription": "You are not a member of any office. Please contact an admin."
+    "noOfficeDescription": "You are not a member of any office yet.",
+    "createOffice": "Create an office"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -305,6 +307,44 @@
     "paymentsCompleted": "{paid}/{total} payments completed",
     "exportPdf": "Export PDF"
   },
+  "members": {
+    "title": "Members",
+    "subtitle": "Manage members and their roles.",
+    "addMember": "Add Member",
+    "addMemberDescription": "Add an existing user by their email address.",
+    "email": "Email",
+    "emailPlaceholder": "user@company.com",
+    "roles": "Roles",
+    "adding": "Adding...",
+    "addButton": "Add",
+    "memberAdded": "Member added",
+    "name": "Name",
+    "actions": "Actions",
+    "editRoles": "Edit roles",
+    "rolesUpdated": "Roles updated",
+    "removeMember": "Remove",
+    "removeMemberTitle": "Remove member?",
+    "removeMemberDescription": "Remove {name} from this office? They will lose access immediately.",
+    "memberRemoved": "Member removed",
+    "you": "(you)",
+    "noMembers": "No members yet.",
+    "roleLabels": {
+      "ADMIN": "Admin",
+      "USER": "User"
+    }
+  },
+  "office": {
+    "createOffice": "Create Office",
+    "createTitle": "Create a new office",
+    "createSubtitle": "Set up a new office to manage maté for your team.",
+    "details": "Office Details",
+    "name": "Office Name",
+    "namePlaceholder": "e.g. Lausanne Office",
+    "timezone": "Timezone",
+    "creating": "Creating...",
+    "create": "Create Office",
+    "officeCreated": "Office created!"
+  },
   "confirmDialog": {
     "cancel": "Cancel",
     "processing": "Processing..."
@@ -346,6 +386,11 @@
     "noConsumptionForPeriod": "No consumption for {month}/{year}.",
     "invalidFileType": "Invalid file type: {name}. Allowed: PDF, PNG, JPG.",
     "fileTooLarge": "File too large: {name}. Max 10MB.",
+    "atLeastOneRole": "At least one role is required",
+    "cannotRemoveLastAdmin": "Cannot remove the last admin of this office",
+    "userNotFound": "No user found with this email address",
+    "alreadyMember": "This user is already a member of this office",
+    "invalidEmail": "Invalid email address",
     "nameRequired": "Name is required",
     "invalidUrl": "Invalid URL",
     "cannotBeZero": "Cannot be zero",

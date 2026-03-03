@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getOptionalSession, getUserMemberships } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
+import { Button } from "@/components/ui/button";
 
 export default async function Home() {
   const session = await getOptionalSession();
@@ -28,6 +30,9 @@ export default async function Home() {
           <p className="mt-2 text-muted-foreground">
             {t('home.noOfficeDescription')}
           </p>
+          <Button asChild className="mt-4">
+            <Link href="/org/create">{t('home.createOffice')}</Link>
+          </Button>
         </div>
       </div>
     );

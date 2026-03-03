@@ -14,6 +14,7 @@ import {
   Wallet,
   HandCoins,
   Timer,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ export function AppSidebar({ officeId, isAdmin }: AppSidebarProps) {
   ];
 
   const adminNav: NavItem[] = [
+    { path: "/admin/members", label: t('nav.members'), icon: Users },
     { path: "/admin/schedule", label: t('nav.schedule'), icon: CalendarDays },
     { path: "/admin/cron", label: t('nav.cronJobs'), icon: Timer },
     { path: "/admin/settings", label: t('nav.settings'), icon: Settings },

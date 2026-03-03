@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Building2, Check, LogOut, User } from "lucide-react";
+import { Building2, Check, LogOut, Plus, User } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -57,23 +57,23 @@ export function UserMenu({ memberships, currentOfficeId, avatarUrl }: UserMenuPr
           <User className="mr-2 h-4 w-4" />
           {t("profile.title")}
         </DropdownMenuItem>
-        {memberships.length > 1 && (
-          <>
-            <DropdownMenuSeparator />
-            {memberships.map((m) => (
-              <DropdownMenuItem
-                key={m.officeId}
-                onClick={() => router.push(`/org/${m.officeId}/dashboard`)}
-              >
-                <Building2 className="mr-2 h-4 w-4" />
-                {m.officeName}
-                {m.officeId === currentOfficeId && (
-                  <Check className="ml-auto h-4 w-4" />
-                )}
-              </DropdownMenuItem>
-            ))}
-          </>
-        )}
+        <DropdownMenuSeparator />
+        {memberships.map((m) => (
+          <DropdownMenuItem
+            key={m.officeId}
+            onClick={() => router.push(`/org/${m.officeId}/dashboard`)}
+          >
+            <Building2 className="mr-2 h-4 w-4" />
+            {m.officeName}
+            {m.officeId === currentOfficeId && (
+              <Check className="ml-auto h-4 w-4" />
+            )}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem onClick={() => router.push("/org/create")}>
+          <Plus className="mr-2 h-4 w-4" />
+          {t("office.createOffice")}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={async () => {
