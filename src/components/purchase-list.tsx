@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { useTranslations, useLocale } from "next-intl";
 import { Download, PackageCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,8 @@ interface PurchaseListProps {
 
 export function PurchaseList({ officeId, batches }: PurchaseListProps) {
   const [isPending, startTransition] = useTransition();
+  const t = useTranslations();
+  const locale = useLocale();
 
   function handleDownload(invoiceId: string) {
     startTransition(async () => {
@@ -58,7 +61,7 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
     startTransition(async () => {
       const result = await markDelivered(officeId, batchId);
       if (result.success) {
-        toast.success("Delivery received — stock updated");
+        toast.success(t('purchases.deliveryReceived'));
       } else {
         toast.error(result.error);
       }
@@ -68,7 +71,7 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
   if (batches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No purchases recorded yet.
+        {t('purchases.noPurchases')}
       </p>
     );
   }
@@ -78,14 +81,14 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Status</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead className="text-center">Qty</TableHead>
-            <TableHead className="text-right">Per Can</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>Paid By</TableHead>
-            <TableHead>Notes</TableHead>
-            <TableHead>Actions</TableHead>
+            <TableHead>{t('purchases.status')}</TableHead>
+            <TableHead>{t('purchases.date')}</TableHead>
+            <TableHead className="text-center">{t('purchases.qty')}</TableHead>
+            <TableHead className="text-right">{t('purchases.perCanHeader')}</TableHead>
+            <TableHead className="text-right">{t('purchases.total')}</TableHead>
+            <TableHead>{t('purchases.paidBy')}</TableHead>
+            <TableHead>{t('purchases.notes')}</TableHead>
+            <TableHead>{t('purchases.actions')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -97,11 +100,11 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
                     batch.status === "DELIVERED" ? "default" : "secondary"
                   }
                 >
-                  {batch.status === "DELIVERED" ? "Delivered" : "Ordered"}
+                  {batch.status === "DELIVERED" ? t('purchases.delivered') : t('purchases.ordered')}
                 </Badge>
               </TableCell>
               <TableCell>
-                {new Date(batch.purchasedAt).toLocaleDateString("fr-CH")}
+                {new Date(batch.purchasedAt).toLocaleDateString(locale)}
               </TableCell>
               <TableCell className="text-center">{batch.qty}</TableCell>
               <TableCell className="text-right">
@@ -122,10 +125,9 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
                       size="sm"
                       disabled={isPending}
                       onClick={() => handleMarkDelivered(batch.id)}
-                      title="Mark as delivered"
                     >
                       <PackageCheck className="mr-1 h-3 w-3" />
-                      Received
+                      {t('purchases.received')}
                     </Button>
                   )}
                   {batch.invoices.map((inv) => (

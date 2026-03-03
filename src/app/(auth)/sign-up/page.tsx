@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { signIn, signUp } from "@/lib/auth-client";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 
 export default function SignUpPage() {
   const router = useRouter();
+  const t = useTranslations();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -39,7 +41,7 @@ export default function SignUpPage() {
     });
 
     if (error) {
-      setError(error.message ?? "Sign up failed");
+      setError(error.message ?? t('auth.signUpFailed'));
       setLoading(false);
     } else {
       router.push("/");
@@ -50,9 +52,9 @@ export default function SignUpPage() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Create Account</CardTitle>
+          <CardTitle>{t('auth.signUpTitle')}</CardTitle>
           <CardDescription>
-            Join MateCrew to track your maté consumption
+            {t('auth.signUpDescription')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -71,39 +73,39 @@ export default function SignUpPage() {
               <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
               <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
             </svg>
-            Sign up with Microsoft
+            {t('auth.signUpWithMicrosoft')}
           </Button>
 
           <div className="relative my-4">
             <Separator />
             <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-              or
+              {t('common.or')}
             </span>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name">{t('auth.name')}</Label>
               <Input
                 id="name"
                 name="name"
                 type="text"
-                placeholder="Your name"
+                placeholder={t('auth.namePlaceholder')}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('auth.email')}</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="you@company.com"
+                placeholder={t('auth.emailPlaceholder')}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('auth.password')}</Label>
               <Input
                 id="password"
                 name="password"
@@ -116,13 +118,13 @@ export default function SignUpPage() {
               <p className="text-sm text-red-500">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Creating account..." : "Create Account"}
+              {loading ? t('auth.creatingAccount') : t('auth.signUp')}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            {t('auth.alreadyHaveAccount')}{" "}
             <Link href="/sign-in" className="text-primary underline">
-              Sign in
+              {t('auth.signIn')}
             </Link>
           </p>
         </CardContent>

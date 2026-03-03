@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,6 @@ interface Office {
   timezone: string;
   slackWebhookUrl: string | null;
   slackChannelLabel: string | null;
-  dailyPostTime: string;
   lowStockThreshold: number;
 }
 
@@ -33,12 +33,13 @@ interface OfficeSettingsFormProps {
 
 export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
   const [isPending, startTransition] = useTransition();
+  const t = useTranslations();
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
       const result = await updateOffice(office.id, formData);
       if (result.success) {
-        toast.success("Settings saved");
+        toast.success(t('settings.settingsSaved'));
       } else {
         toast.error(result.error);
       }
@@ -49,7 +50,7 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
     startTransition(async () => {
       const result = await testSlackWebhook(office.id);
       if (result.success) {
-        toast.success("Test message sent!");
+        toast.success(t('settings.testMessageSent'));
       } else {
         toast.error(result.error);
       }
@@ -59,15 +60,15 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>General</CardTitle>
+        <CardTitle>{t('settings.generalTitle')}</CardTitle>
         <CardDescription>
-          Update your office configuration and Slack integration.
+          {t('settings.generalDescription')}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form action={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">{t('settings.name')}</Label>
             <Input
               id="name"
               name="name"
@@ -77,7 +78,7 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="timezone">Timezone</Label>
+            <Label htmlFor="timezone">{t('settings.timezone')}</Label>
             <Input
               id="timezone"
               name="timezone"
@@ -86,14 +87,14 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="slackWebhookUrl">Slack Webhook URL</Label>
+            <Label htmlFor="slackWebhookUrl">{t('settings.slackWebhookUrl')}</Label>
             <div className="flex gap-2">
               <Input
                 id="slackWebhookUrl"
                 name="slackWebhookUrl"
                 type="url"
                 defaultValue={office.slackWebhookUrl ?? ""}
-                placeholder="https://hooks.slack.com/services/..."
+                placeholder={t('settings.slackWebhookPlaceholder')}
                 className="flex-1"
               />
               <Button
@@ -103,48 +104,35 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
                 disabled={isPending}
                 onClick={handleTestSlack}
               >
-                Test
+                {t('settings.test')}
               </Button>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="slackChannelLabel">Slack Channel Label</Label>
+            <Label htmlFor="slackChannelLabel">{t('settings.slackChannelLabel')}</Label>
             <Input
               id="slackChannelLabel"
               name="slackChannelLabel"
               defaultValue={office.slackChannelLabel ?? ""}
-              placeholder="#maté-lausanne"
+              placeholder={t('settings.slackChannelPlaceholder')}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="dailyPostTime">Daily Post Time</Label>
-              <Input
-                id="dailyPostTime"
-                name="dailyPostTime"
-                defaultValue={office.dailyPostTime}
-                placeholder="10:00"
-                pattern="\d{2}:\d{2}"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="lowStockThreshold">Low Stock Threshold</Label>
-              <Input
-                id="lowStockThreshold"
-                name="lowStockThreshold"
-                type="number"
-                min={0}
-                defaultValue={office.lowStockThreshold}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="lowStockThreshold">{t('settings.lowStockThreshold')}</Label>
+            <Input
+              id="lowStockThreshold"
+              name="lowStockThreshold"
+              type="number"
+              min={0}
+              defaultValue={office.lowStockThreshold}
+            />
           </div>
 
           <div className="flex justify-end pt-2">
             <Button type="submit" disabled={isPending}>
-              {isPending ? "Saving..." : "Save Changes"}
+              {isPending ? t('settings.saving') : t('settings.saveChanges')}
             </Button>
           </div>
         </form>

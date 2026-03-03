@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   BarChart3,
+  CalendarDays,
   CupSoda,
   PersonStanding,
   Settings,
   Package,
   Receipt,
   Wallet,
+  HandCoins,
+  Timer,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,19 +24,6 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const userNav: NavItem[] = [
-  { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { path: "/request", label: "Request", icon: CupSoda },
-  { path: "/runner", label: "Runner", icon: PersonStanding },
-];
-
-const adminNav: NavItem[] = [
-  { path: "/admin/settings", label: "Settings", icon: Settings },
-  { path: "/admin/stock", label: "Stock", icon: Package },
-  { path: "/admin/purchases", label: "Purchases", icon: Receipt },
-  { path: "/admin/reimbursements", label: "Reimbursements", icon: Wallet },
-];
-
 interface AppSidebarProps {
   officeId: string;
   isAdmin: boolean;
@@ -40,6 +31,23 @@ interface AppSidebarProps {
 
 export function AppSidebar({ officeId, isAdmin }: AppSidebarProps) {
   const pathname = usePathname();
+  const t = useTranslations();
+
+  const userNav: NavItem[] = [
+    { path: "/dashboard", label: t('nav.dashboard'), icon: BarChart3 },
+    { path: "/request", label: t('nav.request'), icon: CupSoda },
+    { path: "/runner", label: t('nav.runner'), icon: PersonStanding },
+    { path: "/reimbursements", label: t('nav.reimbursements'), icon: Wallet },
+  ];
+
+  const adminNav: NavItem[] = [
+    { path: "/admin/schedule", label: t('nav.schedule'), icon: CalendarDays },
+    { path: "/admin/cron", label: t('nav.cronJobs'), icon: Timer },
+    { path: "/admin/settings", label: t('nav.settings'), icon: Settings },
+    { path: "/admin/stock", label: t('nav.stock'), icon: Package },
+    { path: "/admin/purchases", label: t('nav.purchases'), icon: Receipt },
+    { path: "/admin/reimbursements", label: t('nav.settlements'), icon: HandCoins },
+  ];
   const prefix = `/org/${officeId}`;
 
   function renderLink(item: NavItem) {
@@ -74,7 +82,7 @@ export function AppSidebar({ officeId, isAdmin }: AppSidebarProps) {
           <>
             <div className="my-3 border-t" />
             <p className="px-3 text-xs font-medium uppercase text-muted-foreground">
-              Admin
+              {t('common.admin')}
             </p>
             {adminNav.map(renderLink)}
           </>

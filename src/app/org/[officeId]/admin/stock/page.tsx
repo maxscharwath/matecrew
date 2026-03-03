@@ -12,13 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toISODateString } from "@/lib/date";
-
-const REASON_LABELS: Record<string, string> = {
-  SERVED: "Served",
-  UNSERVED: "Unserved",
-  ADJUSTMENT: "Adjustment",
-  PURCHASE: "Purchase",
-};
+import { getTranslations, getLocale } from "next-intl/server";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
@@ -27,6 +21,8 @@ interface Props {
 export default async function StockPage({ params }: Props) {
   const { officeId } = await params;
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+  const locale = await getLocale();
 
   const office = await prisma.office.findUniqueOrThrow({
     where: { id: officeId },
@@ -86,9 +82,9 @@ export default async function StockPage({ params }: Props) {
   return (
     <div className="mx-auto max-w-4xl space-y-8 p-8">
       <div>
-        <h1 className="text-2xl font-bold">Stock — {office.name}</h1>
+        <h1 className="text-2xl font-bold">{t('stock.title', { office: office.name })}</h1>
         <p className="mt-1 text-muted-foreground">
-          Monitor and manage maté stock.
+          {t('stock.subtitle')}
         </p>
       </div>
 
@@ -103,23 +99,23 @@ export default async function StockPage({ params }: Props) {
 
       {recentMovements.length > 0 && (
         <div>
-          <h2 className="mb-3 text-lg font-semibold">Audit Log</h2>
+          <h2 className="mb-3 text-lg font-semibold">{t('stock.auditLog')}</h2>
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-center">Delta</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Note</TableHead>
+                  <TableHead>{t('stock.date')}</TableHead>
+                  <TableHead>{t('stock.reason')}</TableHead>
+                  <TableHead className="text-center">{t('stock.delta')}</TableHead>
+                  <TableHead>{t('stock.user')}</TableHead>
+                  <TableHead>{t('stock.note')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recentMovements.map((m) => (
                   <TableRow key={m.id}>
                     <TableCell className="text-muted-foreground">
-                      {m.createdAt.toLocaleString("fr-CH", {
+                      {m.createdAt.toLocaleString(locale, {
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",
@@ -129,7 +125,7 @@ export default async function StockPage({ params }: Props) {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {REASON_LABELS[m.reason] ?? m.reason}
+                        {t(`stock.reasonLabels.${m.reason}` as never)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-center font-mono">

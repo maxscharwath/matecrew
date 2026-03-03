@@ -2,6 +2,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { r2, R2_BUCKET } from "@/lib/r2";
@@ -42,7 +43,29 @@ export function buildInvoiceKey(
   purchaseBatchId: string,
   filename: string
 ): string {
-  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const sanitized = filename.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
   const uuid = crypto.randomUUID();
   return `invoices/${purchaseBatchId}/${uuid}-${sanitized}`;
+}
+
+const PDF_VERSION = "v2";
+
+export function buildSettlementKey(periodId: string): string {
+  return `reimbursements/${PDF_VERSION}/${periodId}/settlement.pdf`;
+}
+
+export function buildUserSettlementKey(
+  periodId: string,
+  userId: string
+): string {
+  return `reimbursements/${PDF_VERSION}/${periodId}/user-${userId}.pdf`;
+}
+
+export async function r2ObjectExists(key: string): Promise<boolean> {
+  try {
+    await r2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
 }

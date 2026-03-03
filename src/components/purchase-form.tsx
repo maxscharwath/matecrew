@@ -2,6 +2,7 @@
 
 import { useTransition, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +38,7 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const [qty, setQty] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
+  const t = useTranslations();
 
   const perCan = qty > 0 ? totalPrice / qty : 0;
 
@@ -50,7 +52,7 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
     startTransition(async () => {
       const result = await createPurchaseBatch(officeId, formData);
       if (result.success) {
-        toast.success("Purchase recorded");
+        toast.success(t('purchases.purchaseRecorded'));
         resetForm();
       } else {
         toast.error(result.error);
@@ -61,17 +63,16 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New Purchase</CardTitle>
+        <CardTitle>{t('purchases.newPurchase')}</CardTitle>
         <CardDescription>
-          Record a purchase. Stock is updated when delivery is marked as
-          received.
+          {t('purchases.newPurchaseDescription')}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form ref={formRef} action={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="purchasedAt">Date</Label>
+              <Label htmlFor="purchasedAt">{t('purchases.date')}</Label>
               <Input
                 id="purchasedAt"
                 name="purchasedAt"
@@ -81,7 +82,7 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="qty">Qty (cans)</Label>
+              <Label htmlFor="qty">{t('purchases.qtyCans')}</Label>
               <Input
                 id="qty"
                 name="qty"
@@ -93,7 +94,7 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="totalPrice">Total paid (CHF)</Label>
+              <Label htmlFor="totalPrice">{t('purchases.totalPaidChf')}</Label>
               <Input
                 id="totalPrice"
                 name="totalPrice"
@@ -109,16 +110,16 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
 
           {qty > 0 && totalPrice > 0 && (
             <p className="text-sm text-muted-foreground">
-              CHF {perCan.toFixed(2)} per can (incl. all fees)
+              {t('purchases.perCan', { price: perCan.toFixed(2) })}
             </p>
           )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="paidByUserId">Paid By</Label>
+              <Label htmlFor="paidByUserId">{t('purchases.paidBy')}</Label>
               <Select name="paidByUserId" required>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select member" />
+                  <SelectValue placeholder={t('purchases.selectMember')} />
                 </SelectTrigger>
                 <SelectContent>
                   {members.map((m) => (
@@ -130,7 +131,7 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="invoices">Invoice</Label>
+              <Label htmlFor="invoices">{t('purchases.invoice')}</Label>
               <Input
                 id="invoices"
                 name="invoices"
@@ -142,18 +143,18 @@ export function PurchaseForm({ officeId, members }: PurchaseFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="notes">{t('purchases.notes')}</Label>
             <Textarea
               id="notes"
               name="notes"
-              placeholder="Optional (e.g. delivery fees included)"
+              placeholder={t('purchases.notesPlaceholder')}
               rows={2}
             />
           </div>
 
           <div className="flex justify-end">
             <Button type="submit" disabled={isPending}>
-              {isPending ? "Saving..." : "Record Purchase"}
+              {isPending ? t('purchases.recording') : t('purchases.recordPurchase')}
             </Button>
           </div>
         </form>

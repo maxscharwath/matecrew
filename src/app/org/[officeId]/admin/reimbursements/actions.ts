@@ -1,147 +1,106 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
+import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { generateReimbursementCsv } from "@/lib/csv-export";
-
-const CreatePeriodSchema = z
-  .object({
-    startDate: z.coerce.date(),
-    endDate: z.coerce.date(),
-  })
-  .refine((d) => d.endDate > d.startDate, {
-    message: "End date must be after start date",
-  });
+import { generateSettlementPdf } from "@/lib/pdf-export";
+import {
+  buildSettlementKey,
+  r2ObjectExists,
+  uploadToR2,
+  getR2SignedUrl,
+  deleteFromR2,
+} from "@/lib/r2-helpers";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
-export async function createReimbursementPeriod(
-  officeId: string,
-  formData: FormData
-): Promise<ActionResult> {
+export async function generateMissingPeriods(
+  officeId: string
+): Promise<{ success: true; created: number } | { success: false; error: string }> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
-  const parsed = CreatePeriodSchema.safeParse({
-    startDate: formData.get("startDate"),
-    endDate: formData.get("endDate"),
-  });
-
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0].message };
-  }
-
-  const { startDate, endDate } = parsed.data;
-
-  // Check for overlapping open periods
-  const overlap = await prisma.reimbursementPeriod.findFirst({
-    where: {
-      officeId,
-      closedAt: null,
-      startDate: { lte: endDate },
-      endDate: { gte: startDate },
-    },
-  });
-
-  if (overlap) {
-    return {
-      success: false,
-      error: "An open period already overlaps with this date range.",
-    };
-  }
-
-  const result = await calculateReimbursements(officeId, startDate, endDate);
-
-  await prisma.reimbursementPeriod.create({
-    data: {
-      officeId,
-      startDate,
-      endDate,
-      lines: {
-        create: result.lines.map((l) => ({
-          fromUserId: l.fromUserId,
-          toUserId: l.toUserId,
-          amount: l.amount,
-          currency: "CHF",
-        })),
-      },
-    },
-  });
-
-  revalidatePath(`/org/${officeId}/admin/reimbursements`);
-  return { success: true };
-}
-
-export async function closePeriod(
-  officeId: string,
-  periodId: string
-): Promise<ActionResult> {
-  await requireOrgRoles(officeId, "ADMIN");
-
-  const period = await prisma.reimbursementPeriod.findUnique({
-    where: { id: periodId },
-  });
-
-  if (!period || period.officeId !== officeId) {
-    return { success: false, error: "Period not found." };
-  }
-
-  if (period.closedAt) {
-    return { success: false, error: "Period is already closed." };
-  }
-
-  await prisma.reimbursementPeriod.update({
-    where: { id: periodId },
-    data: { closedAt: new Date() },
-  });
-
-  revalidatePath(`/org/${officeId}/admin/reimbursements`);
-  return { success: true };
-}
-
-export async function recalculatePeriod(
-  officeId: string,
-  periodId: string
-): Promise<ActionResult> {
-  await requireOrgRoles(officeId, "ADMIN");
-
-  const period = await prisma.reimbursementPeriod.findUnique({
-    where: { id: periodId },
-  });
-
-  if (!period || period.officeId !== officeId) {
-    return { success: false, error: "Period not found." };
-  }
-
-  if (period.closedAt) {
-    return { success: false, error: "Cannot recalculate a closed period." };
-  }
-
-  const result = await calculateReimbursements(
-    officeId,
-    period.startDate,
-    period.endDate
-  );
-
-  await prisma.$transaction([
-    prisma.reimbursementLine.deleteMany({ where: { periodId } }),
-    ...result.lines.map((l) =>
-      prisma.reimbursementLine.create({
-        data: {
-          periodId,
-          fromUserId: l.fromUserId,
-          toUserId: l.toUserId,
-          amount: l.amount,
-          currency: "CHF",
-        },
-      })
-    ),
+  // Find earliest activity date
+  const [earliestConsumption, earliestPurchase] = await Promise.all([
+    prisma.consumptionEntry.findFirst({
+      where: { officeId },
+      orderBy: { date: "asc" },
+      select: { date: true },
+    }),
+    prisma.purchaseBatch.findFirst({
+      where: { officeId },
+      orderBy: { purchasedAt: "asc" },
+      select: { purchasedAt: true },
+    }),
   ]);
 
+  const dates = [earliestConsumption?.date, earliestPurchase?.purchasedAt].filter(
+    (d): d is Date => d != null
+  );
+
+  if (dates.length === 0) {
+    return { success: false, error: t('errors.noActivityData') };
+  }
+
+  const earliest = dates.sort((a, b) => a.getTime() - b.getTime())[0];
+
+  // Get existing periods
+  const existingPeriods = await prisma.reimbursementPeriod.findMany({
+    where: { officeId },
+    select: { month: true, year: true },
+  });
+  const existingSet = new Set(
+    existingPeriods.map((p) => `${p.year}-${p.month}`)
+  );
+
+  // Generate months from earliest to last month
+  const now = new Date();
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  let created = 0;
+
+  const cursor = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
+  while (cursor <= lastMonth) {
+    const month = cursor.getMonth() + 1;
+    const year = cursor.getFullYear();
+    const key = `${year}-${month}`;
+
+    if (!existingSet.has(key)) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0);
+
+      const result = await calculateReimbursements(officeId, startDate, endDate);
+
+      if (result.totalConsumption > 0 || result.totalCost > 0) {
+        await prisma.reimbursementPeriod.create({
+          data: {
+            officeId,
+            month,
+            year,
+            startDate,
+            endDate,
+            lines: {
+              create: result.lines.map((l) => ({
+                fromUserId: l.fromUserId,
+                toUserId: l.toUserId,
+                amount: l.amount,
+                currency: "CHF",
+              })),
+            },
+          },
+        });
+        created++;
+      }
+    }
+
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
-  return { success: true };
+  revalidatePath(`/org/${officeId}/reimbursements`);
+  return { success: true, created };
 }
 
 export async function deletePeriod(
@@ -149,17 +108,14 @@ export async function deletePeriod(
   periodId: string
 ): Promise<ActionResult> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const period = await prisma.reimbursementPeriod.findUnique({
     where: { id: periodId },
   });
 
   if (!period || period.officeId !== officeId) {
-    return { success: false, error: "Period not found." };
-  }
-
-  if (period.closedAt) {
-    return { success: false, error: "Cannot delete a closed period." };
+    return { success: false, error: t('errors.periodNotFound') };
   }
 
   await prisma.$transaction([
@@ -167,7 +123,11 @@ export async function deletePeriod(
     prisma.reimbursementPeriod.delete({ where: { id: periodId } }),
   ]);
 
+  // Purge cached settlement PDF if present
+  deleteFromR2(buildSettlementKey(periodId)).catch(() => {});
+
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  revalidatePath(`/org/${officeId}/reimbursements`);
   return { success: true };
 }
 
@@ -176,6 +136,7 @@ export async function exportPeriodCsv(
   periodId: string
 ): Promise<{ success: true; csv: string } | { success: false; error: string }> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const period = await prisma.reimbursementPeriod.findUnique({
     where: { id: periodId },
@@ -183,7 +144,7 @@ export async function exportPeriodCsv(
   });
 
   if (!period || period.officeId !== officeId) {
-    return { success: false, error: "Period not found." };
+    return { success: false, error: t('errors.periodNotFound') };
   }
 
   const result = await calculateReimbursements(
@@ -203,4 +164,52 @@ export async function exportPeriodCsv(
   });
 
   return { success: true, csv };
+}
+
+export async function exportPeriodPdf(
+  officeId: string,
+  periodId: string
+): Promise<{ success: true; url: string } | { success: false; error: string }> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const period = await prisma.reimbursementPeriod.findUnique({
+    where: { id: periodId },
+    include: { office: { select: { name: true, locale: true } } },
+  });
+
+  if (!period || period.officeId !== officeId) {
+    return { success: false, error: t('errors.periodNotFound') };
+  }
+
+  const key = buildSettlementKey(periodId);
+
+  // Serve cached PDF if available
+  if (await r2ObjectExists(key)) {
+    const url = await getR2SignedUrl(key);
+    return { success: true, url };
+  }
+
+  // Generate and cache
+  const result = await calculateReimbursements(
+    officeId,
+    period.startDate,
+    period.endDate
+  );
+
+  const pdfBuffer = await generateSettlementPdf({
+    officeName: period.office.name,
+    startDate: period.startDate,
+    endDate: period.endDate,
+    totalConsumption: result.totalConsumption,
+    totalCost: result.totalCost,
+    unitPrice: result.unitPrice,
+    shares: result.shares,
+    lines: result.lines,
+    locale: period.office.locale,
+  });
+
+  await uploadToR2({ key, body: pdfBuffer, contentType: "application/pdf" });
+  const url = await getR2SignedUrl(key);
+  return { success: true, url };
 }

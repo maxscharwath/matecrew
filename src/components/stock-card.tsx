@@ -2,6 +2,7 @@
 
 import { useTransition, useRef } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,13 +31,14 @@ export function StockCard({
 }: StockCardProps) {
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  const t = useTranslations();
   const isLow = currentQty <= lowStockThreshold;
 
   function handleAdjust(formData: FormData) {
     startTransition(async () => {
       const result = await adjustStock(officeId, formData);
       if (result.success) {
-        toast.success("Stock updated");
+        toast.success(t('stock.stockUpdated'));
         formRef.current?.reset();
       } else {
         toast.error(result.error);
@@ -49,14 +51,14 @@ export function StockCard({
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>{officeName}</CardTitle>
-          <CardDescription>Current stock level</CardDescription>
+          <CardDescription>{t('stock.currentStockLevel')}</CardDescription>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-3xl font-bold">{currentQty}</span>
           {isLow && (
             <Badge variant="destructive" className="gap-1">
               <AlertTriangle className="h-3 w-3" />
-              Low
+              {t('stock.low')}
             </Badge>
           )}
         </div>
@@ -68,18 +70,18 @@ export function StockCard({
               <Input
                 name="adjustment"
                 type="number"
-                placeholder="+10 or -3"
+                placeholder={t('stock.adjustPlaceholder')}
                 required
               />
             </div>
             <div className="flex-1">
               <Input
                 name="note"
-                placeholder="Reason (optional)"
+                placeholder={t('stock.reasonPlaceholder')}
               />
             </div>
             <Button type="submit" variant="outline" disabled={isPending}>
-              {isPending ? "Adjusting..." : "Adjust"}
+              {isPending ? t('stock.adjusting') : t('stock.adjust')}
             </Button>
           </div>
         </form>

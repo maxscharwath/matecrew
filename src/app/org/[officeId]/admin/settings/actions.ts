@@ -4,19 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { sendSlackMessage } from "@/lib/slack";
-
-const OfficeSchema = z.object({
-  name: z.string().min(1, "Name is required").max(100),
-  timezone: z.string().min(1).default("Europe/Zurich"),
-  slackWebhookUrl: z.string().url("Invalid URL").optional().or(z.literal("")),
-  slackChannelLabel: z.string().max(100).optional().or(z.literal("")),
-  dailyPostTime: z
-    .string()
-    .regex(/^\d{2}:\d{2}$/, "Must be HH:mm format")
-    .default("10:00"),
-  lowStockThreshold: z.coerce.number().int().min(0).default(5),
-});
+import { sendSlackMessage, buildTestMessage } from "@/lib/slack";
+import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -25,14 +14,22 @@ export async function updateOffice(
   formData: FormData
 ): Promise<ActionResult> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const OfficeSchema = z.object({
+    name: z.string().min(1, t('errors.nameRequired')).max(100),
+    timezone: z.string().min(1).default("Europe/Zurich"),
+    slackWebhookUrl: z.string().url(t('errors.invalidUrl')).optional().or(z.literal("")),
+    slackChannelLabel: z.string().max(100).optional().or(z.literal("")),
+    lowStockThreshold: z.coerce.number().int().min(0).default(30),
+  });
 
   const parsed = OfficeSchema.safeParse({
     name: formData.get("name"),
     timezone: formData.get("timezone") || "Europe/Zurich",
     slackWebhookUrl: formData.get("slackWebhookUrl"),
     slackChannelLabel: formData.get("slackChannelLabel"),
-    dailyPostTime: formData.get("dailyPostTime") || "10:00",
-    lowStockThreshold: formData.get("lowStockThreshold") ?? 5,
+    lowStockThreshold: formData.get("lowStockThreshold") ?? 30,
   });
 
   if (!parsed.success) {
@@ -49,7 +46,6 @@ export async function updateOffice(
         timezone: data.timezone,
         slackWebhookUrl: data.slackWebhookUrl || null,
         slackChannelLabel: data.slackChannelLabel || null,
-        dailyPostTime: data.dailyPostTime,
         lowStockThreshold: data.lowStockThreshold,
       },
     });
@@ -58,7 +54,7 @@ export async function updateOffice(
       e instanceof Error &&
       e.message.includes("Unique constraint failed")
     ) {
-      return { success: false, error: "An office with this name already exists." };
+      return { success: false, error: t('errors.officeNameExists') };
     }
     throw e;
   }
@@ -69,33 +65,23 @@ export async function updateOffice(
 
 export async function testSlackWebhook(officeId: string): Promise<ActionResult> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const office = await prisma.office.findUnique({ where: { id: officeId } });
 
   if (!office) {
-    return { success: false, error: "Office not found." };
+    return { success: false, error: t('errors.officeNotFound') };
   }
 
   if (!office.slackWebhookUrl) {
-    return { success: false, error: "No Slack webhook URL configured." };
+    return { success: false, error: t('errors.noSlackWebhook') };
   }
 
   try {
-    await sendSlackMessage(
-      office.slackWebhookUrl,
-      [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*Test from MateCrew*\nWebhook for *${office.name}* is working!`,
-          },
-        },
-      ],
-      `Test webhook for ${office.name}`
-    );
+    const { blocks, fallback } = await buildTestMessage(office.name, office.locale);
+    await sendSlackMessage(office.slackWebhookUrl, blocks, fallback);
   } catch {
-    return { success: false, error: "Slack webhook failed. Check the URL." };
+    return { success: false, error: t('errors.slackFailed') };
   }
 
   return { success: true };

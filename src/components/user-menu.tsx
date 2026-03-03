@@ -1,8 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTranslations, useLocale } from "next-intl";
 import { Building2, Check, LogOut } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
+import { switchUserLocale } from "@/lib/locale";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -26,6 +28,8 @@ interface UserMenuProps {
 export function UserMenu({ memberships, currentOfficeId }: UserMenuProps) {
   const { data: session } = useSession();
   const router = useRouter();
+  const t = useTranslations();
+  const locale = useLocale();
 
   if (!session) return null;
 
@@ -57,7 +61,7 @@ export function UserMenu({ memberships, currentOfficeId }: UserMenuProps) {
         <DropdownMenuLabel>{session.user.email}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          Switch office
+          {t('nav.switchOffice')}
         </DropdownMenuLabel>
         {memberships.map((m) => (
           <DropdownMenuItem
@@ -72,6 +76,16 @@ export function UserMenu({ memberships, currentOfficeId }: UserMenuProps) {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          {t('auth.language')}
+        </DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => { switchUserLocale(session.user.id, 'fr'); }}>
+          Français {locale === 'fr' && <Check className="ml-auto h-4 w-4" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { switchUserLocale(session.user.id, 'en'); }}>
+          English {locale === 'en' && <Check className="ml-auto h-4 w-4" />}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={async () => {
             await signOut();
@@ -79,7 +93,7 @@ export function UserMenu({ memberships, currentOfficeId }: UserMenuProps) {
           }}
         >
           <LogOut className="mr-2 h-4 w-4" />
-          Sign out
+          {t('auth.signOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { signIn } from "@/lib/auth-client";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 
 export default function SignInPage() {
   const router = useRouter();
+  const t = useTranslations();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -37,7 +39,7 @@ export default function SignInPage() {
     });
 
     if (error) {
-      setError(error.message ?? "Invalid credentials");
+      setError(error.message ?? t('auth.invalidCredentials'));
       setLoading(false);
     } else {
       router.push("/");
@@ -48,9 +50,9 @@ export default function SignInPage() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Sign In</CardTitle>
+          <CardTitle>{t('auth.signInTitle')}</CardTitle>
           <CardDescription>
-            Sign in to your MateCrew account
+            {t('auth.signInDescription')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -69,29 +71,29 @@ export default function SignInPage() {
               <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
               <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
             </svg>
-            Sign in with Microsoft
+            {t('auth.signInWithMicrosoft')}
           </Button>
 
           <div className="relative my-4">
             <Separator />
             <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-              or
+              {t('common.or')}
             </span>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('auth.email')}</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="you@company.com"
+                placeholder={t('auth.emailPlaceholder')}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('auth.password')}</Label>
               <Input
                 id="password"
                 name="password"
@@ -103,13 +105,13 @@ export default function SignInPage() {
               <p className="text-sm text-red-500">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? t('auth.signingIn') : t('auth.signIn')}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            No account?{" "}
+            {t('auth.noAccount')}{" "}
             <Link href="/sign-up" className="text-primary underline">
-              Create one
+              {t('auth.createOne')}
             </Link>
           </p>
         </CardContent>

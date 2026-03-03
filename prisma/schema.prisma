@@ -37,6 +37,11 @@ enum PurchaseStatus {
   DELIVERED
 }
 
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
@@ -45,6 +50,7 @@ model User {
   email         String    @unique
   emailVerified Boolean   @default(false)
   image         String?
+  locale        String    @default("fr")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -106,20 +112,21 @@ model Office {
   id                String  @id @default(cuid())
   name              String  @unique
   timezone          String  @default("Europe/Zurich")
+  locale            String  @default("fr")
   slackWebhookUrl   String?
   slackChannelLabel String?
-  dailyPostTime     String  @default("10:00") // HH:mm format
-  lowStockThreshold Int     @default(5)
+  lowStockThreshold Int     @default(30)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships        Membership[]
-  dailyRequests      DailyRequest[]
-  stock              Stock?
-  purchaseBatches    PurchaseBatch[]
-  consumptionEntries ConsumptionEntry[]
+  memberships          Membership[]
+  dailyRequests        DailyRequest[]
+  stock                Stock?
+  purchaseBatches      PurchaseBatch[]
+  consumptionEntries   ConsumptionEntry[]
   reimbursementPeriods ReimbursementPeriod[]
+  mateSessions         MateSession[]
 }
 
 model Membership {
@@ -134,17 +141,37 @@ model Membership {
   @@unique([userId, officeId])
 }
 
-model DailyRequest {
-  id        String        @id @default(cuid())
-  date      DateTime      @db.Date
-  officeId  String
-  office    Office        @relation(fields: [officeId], references: [id])
-  userId    String
-  user      User          @relation(fields: [userId], references: [id])
-  status    RequestStatus @default(REQUESTED)
-  createdAt DateTime      @default(now())
+model MateSession {
+  id                String    @id @default(cuid())
+  officeId          String
+  office            Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  dayOfWeek         Int       // 0=Sun, 1=Mon ... 6=Sat
+  startTime         String    // HH:mm — session opens & notification sent
+  cutoffTime        String    // HH:mm — requests close
+  label             String?   // e.g. "Matin", "Après-midi"
+  lastNotifiedDate  DateTime? @db.Date // idempotency: skip if already notified today
 
-  @@unique([date, officeId, userId])
+  createdAt DateTime @default(now())
+
+  dailyRequests DailyRequest[]
+
+  @@unique([officeId, dayOfWeek, startTime])
+  @@index([dayOfWeek])
+}
+
+model DailyRequest {
+  id            String        @id @default(cuid())
+  date          DateTime      @db.Date
+  officeId      String
+  office        Office        @relation(fields: [officeId], references: [id])
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  mateSessionId String?
+  mateSession   MateSession?  @relation(fields: [mateSessionId], references: [id], onDelete: SetNull)
+  status        RequestStatus @default(REQUESTED)
+  createdAt     DateTime      @default(now())
+
+  @@unique([date, officeId, userId, mateSessionId])
 }
 
 model Stock {
@@ -218,12 +245,15 @@ model ReimbursementPeriod {
   id        String    @id @default(cuid())
   officeId  String
   office    Office    @relation(fields: [officeId], references: [id])
+  month     Int       // 1-12
+  year      Int       // e.g. 2026
   startDate DateTime  @db.Date
   endDate   DateTime  @db.Date
-  closedAt  DateTime?
   createdAt DateTime  @default(now())
 
   lines ReimbursementLine[]
+
+  @@unique([officeId, year, month])
 }
 
 model ReimbursementLine {
@@ -236,4 +266,6 @@ model ReimbursementLine {
   toUser     User                @relation("ReimbursementTo", fields: [toUserId], references: [id])
   amount     Decimal             @db.Decimal(10, 2)
   currency   String              @default("CHF")
+  status     PaymentStatus       @default(PENDING)
+  paidAt     DateTime?
 }

@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { getTranslations, getLocale } from "next-intl/server";
+import { ArrowRight } from "lucide-react";
 import { requireMembership } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
 import {
@@ -13,10 +16,30 @@ interface Props {
   readonly params: Promise<{ officeId: string }>;
 }
 
+function formatPeriodLabel(startDate: Date, endDate: Date, locale: string) {
+  const isFullMonth =
+    startDate.getDate() === 1 &&
+    endDate.getDate() ===
+      new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0).getDate() &&
+    startDate.getMonth() === endDate.getMonth() &&
+    startDate.getFullYear() === endDate.getFullYear();
+
+  if (isFullMonth) {
+    return startDate.toLocaleDateString(locale, {
+      month: "long",
+      year: "numeric",
+    });
+  }
+
+  return `${startDate.toLocaleDateString(locale)} – ${endDate.toLocaleDateString(locale)}`;
+}
+
 export default async function DashboardPage({ params }: Props) {
   const { officeId } = await params;
   const { session, membership } = await requireMembership(officeId);
   const userId = session.user.id;
+  const t = await getTranslations();
+  const locale = await getLocale();
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -30,6 +53,7 @@ export default async function DashboardPage({ params }: Props) {
     totalPurchaseCost,
     userPaidTotal,
     monthBatches,
+    latestPeriod,
   ] = await Promise.all([
     prisma.consumptionEntry.aggregate({
       where: { userId, officeId },
@@ -72,6 +96,21 @@ export default async function DashboardPage({ params }: Props) {
         paidBy: { select: { id: true, name: true } },
       },
     }),
+    prisma.reimbursementPeriod.findFirst({
+      where: { officeId },
+      orderBy: { startDate: "desc" },
+      include: {
+        lines: {
+          where: {
+            OR: [{ fromUserId: userId }, { toUserId: userId }],
+          },
+          include: {
+            fromUser: { select: { name: true } },
+            toUser: { select: { name: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   const userMonthQty = thisMonthConsumed._sum.qty ?? 0;
@@ -109,34 +148,50 @@ export default async function DashboardPage({ params }: Props) {
 
   const hasPurchaseData = totalCost > 0;
 
+  // Latest period data
+  const periodLabel = latestPeriod
+    ? formatPeriodLabel(latestPeriod.startDate, latestPeriod.endDate, locale)
+    : null;
+  const periodLines = latestPeriod
+    ? latestPeriod.lines.map((l) => ({
+        id: l.id,
+        direction: l.fromUserId === userId ? ("pay" as const) : ("receive" as const),
+        otherUserName:
+          l.fromUserId === userId ? l.toUser.name : l.fromUser.name,
+        amount: l.amount.toNumber(),
+        status: l.status,
+      }))
+    : [];
+  const periodPaidCount = periodLines.filter((l) => l.status === "PAID").length;
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
         <p className="text-muted-foreground">
-          Welcome, {session.user.name} &mdash; {membership.office.name}
+          {t('dashboard.welcome', { name: session.user.name, office: membership.office.name })}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>This month</CardDescription>
+            <CardDescription>{t('dashboard.thisMonth')}</CardDescription>
             <CardTitle className="text-3xl">{userMonthQty}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">matés consumed</p>
+            <p className="text-xs text-muted-foreground">{t('dashboard.matesConsumed')}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>All time</CardDescription>
+            <CardDescription>{t('dashboard.allTime')}</CardDescription>
             <CardTitle className="text-3xl">
               {totalConsumed._sum.qty ?? 0}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">matés consumed</p>
+            <p className="text-xs text-muted-foreground">{t('dashboard.matesConsumed')}</p>
           </CardContent>
         </Card>
       </div>
@@ -145,33 +200,33 @@ export default async function DashboardPage({ params }: Props) {
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Your share this month</CardDescription>
+              <CardDescription>{t('dashboard.yourShareEstimate')}</CardDescription>
               <CardTitle className="text-2xl">
                 CHF {userShare.toFixed(2)}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground">
-                based on consumption
+                {t('dashboard.currentMonthBasedOnConsumption')}
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>You paid this month</CardDescription>
+              <CardDescription>{t('dashboard.youPaidEstimate')}</CardDescription>
               <CardTitle className="text-2xl">
                 CHF {userPaid.toFixed(2)}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground">
-                purchases you covered
+                {t('dashboard.purchasesCoveredThisMonth')}
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription>Net balance</CardDescription>
+              <CardDescription>{t('dashboard.netBalanceEstimate')}</CardDescription>
               <CardTitle
                 className={`text-2xl ${
                   netOwed > 0
@@ -191,10 +246,10 @@ export default async function DashboardPage({ params }: Props) {
             <CardContent>
               <p className="text-xs text-muted-foreground">
                 {netOwed > 0
-                  ? "you owe"
+                  ? t('dashboard.youOwe')
                   : netOwed < 0
-                    ? "you are owed"
-                    : "settled"}
+                    ? t('dashboard.youAreOwed')
+                    : t('common.settled')}
               </p>
             </CardContent>
           </Card>
@@ -204,9 +259,9 @@ export default async function DashboardPage({ params }: Props) {
       {owesTo.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>You Owe</CardTitle>
+            <CardTitle>{t('dashboard.youOweTitle')}</CardTitle>
             <CardDescription>
-              Breakdown of what you owe to each payer this month
+              {t('dashboard.breakdownDescription')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -227,15 +282,79 @@ export default async function DashboardPage({ params }: Props) {
         </Card>
       )}
 
+      {latestPeriod && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('dashboard.latestSettlement', { period: periodLabel ?? '' })}</CardTitle>
+            <CardDescription>
+              {t('dashboard.finalizedPeriod')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {periodLines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t('dashboard.noPaymentsInPeriod')}
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  {t('dashboard.paidCount', { paid: periodPaidCount, total: periodLines.length })}
+                </p>
+                <div className="space-y-2">
+                  {periodLines.map((l) => (
+                    <div
+                      key={l.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {l.direction === "pay"
+                            ? t('dashboard.youPayUser', { name: l.otherUserName })
+                            : t('dashboard.userPaysYou', { name: l.otherUserName })}
+                        </span>
+                        <Badge
+                          variant={l.status === "PAID" ? "default" : "secondary"}
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {l.status === "PAID" ? t('common.paid') : t('common.pending')}
+                        </Badge>
+                      </div>
+                      <span
+                        className={`text-sm font-medium ${
+                          l.status === "PAID"
+                            ? "text-muted-foreground line-through"
+                            : l.direction === "pay"
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-green-600 dark:text-green-400"
+                        }`}
+                      >
+                        CHF {l.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <Link
+              href={`/org/${officeId}/reimbursements`}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              {t('dashboard.viewAllPeriods')}
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle>Recent Requests</CardTitle>
-          <CardDescription>Your last 10 daily requests</CardDescription>
+          <CardTitle>{t('dashboard.recentRequests')}</CardTitle>
+          <CardDescription>{t('dashboard.lastRequests')}</CardDescription>
         </CardHeader>
         <CardContent>
           {recentRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No requests yet. Head to the Request page to get your first maté!
+              {t('dashboard.noRequestsYet')}
             </p>
           ) : (
             <div className="space-y-2">
@@ -245,14 +364,14 @@ export default async function DashboardPage({ params }: Props) {
                   className="flex items-center justify-between rounded-md border px-3 py-2"
                 >
                   <span className="text-sm font-medium">
-                    {new Date(req.date).toLocaleDateString("fr-CH")}
+                    {new Date(req.date).toLocaleDateString(locale)}
                   </span>
                   <Badge
                     variant={
                       req.status === "SERVED" ? "default" : "secondary"
                     }
                   >
-                    {req.status === "SERVED" ? "Served" : "Requested"}
+                    {req.status === "SERVED" ? t('dashboard.served') : t('dashboard.requested')}
                   </Badge>
                 </div>
               ))}

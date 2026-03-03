@@ -48,8 +48,8 @@ async function main() {
   console.log("Offices:");
 
   const offices = [
-    { name: "Lausanne", timezone: "Europe/Zurich", dailyPostTime: "10:00", lowStockThreshold: 5 },
-    { name: "Genève", timezone: "Europe/Zurich", dailyPostTime: "10:00", lowStockThreshold: 5 },
+    { name: "Lausanne", timezone: "Europe/Zurich", lowStockThreshold: 30 },
+    { name: "Genève", timezone: "Europe/Zurich", lowStockThreshold: 30 },
   ];
 
   const createdOffices: Record<string, { id: string; name: string }> = {};
@@ -103,6 +103,40 @@ async function main() {
     createdEmployees.push(user);
   }
 
+  // ─── Mate Sessions (weekly schedule) ────────────────────
+  console.log("\nMate sessions:");
+
+  const lausanneId = createdOffices["Lausanne"].id;
+  const sessionData = [
+    { dayOfWeek: 1, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+    { dayOfWeek: 1, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+    { dayOfWeek: 2, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+    { dayOfWeek: 2, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+    { dayOfWeek: 3, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+    { dayOfWeek: 3, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+    { dayOfWeek: 4, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+    { dayOfWeek: 4, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+    { dayOfWeek: 5, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+    { dayOfWeek: 5, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+  ];
+
+  const createdSessions: { id: string; dayOfWeek: number; startTime: string }[] = [];
+  for (const s of sessionData) {
+    const session = await prisma.mateSession.upsert({
+      where: {
+        officeId_dayOfWeek_startTime: {
+          officeId: lausanneId,
+          dayOfWeek: s.dayOfWeek,
+          startTime: s.startTime,
+        },
+      },
+      update: {},
+      create: { officeId: lausanneId, ...s },
+    });
+    createdSessions.push(session);
+  }
+  console.log(`  Created ${createdSessions.length} sessions for Lausanne (Mon-Fri, 2/day)`);
+
   // ─── Sample daily requests (last 5 days) ───────────────
   console.log("\nDaily requests:");
 
@@ -115,27 +149,36 @@ async function main() {
     date.setDate(date.getDate() - daysAgo);
     date.setHours(0, 0, 0, 0);
 
+    // Find the morning session for this day of week
+    const dow = date.getDay();
+    const daySession = createdSessions.find(
+      (s) => s.dayOfWeek === dow && s.startTime === "08:00",
+    );
+
     const requesters = allLausanneUsers.filter((_, i) => (daysAgo + i) % 3 !== 0);
 
     for (const user of requesters) {
       const status = daysAgo > 0 ? "SERVED" : "REQUESTED";
 
-      await prisma.dailyRequest.upsert({
+      const existing = await prisma.dailyRequest.findFirst({
         where: {
-          date_officeId_userId: {
-            date,
-            officeId: createdOffices["Lausanne"].id,
-            userId: user.id,
-          },
-        },
-        update: {},
-        create: {
           date,
-          officeId: createdOffices["Lausanne"].id,
+          officeId: lausanneId,
           userId: user.id,
-          status,
+          mateSessionId: daySession?.id ?? null,
         },
       });
+      if (!existing) {
+        await prisma.dailyRequest.create({
+          data: {
+            date,
+            officeId: lausanneId,
+            userId: user.id,
+            mateSessionId: daySession?.id ?? null,
+            status,
+          },
+        });
+      }
       requestCount++;
     }
   }
@@ -197,14 +240,14 @@ async function main() {
       data: {
         officeId: createdOffices["Lausanne"].id,
         status: "DELIVERED",
-        deliveredAt: new Date(today.getFullYear(), today.getMonth(), 2),
+        deliveredAt: new Date(today.getFullYear(), today.getMonth() - 1, 16),
         orderedByUserId: admin.id,
         paidByUserId: admin.id,
         qty: 48,
         unitPrice: 2.5,
         totalPrice: 120,
         notes: "Initial batch — Migros order",
-        purchasedAt: new Date(today.getFullYear(), today.getMonth(), 1),
+        purchasedAt: new Date(today.getFullYear(), today.getMonth() - 1, 15),
       },
     });
 

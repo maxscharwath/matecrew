@@ -22,14 +22,42 @@ export interface ReimbursementResult {
   lines: PaymentLine[];
   totalConsumption: number;
   totalCost: number;
+  unitPrice: number;
 }
 
+/**
+ * Calculates reimbursements for a given period.
+ *
+ * Model:
+ *   Purchases are bulk orders (e.g. 300 cans every few months) — NOT monthly.
+ *   All purchased cans go into a shared pool.
+ *
+ *   Unit price = weighted average across ALL purchases for the office.
+ *   Must be global (not capped at endDate) — proof that this guarantees
+ *   no money is lost:
+ *
+ *     Let S = total spend, Q = total purchased qty, u = S/Q.
+ *     Payer k spent spend_k. Their credit % = spend_k / S.
+ *     In period j with C_j cans consumed:
+ *       payer k credit = (spend_k / S) × C_j × u
+ *                      = (spend_k / S) × C_j × (S / Q)
+ *                      = spend_k × C_j / Q
+ *     After ALL Q cans consumed (C = Q):
+ *       payer k total credit = spend_k × Q / Q = spend_k ✓
+ *
+ *   Every payer gets back exactly what they spent. Zero money lost.
+ *
+ *   Note: payment line amounts are frozen in the DB when a period is
+ *   generated. The live calculation here is used for display and for
+ *   generating new periods. If a new purchase shifts the unit price,
+ *   existing frozen lines are unaffected.
+ */
 export async function calculateReimbursements(
   officeId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
 ): Promise<ReimbursementResult> {
-  // Fetch consumption grouped by user
+  // 1. Consumption in this period, grouped by user
   const consumptionByUser = await prisma.consumptionEntry.groupBy({
     by: ["userId"],
     where: {
@@ -39,7 +67,6 @@ export async function calculateReimbursements(
     _sum: { qty: true },
   });
 
-  // Fetch user names for consumers
   const userIds = consumptionByUser.map((c) => c.userId);
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -47,79 +74,98 @@ export async function calculateReimbursements(
   });
   const userMap = new Map(users.map((u) => [u.id, u.name]));
 
-  // Fetch purchases in date range
+  const totalConsumption = consumptionByUser.reduce(
+    (sum, c) => sum + (c._sum.qty ?? 0),
+    0,
+  );
+
+  // 2. ALL purchases for this office (global, not date-scoped).
+  //    See docstring above for proof that this guarantees zero money loss.
   const purchases = await prisma.purchaseBatch.findMany({
-    where: {
-      officeId,
-      purchasedAt: { gte: startDate, lte: endDate },
-    },
+    where: { officeId },
     select: {
       paidByUserId: true,
+      qty: true,
       totalPrice: true,
       paidBy: { select: { id: true, name: true } },
     },
   });
 
-  const totalConsumption = consumptionByUser.reduce(
-    (sum, c) => sum + (c._sum.qty ?? 0),
-    0
-  );
-  const totalCost = purchases.reduce(
+  // 3. Weighted average unit price = total spend / total qty purchased
+  const totalPurchasedQty = purchases.reduce((sum, p) => sum + p.qty, 0);
+  const totalPurchaseSpend = purchases.reduce(
     (sum, p) => sum + p.totalPrice.toNumber(),
-    0
+    0,
   );
+  const unitPrice =
+    totalPurchasedQty > 0
+      ? Math.round((totalPurchaseSpend / totalPurchasedQty) * 100) / 100
+      : 0;
 
-  // Build payment map: how much each user paid
+  // 4. Period cost = cans consumed × unit price
+  const totalCost = Math.round(totalConsumption * unitPrice * 100) / 100;
+
+  // 5. Credit each payer proportionally for this period's cost.
+  //    payer credit = (their total spend / all spend) × period cost.
+  //    This correctly handles multiple payers and multiple purchases.
   const paidMap = new Map<string, number>();
-  for (const p of purchases) {
-    const current = paidMap.get(p.paidByUserId) ?? 0;
-    paidMap.set(p.paidByUserId, current + p.totalPrice.toNumber());
-    // Ensure payers are in userMap even if they didn't consume
-    if (!userMap.has(p.paidByUserId)) {
-      userMap.set(p.paidByUserId, p.paidBy.name);
+  if (totalPurchaseSpend > 0) {
+    // Aggregate spend per payer first (a user may have multiple purchases)
+    const spendByPayer = new Map<string, number>();
+    for (const p of purchases) {
+      spendByPayer.set(
+        p.paidByUserId,
+        (spendByPayer.get(p.paidByUserId) ?? 0) + p.totalPrice.toNumber(),
+      );
+      if (!userMap.has(p.paidByUserId)) {
+        userMap.set(p.paidByUserId, p.paidBy.name);
+      }
+    }
+
+    for (const [payerId, payerSpend] of spendByPayer) {
+      const credit = (payerSpend / totalPurchaseSpend) * totalCost;
+      paidMap.set(payerId, credit);
     }
   }
 
-  // Calculate shares
+  // 6. Build shares: each consumer's cost vs their payer credit
   const shares: ConsumptionShare[] = [];
 
-  // Include all consumers
   for (const entry of consumptionByUser) {
     const qty = entry._sum.qty ?? 0;
-    const costShare =
-      totalConsumption > 0 ? (qty / totalConsumption) * totalCost : 0;
-    const amountPaid = paidMap.get(entry.userId) ?? 0;
+    const costShare = Math.round(qty * unitPrice * 100) / 100;
+    const amountPaid = Math.round((paidMap.get(entry.userId) ?? 0) * 100) / 100;
 
     shares.push({
       userId: entry.userId,
       userName: userMap.get(entry.userId) ?? "Unknown",
       qty,
-      costShare: Math.round(costShare * 100) / 100,
-      amountPaid: Math.round(amountPaid * 100) / 100,
+      costShare,
+      amountPaid,
       netOwed: Math.round((costShare - amountPaid) * 100) / 100,
     });
   }
 
-  // Include payers who didn't consume (they are owed money)
-  for (const [payerId, amount] of paidMap) {
-    if (!shares.find((s) => s.userId === payerId)) {
+  // Include payers who didn't consume in this period (they are owed money)
+  for (const [payerId, credit] of paidMap) {
+    if (!shares.some((s) => s.userId === payerId)) {
+      const amountPaid = Math.round(credit * 100) / 100;
       shares.push({
         userId: payerId,
         userName: userMap.get(payerId) ?? "Unknown",
         qty: 0,
         costShare: 0,
-        amountPaid: Math.round(amount * 100) / 100,
-        netOwed: Math.round(-amount * 100) / 100,
+        amountPaid,
+        netOwed: -amountPaid,
       });
     }
   }
 
   shares.sort((a, b) => a.userName.localeCompare(b.userName));
 
-  // Generate payment lines (greedy settlement)
   const lines = generatePaymentLines(shares);
 
-  return { shares, lines, totalConsumption, totalCost };
+  return { shares, lines, totalConsumption, totalCost, unitPrice };
 }
 
 function generatePaymentLines(shares: ConsumptionShare[]): PaymentLine[] {

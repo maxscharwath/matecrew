@@ -5,11 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
-
-const AdjustStockSchema = z.object({
-  adjustment: z.coerce.number().int().refine((n) => n !== 0, "Cannot be zero"),
-  note: z.string().max(200).optional().or(z.literal("")),
-});
+import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -18,6 +14,12 @@ export async function adjustStock(
   formData: FormData
 ): Promise<ActionResult> {
   const { membership } = await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const AdjustStockSchema = z.object({
+    adjustment: z.coerce.number().int().refine((n) => n !== 0, t('errors.cannotBeZero')),
+    note: z.string().max(200).optional().or(z.literal("")),
+  });
 
   const parsed = AdjustStockSchema.safeParse({
     adjustment: formData.get("adjustment"),
@@ -33,14 +35,14 @@ export async function adjustStock(
   const stock = await prisma.stock.findUnique({ where: { officeId } });
 
   if (!stock) {
-    return { success: false, error: "Stock record not found for this office." };
+    return { success: false, error: t('errors.stockNotFound') };
   }
 
   const newQty = stock.currentQty + adjustment;
   if (newQty < 0) {
     return {
       success: false,
-      error: `Cannot reduce below 0. Current: ${stock.currentQty}, adjustment: ${adjustment}.`,
+      error: t('errors.cannotReduceBelowZero', { current: stock.currentQty, adjustment }),
     };
   }
 

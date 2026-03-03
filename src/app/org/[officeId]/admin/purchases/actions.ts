@@ -11,6 +11,7 @@ import {
   deleteFromR2,
 } from "@/lib/r2-helpers";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { getTranslations } from "next-intl/server";
 
 const ALLOWED_MIME_TYPES = [
   "application/pdf",
@@ -20,14 +21,6 @@ const ALLOWED_MIME_TYPES = [
 ];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-const CreatePurchaseSchema = z.object({
-  purchasedAt: z.coerce.date(),
-  paidByUserId: z.string().min(1, "Paid by is required"),
-  qty: z.coerce.number().int().positive("Qty must be positive"),
-  totalPrice: z.coerce.number().positive("Total must be positive"),
-  notes: z.string().max(500).optional().or(z.literal("")),
-});
-
 type ActionResult = { success: true } | { success: false; error: string };
 
 export async function createPurchaseBatch(
@@ -35,6 +28,15 @@ export async function createPurchaseBatch(
   formData: FormData
 ): Promise<ActionResult> {
   const { membership } = await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const CreatePurchaseSchema = z.object({
+    purchasedAt: z.coerce.date(),
+    paidByUserId: z.string().min(1, t('errors.paidByRequired')),
+    qty: z.coerce.number().int().positive(t('errors.qtyMustBePositive')),
+    totalPrice: z.coerce.number().positive(t('errors.totalMustBePositive')),
+    notes: z.string().max(500).optional().or(z.literal("")),
+  });
 
   const parsed = CreatePurchaseSchema.safeParse({
     purchasedAt: formData.get("purchasedAt"),
@@ -59,13 +61,13 @@ export async function createPurchaseBatch(
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
       return {
         success: false,
-        error: `Invalid file type: ${file.name}. Allowed: PDF, PNG, JPG.`,
+        error: t('errors.invalidFileType', { name: file.name }),
       };
     }
     if (file.size > MAX_FILE_SIZE) {
       return {
         success: false,
-        error: `File too large: ${file.name}. Max 10MB.`,
+        error: t('errors.fileTooLarge', { name: file.name }),
       };
     }
   }
@@ -127,17 +129,18 @@ export async function markDelivered(
   batchId: string
 ): Promise<ActionResult> {
   const { membership } = await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const batch = await prisma.purchaseBatch.findUnique({
     where: { id: batchId },
   });
 
   if (!batch || batch.officeId !== officeId) {
-    return { success: false, error: "Purchase not found." };
+    return { success: false, error: t('errors.purchaseNotFound') };
   }
 
   if (batch.status === "DELIVERED") {
-    return { success: false, error: "Already marked as delivered." };
+    return { success: false, error: t('errors.alreadyDelivered') };
   }
 
   const stock = await prisma.stock.findUnique({ where: { officeId } });
@@ -177,6 +180,7 @@ export async function getInvoiceUrl(
   invoiceFileId: string
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const invoice = await prisma.invoiceFile.findUnique({
     where: { id: invoiceFileId },
@@ -186,7 +190,7 @@ export async function getInvoiceUrl(
   });
 
   if (!invoice || invoice.purchaseBatch.officeId !== officeId) {
-    return { success: false, error: "Invoice not found." };
+    return { success: false, error: t('errors.invoiceNotFound') };
   }
 
   const url = await getR2SignedUrl(invoice.storageKey);

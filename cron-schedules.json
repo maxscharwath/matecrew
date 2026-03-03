@@ -1,0 +1,16 @@
+[
+  {
+    "id": "daily-request",
+    "name": "Session notifications",
+    "description": "Envoie les notifications Slack pour les sessions du jour",
+    "path": "/api/cron/daily-request",
+    "cron": "*/5 * * * *"
+  },
+  {
+    "id": "monthly-reimbursement",
+    "name": "Monthly reimbursements",
+    "description": "Génère les remboursements du mois précédent",
+    "path": "/api/cron/monthly-reimbursement",
+    "cron": "0 2 1 * *"
+  }
+]

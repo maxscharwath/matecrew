@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { sendSlackMessage } from "@/lib/slack";
+import { sendSlackMessage, buildLowStockMessage } from "@/lib/slack";
 
 const ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -25,19 +25,14 @@ export async function checkAndAlertLowStock(
       return;
     }
 
-    await sendSlackMessage(
-      office.slackWebhookUrl,
-      [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `:warning: *Stock bas — ${office.name}*\n${stock.currentQty} canettes restantes (seuil: ${office.lowStockThreshold})`,
-          },
-        },
-      ],
-      `Stock bas: ${stock.currentQty} canettes (${office.name})`
+    const { blocks, fallback } = await buildLowStockMessage(
+      office.name,
+      stock.currentQty,
+      office.lowStockThreshold,
+      office.locale,
     );
+
+    await sendSlackMessage(office.slackWebhookUrl, blocks, fallback);
 
     await prisma.stock.update({
       where: { officeId },

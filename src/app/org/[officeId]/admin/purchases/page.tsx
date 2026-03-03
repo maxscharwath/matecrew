@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { PurchaseForm } from "@/components/purchase-form";
 import { PurchaseList } from "@/components/purchase-list";
+import { getTranslations } from "next-intl/server";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
@@ -10,6 +11,7 @@ interface Props {
 export default async function PurchasesPage({ params }: Props) {
   const { officeId } = await params;
   await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
 
   const [batches, memberships] = await Promise.all([
     prisma.purchaseBatch.findMany({
@@ -47,9 +49,9 @@ export default async function PurchasesPage({ params }: Props) {
   return (
     <div className="mx-auto max-w-5xl space-y-8 p-8">
       <div>
-        <h1 className="text-2xl font-bold">Purchases</h1>
+        <h1 className="text-2xl font-bold">{t('purchases.title')}</h1>
         <p className="mt-1 text-muted-foreground">
-          Record maté purchases and manage invoices.
+          {t('purchases.subtitle')}
         </p>
       </div>
 

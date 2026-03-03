@@ -1,6 +1,7 @@
 "use client";
 
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { useTranslations, useLocale } from "next-intl";
 import {
   ChartContainer,
   ChartTooltip,
@@ -20,19 +21,22 @@ interface StockChartProps {
   officeName: string;
 }
 
-const chartConfig = {
-  qty: {
-    label: "Stock",
-    color: "hsl(var(--chart-1))",
-  },
-} satisfies ChartConfig;
-
 export function StockChart({ data, officeName }: StockChartProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  const chartConfig = {
+    qty: {
+      label: t('stock.chartLabel'),
+      color: "hsl(var(--chart-1))",
+    },
+  } satisfies ChartConfig;
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Stock Level — {officeName}</CardTitle>
-        <CardDescription>Last 30 days</CardDescription>
+        <CardTitle>{t('stock.chartTitle', { office: officeName })}</CardTitle>
+        <CardDescription>{t('stock.chartSubtitle')}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-[3/1] w-full">
@@ -45,7 +49,7 @@ export function StockChart({ data, officeName }: StockChartProps) {
               tickMargin={8}
               tickFormatter={(v: string) => {
                 const d = new Date(v + "T00:00:00Z");
-                return d.toLocaleDateString("fr-CH", {
+                return d.toLocaleDateString(locale, {
                   day: "numeric",
                   month: "short",
                   timeZone: "UTC",

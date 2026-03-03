@@ -190,6 +190,71 @@ prisma/
 - Configurable email domain restriction
 - Account linking: SSO users auto-link to existing accounts by email
 
+## Reimbursement Model
+
+Purchases are **bulk orders** (e.g. 300 cans every few months), not monthly. All cans go into a shared pool. The settlement algorithm splits costs fairly across consumers and credits payers proportionally.
+
+### Definitions
+
+| Symbol | Meaning |
+|--------|---------|
+| S | Total spend across **all** purchases for the office |
+| Q | Total quantity purchased |
+| u = S / Q | Weighted-average unit price |
+| spend_k | Total amount payer *k* has spent |
+| C_j | Cans consumed in period *j* |
+
+### Per-period calculation
+
+1. **Unit price** — weighted average across every purchase ever recorded for the office:
+
+   ```
+   u = S / Q
+   ```
+
+2. **Period cost** — cans consumed in the period times unit price:
+
+   ```
+   periodCost_j = C_j × u
+   ```
+
+3. **Consumer share** — each user pays for what they drank:
+
+   ```
+   costShare_i = qty_i × u
+   ```
+
+4. **Payer credit** — each payer is credited proportionally to their share of total spend:
+
+   ```
+   credit_k = (spend_k / S) × periodCost_j
+   ```
+
+5. **Net owed** — positive means the user owes money, negative means they are owed:
+
+   ```
+   netOwed_i = costShare_i − credit_i
+   ```
+
+6. **Payment lines** — a greedy algorithm matches debtors to creditors to minimise the number of transfers.
+
+### Zero-loss guarantee
+
+Using **all** purchases globally (not scoped to the period date range) guarantees no money is ever lost:
+
+```
+credit_k  = (spend_k / S) × C_j × (S / Q)
+          = spend_k × C_j / Q
+```
+
+Summing over all periods until every purchased can is consumed (C = Q):
+
+```
+total_credit_k = spend_k × Q / Q = spend_k
+```
+
+Every payer gets back exactly what they spent. Payment line amounts are frozen in the database when a period is generated, so later purchases shifting the unit price do not affect already-settled periods.
+
 ## Roles
 
 Roles are per-office (via Membership):
