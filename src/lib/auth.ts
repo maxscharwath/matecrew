@@ -3,10 +3,34 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { prisma } from "@/lib/prisma";
 
+const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+function isEmailAllowed(email: string): boolean {
+  if (allowedDomains.length === 0) return true;
+  const domain = email.split("@")[1]?.toLowerCase();
+  return !!domain && allowedDomains.includes(domain);
+}
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
+
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          if (!isEmailAllowed(user.email)) {
+            return false;
+          }
+          return { data: user };
+        },
+      },
+    },
+  },
 
   emailAndPassword: {
     enabled: true,
@@ -23,14 +47,18 @@ export const auth = betterAuth({
     },
   },
 
-  // Microsoft Entra ID — uncomment when ready for V2
-  // socialProviders: {
-  //   microsoft: {
-  //     clientId: process.env.MICROSOFT_CLIENT_ID!,
-  //     clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
-  //     tenantId: process.env.MICROSOFT_TENANT_ID ?? "common",
-  //   },
-  // },
+  socialProviders: {
+    microsoft: {
+      clientId: process.env.MICROSOFT_CLIENT_ID!,
+      clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
+      tenantId: process.env.MICROSOFT_TENANT_ID ?? "common",
+    },
+  },
+
+  accountLinking: {
+    enabled: true,
+    trustedProviders: ["microsoft"],
+  },
 
   plugins: [nextCookies()],
 });

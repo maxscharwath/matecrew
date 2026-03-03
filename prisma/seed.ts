@@ -196,6 +196,8 @@ async function main() {
     await prisma.purchaseBatch.create({
       data: {
         officeId: createdOffices["Lausanne"].id,
+        status: "DELIVERED",
+        deliveredAt: new Date(today.getFullYear(), today.getMonth(), 2),
         orderedByUserId: admin.id,
         paidByUserId: admin.id,
         qty: 48,

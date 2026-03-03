@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
+import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 
 const AdjustStockSchema = z.object({
   adjustment: z.coerce.number().int().refine((n) => n !== 0, "Cannot be zero"),
@@ -58,6 +59,8 @@ export async function adjustStock(
       data: { currentQty: newQty },
     }),
   ]);
+
+  checkAndAlertLowStock(officeId).catch(() => {});
 
   revalidatePath(`/org/${officeId}/admin/stock`);
   return { success: true };

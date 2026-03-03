@@ -32,6 +32,11 @@ enum StockMovementReason {
   PURCHASE
 }
 
+enum PurchaseStatus {
+  ORDERED
+  DELIVERED
+}
+
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
@@ -143,10 +148,11 @@ model DailyRequest {
 }
 
 model Stock {
-  officeId   String   @id
-  office     Office   @relation(fields: [officeId], references: [id])
-  currentQty Int      @default(0)
-  updatedAt  DateTime @updatedAt
+  officeId            String    @id
+  office              Office    @relation(fields: [officeId], references: [id])
+  currentQty          Int       @default(0)
+  updatedAt           DateTime  @updatedAt
+  lowStockAlertSentAt DateTime?
 
   movements StockMovement[]
 }
@@ -164,19 +170,21 @@ model StockMovement {
 }
 
 model PurchaseBatch {
-  id             String   @id @default(cuid())
+  id             String         @id @default(cuid())
   officeId       String
-  office         Office   @relation(fields: [officeId], references: [id])
-  purchasedAt    DateTime @default(now())
+  office         Office         @relation(fields: [officeId], references: [id])
+  status         PurchaseStatus @default(ORDERED)
+  purchasedAt    DateTime       @default(now())
+  deliveredAt    DateTime?
   orderedByUserId String
-  orderedBy      User     @relation("OrderedBy", fields: [orderedByUserId], references: [id])
+  orderedBy      User           @relation("OrderedBy", fields: [orderedByUserId], references: [id])
   paidByUserId   String
-  paidBy         User     @relation("PaidBy", fields: [paidByUserId], references: [id])
+  paidBy         User           @relation("PaidBy", fields: [paidByUserId], references: [id])
   qty            Int
-  unitPrice      Decimal  @db.Decimal(10, 2)
-  totalPrice     Decimal  @db.Decimal(10, 2)
+  unitPrice      Decimal        @db.Decimal(10, 2)
+  totalPrice     Decimal        @db.Decimal(10, 2)
   notes          String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime       @default(now())
 
   invoices           InvoiceFile[]
   consumptionEntries ConsumptionEntry[]

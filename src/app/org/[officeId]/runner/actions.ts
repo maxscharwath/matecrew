@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { getTodayDate } from "@/lib/date";
+import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -58,6 +59,8 @@ export async function markServed(
       data: { currentQty: newQty },
     }),
   ]);
+
+  checkAndAlertLowStock(officeId).catch(() => {});
 
   revalidatePath(`/org/${officeId}/runner`);
   return { success: true };
