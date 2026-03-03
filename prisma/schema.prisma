@@ -25,6 +25,13 @@ enum ConsumptionSource {
   MANUAL
 }
 
+enum StockMovementReason {
+  SERVED
+  UNSERVED
+  ADJUSTMENT
+  PURCHASE
+}
+
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
@@ -36,21 +43,18 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // App-specific fields
-  roles    Role[]  @default([EMPLOYEE])
-  officeId String?
-  office   Office? @relation(fields: [officeId], references: [id])
-
   sessions      Session[]
   accounts      Account[]
 
   // App relations
+  memberships        Membership[]
   dailyRequests      DailyRequest[]
   consumptionEntries ConsumptionEntry[]
   orderedBatches     PurchaseBatch[]    @relation("OrderedBy")
   paidBatches        PurchaseBatch[]    @relation("PaidBy")
   reimbursementsFrom ReimbursementLine[] @relation("ReimbursementFrom")
   reimbursementsTo   ReimbursementLine[] @relation("ReimbursementTo")
+  stockMovements     StockMovement[]
 }
 
 model Session {
@@ -105,12 +109,24 @@ model Office {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users              User[]
+  memberships        Membership[]
   dailyRequests      DailyRequest[]
   stock              Stock?
   purchaseBatches    PurchaseBatch[]
   consumptionEntries ConsumptionEntry[]
   reimbursementPeriods ReimbursementPeriod[]
+}
+
+model Membership {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  officeId String
+  office   Office   @relation(fields: [officeId], references: [id])
+  roles    Role[]   @default([EMPLOYEE])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, officeId])
 }
 
 model DailyRequest {
@@ -131,6 +147,20 @@ model Stock {
   office     Office   @relation(fields: [officeId], references: [id])
   currentQty Int      @default(0)
   updatedAt  DateTime @updatedAt
+
+  movements StockMovement[]
+}
+
+model StockMovement {
+  id        String               @id @default(cuid())
+  officeId  String
+  stock     Stock                @relation(fields: [officeId], references: [officeId])
+  delta     Int                  // +N or -N
+  reason    StockMovementReason
+  note      String?
+  userId    String?
+  user      User?                @relation(fields: [userId], references: [id])
+  createdAt DateTime             @default(now())
 }
 
 model PurchaseBatch {

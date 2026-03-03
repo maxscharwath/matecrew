@@ -13,13 +13,7 @@ const auth = betterAuth({
   emailAndPassword: { enabled: true },
 });
 
-async function createUser(
-  name: string,
-  email: string,
-  password: string,
-  roles: ("ADMIN" | "RUNNER" | "EMPLOYEE")[],
-  officeId: string
-) {
+async function createUser(name: string, email: string, password: string) {
   const existing = await prisma.user.findFirst({ where: { email } });
   if (existing) {
     console.log(`  User ${email} already exists, skipping`);
@@ -30,13 +24,21 @@ async function createUser(
     body: { name, email, password },
   });
 
-  const user = await prisma.user.update({
-    where: { email },
-    data: { roles, officeId },
-  });
-
-  console.log(`  Created ${roles.join("+").toLowerCase()}: ${email} (password: ${password})`);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  console.log(`  Created: ${email} (password: ${password})`);
   return user;
+}
+
+async function createMembership(
+  userId: string,
+  officeId: string,
+  roles: ("ADMIN" | "RUNNER" | "EMPLOYEE")[]
+) {
+  await prisma.membership.upsert({
+    where: { userId_officeId: { userId, officeId } },
+    update: { roles },
+    create: { userId, officeId, roles },
+  });
 }
 
 async function main() {
@@ -74,24 +76,18 @@ async function main() {
     console.log(`  ${office.name}: 24 cans`);
   }
 
-  // ─── Users ─────────────────────────────────────────────
+  // ─── Users + Memberships ──────────────────────────────
   console.log("\nUsers:");
 
-  const admin = await createUser(
-    "Admin",
-    "admin@matecrew.local",
-    "admin123",
-    ["ADMIN", "EMPLOYEE"],
-    createdOffices["Lausanne"].id
-  );
+  const admin = await createUser("Admin", "admin@matecrew.local", "admin123");
+  // Admin gets membership in BOTH offices (demo org switching)
+  await createMembership(admin.id, createdOffices["Lausanne"].id, ["ADMIN", "EMPLOYEE"]);
+  await createMembership(admin.id, createdOffices["Genève"].id, ["ADMIN", "EMPLOYEE"]);
+  console.log("    → Memberships: Lausanne (Admin), Genève (Admin)");
 
-  const runner = await createUser(
-    "Marie Runner",
-    "marie@matecrew.local",
-    "runner123",
-    ["RUNNER", "EMPLOYEE"],
-    createdOffices["Lausanne"].id
-  );
+  const runner = await createUser("Marie Runner", "marie@matecrew.local", "runner123");
+  await createMembership(runner.id, createdOffices["Lausanne"].id, ["RUNNER", "EMPLOYEE"]);
+  console.log("    → Membership: Lausanne (Runner)");
 
   const employees = [
     { name: "Alice Dupont", email: "alice@matecrew.local", office: "Lausanne" },
@@ -101,13 +97,9 @@ async function main() {
 
   const createdEmployees = [];
   for (const emp of employees) {
-    const user = await createUser(
-      emp.name,
-      emp.email,
-      "employee123",
-      ["EMPLOYEE"],
-      createdOffices[emp.office].id
-    );
+    const user = await createUser(emp.name, emp.email, "employee123");
+    await createMembership(user.id, createdOffices[emp.office].id, ["EMPLOYEE"]);
+    console.log(`    → Membership: ${emp.office} (Employee)`);
     createdEmployees.push(user);
   }
 
@@ -123,11 +115,10 @@ async function main() {
     date.setDate(date.getDate() - daysAgo);
     date.setHours(0, 0, 0, 0);
 
-    // Each day, some users request (randomized but deterministic)
     const requesters = allLausanneUsers.filter((_, i) => (daysAgo + i) % 3 !== 0);
 
     for (const user of requesters) {
-      const status = daysAgo > 0 ? "SERVED" : "REQUESTED"; // today's are still pending
+      const status = daysAgo > 0 ? "SERVED" : "REQUESTED";
 
       await prisma.dailyRequest.upsert({
         where: {
@@ -179,6 +170,21 @@ async function main() {
 
   console.log(`  Created ${consumptionCount} entries from served requests`);
 
+  // ─── Stock movements for served requests ───────────────
+  console.log("\nStock movements:");
+
+  for (const req of servedRequests) {
+    await prisma.stockMovement.create({
+      data: {
+        officeId: req.officeId,
+        delta: -1,
+        reason: "SERVED",
+        userId: req.userId,
+      },
+    });
+  }
+  console.log(`  Created ${servedRequests.length} SERVED movements`);
+
   // ─── Sample purchase batch ─────────────────────────────
   console.log("\nPurchase batches:");
 
@@ -199,6 +205,18 @@ async function main() {
         purchasedAt: new Date(today.getFullYear(), today.getMonth(), 1),
       },
     });
+
+    // Stock movement for purchase
+    await prisma.stockMovement.create({
+      data: {
+        officeId: createdOffices["Lausanne"].id,
+        delta: 48,
+        reason: "PURCHASE",
+        note: "Initial batch — Migros order",
+        userId: admin.id,
+      },
+    });
+
     console.log("  Created 1 batch: 48 cans @ CHF 2.50 (Lausanne)");
   } else {
     console.log("  Purchase batch already exists, skipping");
@@ -222,11 +240,11 @@ async function main() {
   // ─── Summary ───────────────────────────────────────────
   console.log("\n✓ Seed complete!");
   console.log("\nTest accounts:");
-  console.log("  admin@matecrew.local   / admin123    (Admin, Lausanne)");
-  console.log("  marie@matecrew.local   / runner123   (Runner, Lausanne)");
-  console.log("  alice@matecrew.local   / employee123 (Employee, Lausanne)");
-  console.log("  bob@matecrew.local     / employee123 (Employee, Lausanne)");
-  console.log("  claire@matecrew.local  / employee123 (Employee, Genève)");
+  console.log("  admin@matecrew.local   / admin123    (Admin in Lausanne + Genève)");
+  console.log("  marie@matecrew.local   / runner123   (Runner in Lausanne)");
+  console.log("  alice@matecrew.local   / employee123 (Employee in Lausanne)");
+  console.log("  bob@matecrew.local     / employee123 (Employee in Lausanne)");
+  console.log("  claire@matecrew.local  / employee123 (Employee in Genève)");
 }
 
 main()

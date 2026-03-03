@@ -34,14 +34,14 @@ export default function SignUpPage() {
       name,
       email,
       password,
-      callbackURL: "/dashboard",
+      callbackURL: "/",
     });
 
     if (error) {
       setError(error.message ?? "Sign up failed");
       setLoading(false);
     } else {
-      router.push("/dashboard");
+      router.push("/");
     }
   }
 

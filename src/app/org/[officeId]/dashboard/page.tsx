@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/auth-utils";
+import { requireMembership } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
 import {
   Card,
@@ -9,20 +9,25 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-export default async function DashboardPage() {
-  const { session, user } = await requireUser();
+interface Props {
+  readonly params: Promise<{ officeId: string }>;
+}
 
+export default async function DashboardPage({ params }: Props) {
+  const { officeId } = await params;
+  const { session, membership } = await requireMembership(officeId);
   const userId = session.user.id;
 
   const [totalConsumed, thisMonthConsumed, recentRequests] =
     await Promise.all([
       prisma.consumptionEntry.aggregate({
-        where: { userId },
+        where: { userId, officeId },
         _sum: { qty: true },
       }),
       prisma.consumptionEntry.aggregate({
         where: {
           userId,
+          officeId,
           date: {
             gte: new Date(
               new Date().getFullYear(),
@@ -34,10 +39,9 @@ export default async function DashboardPage() {
         _sum: { qty: true },
       }),
       prisma.dailyRequest.findMany({
-        where: { userId },
+        where: { userId, officeId },
         orderBy: { date: "desc" },
         take: 10,
-        include: { office: { select: { name: true } } },
       }),
     ]);
 
@@ -46,10 +50,7 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">
-          Welcome, {session.user.name}
-          {user?.office && (
-            <span> &mdash; {user.office.name}</span>
-          )}
+          Welcome, {session.user.name} &mdash; {membership.office.name}
         </p>
       </div>
 
@@ -95,14 +96,9 @@ export default async function DashboardPage() {
                   key={req.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium">
-                      {new Date(req.date).toLocaleDateString("fr-CH")}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {req.office.name}
-                    </span>
-                  </div>
+                  <span className="text-sm font-medium">
+                    {new Date(req.date).toLocaleDateString("fr-CH")}
+                  </span>
                   <Badge
                     variant={
                       req.status === "SERVED" ? "default" : "secondary"

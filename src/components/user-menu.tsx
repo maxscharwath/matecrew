@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Building2, Check, LogOut } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -12,11 +13,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function UserMenu() {
+interface OrgMembership {
+  officeId: string;
+  officeName: string;
+}
+
+interface UserMenuProps {
+  readonly memberships: OrgMembership[];
+  readonly currentOfficeId: string;
+}
+
+export function UserMenu({ memberships, currentOfficeId }: UserMenuProps) {
   const { data: session } = useSession();
   const router = useRouter();
 
   if (!session) return null;
+
+  const currentOrg = memberships.find((m) => m.officeId === currentOfficeId);
 
   const initials = session.user.name
     .split(" ")
@@ -31,10 +44,33 @@ export function UserMenu() {
         <Avatar className="h-7 w-7">
           <AvatarFallback className="text-xs">{initials}</AvatarFallback>
         </Avatar>
-        <span className="text-sm">{session.user.name}</span>
+        <div className="flex flex-col items-start">
+          <span className="text-sm">{session.user.name}</span>
+          {currentOrg && (
+            <span className="text-xs text-muted-foreground">
+              {currentOrg.officeName}
+            </span>
+          )}
+        </div>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>{session.user.email}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Switch office
+        </DropdownMenuLabel>
+        {memberships.map((m) => (
+          <DropdownMenuItem
+            key={m.officeId}
+            onClick={() => router.push(`/org/${m.officeId}/dashboard`)}
+          >
+            <Building2 className="mr-2 h-4 w-4" />
+            {m.officeName}
+            {m.officeId === currentOfficeId && (
+              <Check className="ml-auto h-4 w-4" />
+            )}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={async () => {
@@ -42,6 +78,7 @@ export function UserMenu() {
             router.push("/sign-in");
           }}
         >
+          <LogOut className="mr-2 h-4 w-4" />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

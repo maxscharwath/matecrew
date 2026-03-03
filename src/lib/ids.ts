@@ -5,14 +5,17 @@ import { z } from "zod";
 // Usage: pass raw strings through the parser to get a branded type.
 //   const userId = UserId.parse(someString);
 //   const officeId = OfficeId.parse(someString);
-//   fn(userId)    // ✅ if fn expects UserId
-//   fn(officeId)  // ❌ type error if fn expects UserId
+//   fn(userId)    // OK — if fn expects UserId
+//   fn(officeId)  // ERROR — type error if fn expects UserId
 
 export const UserId = z.string().brand("UserId");
 export type UserId = z.infer<typeof UserId>;
 
 export const OfficeId = z.string().brand("OfficeId");
 export type OfficeId = z.infer<typeof OfficeId>;
+
+export const MembershipId = z.string().brand("MembershipId");
+export type MembershipId = z.infer<typeof MembershipId>;
 
 export const DailyRequestId = z.string().brand("DailyRequestId");
 export type DailyRequestId = z.infer<typeof DailyRequestId>;
@@ -25,6 +28,9 @@ export type InvoiceFileId = z.infer<typeof InvoiceFileId>;
 
 export const ConsumptionEntryId = z.string().brand("ConsumptionEntryId");
 export type ConsumptionEntryId = z.infer<typeof ConsumptionEntryId>;
+
+export const StockMovementId = z.string().brand("StockMovementId");
+export type StockMovementId = z.infer<typeof StockMovementId>;
 
 export const ReimbursementPeriodId = z.string().brand("ReimbursementPeriodId");
 export type ReimbursementPeriodId = z.infer<typeof ReimbursementPeriodId>;

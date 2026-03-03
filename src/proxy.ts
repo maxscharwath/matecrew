@@ -6,12 +6,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Protected routes — redirect to sign-in if no session
-  if (
-    pathname.startsWith("/request") ||
-    pathname.startsWith("/runner") ||
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/admin")
-  ) {
+  if (pathname.startsWith("/org/")) {
     if (!sessionCookie) {
       return NextResponse.redirect(new URL("/sign-in", request.url));
     }
@@ -20,7 +15,7 @@ export async function proxy(request: NextRequest) {
   // Redirect authenticated users away from auth pages
   if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) {
     if (sessionCookie) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+      return NextResponse.redirect(new URL("/", request.url));
     }
   }
 
@@ -28,12 +23,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/request/:path*",
-    "/runner/:path*",
-    "/dashboard/:path*",
-    "/admin/:path*",
-    "/sign-in",
-    "/sign-up",
-  ],
+  matcher: ["/org/:path*", "/sign-in", "/sign-up"],
 };

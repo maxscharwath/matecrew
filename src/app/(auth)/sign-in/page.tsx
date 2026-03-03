@@ -32,14 +32,14 @@ export default function SignInPage() {
     const { error } = await signIn.email({
       email,
       password,
-      callbackURL: "/dashboard",
+      callbackURL: "/",
     });
 
     if (error) {
       setError(error.message ?? "Invalid credentials");
       setLoading(false);
     } else {
-      router.push("/dashboard");
+      router.push("/");
     }
   }
 

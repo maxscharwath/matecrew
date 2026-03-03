@@ -40,7 +40,7 @@ export function buildDailyRequestMessage(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `☕ *Maté du jour — ${officeName}*\n📅 ${date}\n\nQui veut un maté aujourd'hui ?`,
+        text: `:coffee: *Maté du jour — ${officeName}*\n:calendar: ${date}\n\nQui veut un maté aujourd'hui ?`,
       },
     },
     {
