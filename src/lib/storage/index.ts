@@ -58,10 +58,8 @@ export function buildInvoiceKey(
   return `invoices/${purchaseBatchId}/${uuid}-${sanitized}`;
 }
 
-export function buildAvatarKey(userId: string, filename: string): string {
-  const sanitized = filename.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
-  const uuid = crypto.randomUUID();
-  return `avatars/${userId}/${uuid}-${sanitized}`;
+export function buildAvatarKey(userId: string): string {
+  return `avatars/${userId}/${crypto.randomUUID()}.jpg`;
 }
 
 const PDF_VERSION = "v2";

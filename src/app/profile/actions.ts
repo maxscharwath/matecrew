@@ -58,7 +58,7 @@ export async function updateProfile(
       return { success: false, error: "File too large. Max 2 MB." };
     }
 
-    const imageKey = buildAvatarKey(userId, avatarFile.name);
+    const imageKey = buildAvatarKey(userId);
     const buffer = Buffer.from(await avatarFile.arrayBuffer());
     await uploadFile({ key: imageKey, body: buffer, contentType: avatarFile.type });
     imageUpdate = { image: imageKey };
