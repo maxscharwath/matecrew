@@ -1,4 +1,4 @@
-import { put, del, list, getDownloadUrl } from "@vercel/blob";
+import { put, del, list } from "@vercel/blob";
 import type { DownloadResult, StorageProvider } from "./types";
 
 /** Resolve a storage key to the full Vercel Blob URL. */
@@ -19,8 +19,9 @@ export class VercelBlobProvider implements StorageProvider {
   async download(key: string): Promise<DownloadResult> {
     const url = await resolveUrl(key);
     if (!url) throw new Error(`Blob not found: ${key}`);
-    const downloadUrl = getDownloadUrl(url);
-    const res = await fetch(downloadUrl);
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    });
     if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status}`);
     return {
       body: res.body,
