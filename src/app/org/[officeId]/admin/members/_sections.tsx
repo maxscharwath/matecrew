@@ -80,7 +80,7 @@ export async function PendingRequestsSection({ officeId }: { readonly officeId: 
       id: r.id,
       userName: r.user.name,
       userEmail: r.user.email,
-      avatarUrl: await resolveAvatarUrl(r.user.image),
+      avatarUrl: resolveAvatarUrl(r.user.image),
       createdAt: r.createdAt.toISOString(),
     }))
   );
@@ -106,7 +106,7 @@ export async function MembersTableSection({ officeId, currentUserId, page }: Sec
       userId: m.user.id,
       name: m.user.name,
       email: m.user.email,
-      avatarUrl: await resolveAvatarUrl(m.user.image),
+      avatarUrl: resolveAvatarUrl(m.user.image),
       roles: ([...m.roles] as ("ADMIN" | "USER")[]).sort((a, b) => a.localeCompare(b)),
     }))
   );

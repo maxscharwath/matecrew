@@ -7,7 +7,7 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import {
   uploadFile,
   buildInvoiceKey,
-  getSignedUrl,
+  internalFileUrl,
   deleteFile,
 } from "@/lib/storage";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
@@ -193,6 +193,6 @@ export async function getInvoiceUrl(
     return { success: false, error: t('errors.invoiceNotFound') };
   }
 
-  const url = await getSignedUrl(invoice.storageKey);
+  const url = internalFileUrl(invoice.storageKey);
   return { success: true, url };
 }

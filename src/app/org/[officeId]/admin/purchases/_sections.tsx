@@ -66,7 +66,7 @@ export async function PurchaseListSection({ officeId, page }: Props) {
       unitPrice: b.unitPrice.toNumber(),
       totalPrice: b.totalPrice.toNumber(),
       paidByName: b.paidBy.name,
-      paidByImage: await resolveAvatarUrl(b.paidBy.image),
+      paidByImage: resolveAvatarUrl(b.paidBy.image),
       notes: b.notes,
       invoices: b.invoices,
     })),

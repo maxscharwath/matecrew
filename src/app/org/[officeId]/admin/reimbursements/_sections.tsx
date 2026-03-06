@@ -65,9 +65,9 @@ export async function PeriodsSection({ officeId }: { readonly officeId: string }
             period.lines.map(async (l) => ({
               id: l.id,
               fromUserName: l.fromUser.name,
-              fromUserImage: await resolveAvatarUrl(l.fromUser.image),
+              fromUserImage: resolveAvatarUrl(l.fromUser.image),
               toUserName: l.toUser.name,
-              toUserImage: await resolveAvatarUrl(l.toUser.image),
+              toUserImage: resolveAvatarUrl(l.toUser.image),
               amount: l.amount.toNumber(),
               status: l.status,
             })),

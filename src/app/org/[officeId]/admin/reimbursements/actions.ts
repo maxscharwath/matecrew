@@ -11,7 +11,7 @@ import {
   buildSettlementKey,
   fileExists,
   uploadFile,
-  getSignedUrl,
+  internalFileUrl,
   deleteFile,
 } from "@/lib/storage";
 
@@ -186,7 +186,7 @@ export async function exportPeriodPdf(
 
   // Serve cached PDF if available
   if (await fileExists(key)) {
-    const url = await getSignedUrl(key);
+    const url = internalFileUrl(key);
     return { success: true, url };
   }
 
@@ -210,6 +210,6 @@ export async function exportPeriodPdf(
   });
 
   await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
-  const url = await getSignedUrl(key);
+  const url = internalFileUrl(key);
   return { success: true, url };
 }

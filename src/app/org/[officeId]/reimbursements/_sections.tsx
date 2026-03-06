@@ -72,7 +72,7 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
             lineId: l.id,
             direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
             otherUserName: other.name,
-            otherUserImage: await resolveAvatarUrl(other.image),
+            otherUserImage: resolveAvatarUrl(other.image),
             amount: l.amount.toNumber(),
             status: l.status,
           };

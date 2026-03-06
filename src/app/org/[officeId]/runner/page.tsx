@@ -50,7 +50,7 @@ export default async function RunnerPage({ params }: Props) {
       ...r,
       user: {
         ...r.user,
-        image: await resolveAvatarUrl(r.user.image),
+        image: resolveAvatarUrl(r.user.image),
       },
     })),
   );

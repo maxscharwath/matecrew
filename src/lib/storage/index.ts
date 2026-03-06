@@ -77,11 +77,16 @@ export function buildUserSettlementKey(
   return `reimbursements/${PDF_VERSION}/${periodId}/user-${userId}.pdf`;
 }
 
+/** Build an internal `/api/files/...` URL for a storage key. */
+export function internalFileUrl(key: string): string {
+  return `/api/files/${key}`;
+}
+
 /** Resolve a user `image` field to a displayable URL. */
-export async function resolveAvatarUrl(
+export function resolveAvatarUrl(
   image: string | null | undefined
-): Promise<string | undefined> {
+): string | undefined {
   if (!image) return undefined;
-  if (image.startsWith("avatars/")) return getSignedUrl(image);
+  if (image.startsWith("avatars/")) return internalFileUrl(image);
   return image;
 }

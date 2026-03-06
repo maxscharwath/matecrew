@@ -16,7 +16,7 @@ export default async function ProfilePage() {
     getUserMemberships(session.user.id),
   ]);
 
-  const avatarUrl = await resolveAvatarUrl(user.image);
+  const avatarUrl = resolveAvatarUrl(user.image);
 
   const offices = memberships.map((m) => ({
     id: m.office.id,

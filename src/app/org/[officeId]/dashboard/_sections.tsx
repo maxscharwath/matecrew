@@ -289,7 +289,7 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
       .sort((a, b) => b.total - a.total)
       .map(async (p) => ({
         name: p.name,
-        image: await resolveAvatarUrl(p.image),
+        image: resolveAvatarUrl(p.image),
         amount: Math.round(p.total * 100) / 100,
       })),
   );
@@ -461,7 +461,7 @@ export async function SettlementSection({ officeId, userId }: SectionProps) {
         id: l.id,
         direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
         otherUserName: other.name,
-        otherUserImage: await resolveAvatarUrl(other.image),
+        otherUserImage: resolveAvatarUrl(other.image),
         amount: l.amount.toNumber(),
         status: l.status,
       };

@@ -50,7 +50,7 @@ export default async function RequestPage({ params }: Props) {
       .filter((r) => r.user.id !== session.user.id)
       .map(async (r) => ({
         name: r.user.name,
-        image: await resolveAvatarUrl(r.user.image),
+        image: resolveAvatarUrl(r.user.image),
         status: r.status as "REQUESTED" | "SERVED",
       })),
   );

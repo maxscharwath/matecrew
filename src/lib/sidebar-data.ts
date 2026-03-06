@@ -14,7 +14,7 @@ export async function getSidebarData() {
     select: { locale: true, image: true },
   });
 
-  const avatarUrl = await resolveAvatarUrl(user?.image);
+  const avatarUrl = resolveAvatarUrl(user?.image);
   const store = await cookies();
   const lastOfficeId =
     store.get("officeId")?.value ?? memberships[0]?.office.id;
