@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { sendSlackMessage, buildTestMessage } from "@/lib/slack";
+import { deleteFile } from "@/lib/storage";
 import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -85,4 +87,34 @@ export async function testSlackWebhook(officeId: string): Promise<ActionResult> 
   }
 
   return { success: true };
+}
+
+export async function deleteOffice(officeId: string): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const office = await prisma.office.findUnique({
+    where: { id: officeId },
+    include: {
+      purchaseBatches: {
+        include: { invoices: { select: { storageKey: true } } },
+      },
+    },
+  });
+
+  if (!office) {
+    return { success: false, error: t("errors.officeNotFound") };
+  }
+
+  // Delete invoice files from storage before cascade delete
+  const storageKeys = office.purchaseBatches.flatMap((b) =>
+    b.invoices.map((i) => i.storageKey)
+  );
+
+  await Promise.allSettled(storageKeys.map((key) => deleteFile(key)));
+
+  // Cascade delete handles all related records (see schema onDelete: Cascade)
+  await prisma.office.delete({ where: { id: officeId } });
+
+  redirect("/");
 }

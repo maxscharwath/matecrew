@@ -220,7 +220,12 @@
     "saving": "Saving...",
     "saveChanges": "Save Changes",
     "settingsSaved": "Settings saved",
-    "testMessageSent": "Test message sent!"
+    "testMessageSent": "Test message sent!",
+    "dangerZone": "Danger Zone",
+    "deleteDescription": "Permanently delete this office and all its data including memberships, requests, stock, purchases, invoices, consumption history, and reimbursements. This action cannot be undone.",
+    "deleteOffice": "Delete Office",
+    "deleteConfirmTitle": "Delete this office?",
+    "deleteConfirmDescription": "This will permanently delete \"{name}\" and all associated data. This action is irreversible."
   },
   "stock": {
     "title": "Stock — {office}",

@@ -22,11 +22,13 @@ export function OAuthButtons({
   mode,
   loading,
   onLoadingChange,
+  redirectTo,
 }: {
   providers: OAuthProvider[];
   mode: "signIn" | "signUp";
   loading: boolean;
   onLoadingChange: (loading: boolean) => void;
+  redirectTo?: string;
 }) {
   const t = useTranslations();
 
@@ -46,7 +48,7 @@ export function OAuthButtons({
             onLoadingChange(true);
             signIn.social({
               provider: provider.id as "microsoft",
-              callbackURL: "/",
+              callbackURL: redirectTo || "/",
             });
           }}
         >

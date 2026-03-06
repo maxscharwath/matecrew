@@ -8,7 +8,9 @@ export async function proxy(request: NextRequest) {
   // Protected routes — redirect to sign-in if no session
   if (pathname.startsWith("/org/")) {
     if (!sessionCookie) {
-      return NextResponse.redirect(new URL("/sign-in", request.url));
+      const signInUrl = new URL("/sign-in", request.url);
+      signInUrl.searchParams.set("redirectTo", pathname);
+      return NextResponse.redirect(signInUrl);
     }
   }
 

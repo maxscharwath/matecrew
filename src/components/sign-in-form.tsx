@@ -18,7 +18,7 @@ import {
 import { OAuthButtons } from "@/components/oauth-buttons";
 import type { OAuthProvider } from "@/lib/oauth-providers";
 
-export function SignInForm({ oauthProviders, allowedDomain }: { oauthProviders: OAuthProvider[]; allowedDomain: string | null }) {
+export function SignInForm({ oauthProviders, allowedDomain, redirectTo }: { oauthProviders: OAuthProvider[]; allowedDomain: string | null; redirectTo?: string }) {
   const router = useRouter();
   const t = useTranslations();
   const [error, setError] = useState<string | null>(null);
@@ -33,17 +33,18 @@ export function SignInForm({ oauthProviders, allowedDomain }: { oauthProviders: 
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
 
+    const destination = redirectTo || "/";
     const { error } = await signIn.email({
       email,
       password,
-      callbackURL: "/",
+      callbackURL: destination,
     });
 
     if (error) {
       setError(error.message ?? t('auth.invalidCredentials'));
       setLoading(false);
     } else {
-      router.push("/");
+      router.push(destination);
     }
   }
 
@@ -62,6 +63,7 @@ export function SignInForm({ oauthProviders, allowedDomain }: { oauthProviders: 
             mode="signIn"
             loading={loading}
             onLoadingChange={setLoading}
+            redirectTo={redirectTo}
           />
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -93,7 +95,7 @@ export function SignInForm({ oauthProviders, allowedDomain }: { oauthProviders: 
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             {t('auth.noAccount')}{" "}
-            <Link href="/sign-up" className="text-primary underline">
+            <Link href={redirectTo ? `/sign-up?redirectTo=${encodeURIComponent(redirectTo)}` : "/sign-up"} className="text-primary underline">
               {t('auth.createOne')}
             </Link>
           </p>

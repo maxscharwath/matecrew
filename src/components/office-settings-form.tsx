@@ -1,8 +1,9 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +15,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   updateOffice,
   testSlackWebhook,
+  deleteOffice,
 } from "@/app/org/[officeId]/admin/settings/actions";
 
 interface Office {
@@ -34,6 +37,7 @@ interface OfficeSettingsFormProps {
 
 export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
   const [isPending, startTransition] = useTransition();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const t = useTranslations();
 
   function handleSubmit(formData: FormData) {
@@ -58,7 +62,19 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
     });
   }
 
+  function handleDeleteOffice() {
+    startTransition(async () => {
+      const result = await deleteOffice(office.id);
+      if (!result.success) {
+        toast.error(result.error);
+        setShowDeleteDialog(false);
+      }
+      // On success, the server action redirects to "/"
+    });
+  }
+
   return (
+  <>
     <Card>
       <CardHeader>
         <CardTitle>{t('settings.generalTitle')}</CardTitle>
@@ -135,5 +151,35 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
         </form>
       </CardContent>
     </Card>
+
+    <Card className="border-destructive">
+      <CardHeader>
+        <CardTitle className="text-destructive">{t('settings.dangerZone')}</CardTitle>
+        <CardDescription>
+          {t('settings.deleteDescription')}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          variant="destructive"
+          onClick={() => setShowDeleteDialog(true)}
+          disabled={isPending}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          {t('settings.deleteOffice')}
+        </Button>
+      </CardContent>
+    </Card>
+
+    <ConfirmDialog
+      open={showDeleteDialog}
+      onOpenChange={setShowDeleteDialog}
+      onConfirm={handleDeleteOffice}
+      title={t('settings.deleteConfirmTitle')}
+      description={t('settings.deleteConfirmDescription', { name: office.name })}
+      confirmLabel={t('settings.deleteOffice')}
+      isPending={isPending}
+    />
+  </>
   );
 }

@@ -220,7 +220,12 @@
     "saving": "Enregistrement...",
     "saveChanges": "Enregistrer les modifications",
     "settingsSaved": "Paramètres enregistrés",
-    "testMessageSent": "Message de test envoyé !"
+    "testMessageSent": "Message de test envoyé !",
+    "dangerZone": "Zone de danger",
+    "deleteDescription": "Supprimer définitivement ce bureau et toutes ses données : membres, demandes, stock, achats, factures, historique de consommation et remboursements. Cette action est irréversible.",
+    "deleteOffice": "Supprimer le bureau",
+    "deleteConfirmTitle": "Supprimer ce bureau ?",
+    "deleteConfirmDescription": "Cela supprimera définitivement « {name} » et toutes les données associées. Cette action est irréversible."
   },
   "stock": {
     "title": "Stock — {office}",

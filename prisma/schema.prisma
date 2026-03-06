@@ -57,7 +57,7 @@ model User {
   image           String?
   locale          String    @default("fr")
   defaultOfficeId String?
-  defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id])
+  defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id], onDelete: SetNull)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -144,7 +144,7 @@ model Membership {
   userId   String
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   officeId String
-  office   Office   @relation(fields: [officeId], references: [id])
+  office   Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
   roles    Role[]   @default([USER])
   createdAt DateTime @default(now())
 
@@ -185,7 +185,7 @@ model DailyRequest {
   id            String        @id @default(cuid())
   date          DateTime      @db.Date
   officeId      String
-  office        Office        @relation(fields: [officeId], references: [id])
+  office        Office        @relation(fields: [officeId], references: [id], onDelete: Cascade)
   userId        String
   user          User          @relation(fields: [userId], references: [id])
   mateSessionId String?
@@ -198,7 +198,7 @@ model DailyRequest {
 
 model Stock {
   officeId            String    @id
-  office              Office    @relation(fields: [officeId], references: [id])
+  office              Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
   currentQty          Int       @default(0)
   updatedAt           DateTime  @updatedAt
   lowStockAlertSentAt DateTime?
@@ -209,7 +209,7 @@ model Stock {
 model StockMovement {
   id        String               @id @default(cuid())
   officeId  String
-  stock     Stock                @relation(fields: [officeId], references: [officeId])
+  stock     Stock                @relation(fields: [officeId], references: [officeId], onDelete: Cascade)
   delta     Int                  // +N or -N
   reason    StockMovementReason
   note      String?
@@ -221,7 +221,7 @@ model StockMovement {
 model PurchaseBatch {
   id             String         @id @default(cuid())
   officeId       String
-  office         Office         @relation(fields: [officeId], references: [id])
+  office         Office         @relation(fields: [officeId], references: [id], onDelete: Cascade)
   status         PurchaseStatus @default(ORDERED)
   purchasedAt    DateTime       @default(now())
   deliveredAt    DateTime?
@@ -242,7 +242,7 @@ model PurchaseBatch {
 model InvoiceFile {
   id              String        @id @default(cuid())
   purchaseBatchId String
-  purchaseBatch   PurchaseBatch @relation(fields: [purchaseBatchId], references: [id])
+  purchaseBatch   PurchaseBatch @relation(fields: [purchaseBatchId], references: [id], onDelete: Cascade)
   storageKey      String
   filename        String
   mimeType        String
@@ -252,7 +252,7 @@ model InvoiceFile {
 model ConsumptionEntry {
   id              String            @id @default(cuid())
   officeId        String
-  office          Office            @relation(fields: [officeId], references: [id])
+  office          Office            @relation(fields: [officeId], references: [id], onDelete: Cascade)
   userId          String
   user            User              @relation(fields: [userId], references: [id])
   date            DateTime          @db.Date
@@ -267,7 +267,7 @@ model ConsumptionEntry {
 model ReimbursementPeriod {
   id        String    @id @default(cuid())
   officeId  String
-  office    Office    @relation(fields: [officeId], references: [id])
+  office    Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
   month     Int       // 1-12
   year      Int       // e.g. 2026
   startDate DateTime  @db.Date
@@ -282,7 +282,7 @@ model ReimbursementPeriod {
 model ReimbursementLine {
   id         String              @id @default(cuid())
   periodId   String
-  period     ReimbursementPeriod @relation(fields: [periodId], references: [id])
+  period     ReimbursementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
   fromUserId String
   fromUser   User                @relation("ReimbursementFrom", fields: [fromUserId], references: [id])
   toUserId   String
