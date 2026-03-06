@@ -1,28 +1,26 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { StockCard } from "@/components/stock-card";
-import { StockChart } from "@/components/stock-chart";
-import { Badge } from "@/components/ui/badge";
+import { getTranslations } from "next-intl/server";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { toISODateString } from "@/lib/date";
-import { getTranslations, getLocale } from "next-intl/server";
+  StockChartSection,
+  StockChartFallback,
+  AuditLogSection,
+  AuditLogFallback,
+} from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
+  readonly searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-export default async function StockPage({ params }: Props) {
+export default async function StockPage({ params, searchParams }: Props) {
   const { officeId } = await params;
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
-  const locale = await getLocale();
 
   const office = await prisma.office.findUniqueOrThrow({
     where: { id: officeId },
@@ -31,56 +29,8 @@ export default async function StockPage({ params }: Props) {
 
   const currentQty = office.stock?.currentQty ?? 0;
 
-  // Movements for the audit log (last 50)
-  const recentMovements = await prisma.stockMovement.findMany({
-    where: { officeId },
-    take: 50,
-    orderBy: { createdAt: "desc" },
-    include: {
-      user: { select: { name: true } },
-    },
-  });
-
-  // Build chart data: daily stock snapshots over last 30 days
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-  const movements = await prisma.stockMovement.findMany({
-    where: {
-      officeId,
-      createdAt: { gte: thirtyDaysAgo },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const totalDelta = movements.reduce((sum, m) => sum + m.delta, 0);
-  const startQty = currentQty - totalDelta;
-
-  const dailyMap = new Map<string, number>();
-  let runningQty = startQty;
-
-  for (const m of movements) {
-    const day = toISODateString(m.createdAt);
-    runningQty += m.delta;
-    dailyMap.set(day, runningQty);
-  }
-
-  const chartData: { date: string; qty: number }[] = [];
-  const cursor = new Date(thirtyDaysAgo);
-  const today = new Date();
-  let lastQty = startQty;
-
-  while (cursor <= today) {
-    const day = toISODateString(cursor);
-    if (dailyMap.has(day)) {
-      lastQty = dailyMap.get(day)!;
-    }
-    chartData.push({ date: day, qty: lastQty });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">{t('stock.title', { office: office.name })}</h1>
         <p className="mt-1 text-muted-foreground">
@@ -95,61 +45,17 @@ export default async function StockPage({ params }: Props) {
         lowStockThreshold={office.lowStockThreshold}
       />
 
-      <StockChart data={chartData} officeName={office.name} />
+      <Suspense fallback={<StockChartFallback />}>
+        <StockChartSection
+          officeId={officeId}
+          officeName={office.name}
+          currentQty={currentQty}
+        />
+      </Suspense>
 
-      {recentMovements.length > 0 && (
-        <div>
-          <h2 className="mb-3 text-lg font-semibold">{t('stock.auditLog')}</h2>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('stock.date')}</TableHead>
-                  <TableHead>{t('stock.reason')}</TableHead>
-                  <TableHead className="text-center">{t('stock.delta')}</TableHead>
-                  <TableHead>{t('stock.user')}</TableHead>
-                  <TableHead>{t('stock.note')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentMovements.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="text-muted-foreground">
-                      {m.createdAt.toLocaleString(locale, {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        timeZone: "Europe/Zurich",
-                      })}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {t(`stock.reasonLabels.${m.reason}` as never)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-center font-mono">
-                      <span
-                        className={
-                          m.delta > 0
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-red-600 dark:text-red-400"
-                        }
-                      >
-                        {m.delta > 0 ? `+${m.delta}` : m.delta}
-                      </span>
-                    </TableCell>
-                    <TableCell>{m.user?.name ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {m.note ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
+      <Suspense fallback={<AuditLogFallback />}>
+        <AuditLogSection officeId={officeId} page={page} />
+      </Suspense>
     </div>
   );
 }

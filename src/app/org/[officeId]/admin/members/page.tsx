@@ -1,38 +1,28 @@
-import { prisma } from "@/lib/prisma";
+import { Suspense } from "react";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
-import { MembersTable } from "@/components/members-table";
 import { AddMemberForm } from "@/components/add-member-form";
 import { getTranslations } from "next-intl/server";
+import {
+  PendingRequestsSection,
+  PendingRequestsFallback,
+  MembersTableSection,
+  MembersTableFallback,
+} from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
+  readonly searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-export default async function MembersPage({ params }: Props) {
+export default async function MembersPage({ params, searchParams }: Props) {
   const { officeId } = await params;
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
   const { session } = await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
-  const memberships = await prisma.membership.findMany({
-    where: { officeId },
-    include: { user: { select: { id: true, name: true, email: true, image: true } } },
-    orderBy: { user: { name: "asc" } },
-  });
-
-  const members = await Promise.all(
-    memberships.map(async (m) => ({
-      membershipId: m.id,
-      userId: m.user.id,
-      name: m.user.name,
-      email: m.user.email,
-      avatarUrl: await resolveAvatarUrl(m.user.image),
-      roles: m.roles as ("ADMIN" | "USER")[],
-    }))
-  );
-
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">{t("members.title")}</h1>
         <p className="mt-1 text-muted-foreground">
@@ -40,12 +30,19 @@ export default async function MembersPage({ params }: Props) {
         </p>
       </div>
 
+      <Suspense fallback={<PendingRequestsFallback />}>
+        <PendingRequestsSection officeId={officeId} />
+      </Suspense>
+
       <AddMemberForm officeId={officeId} />
-      <MembersTable
-        officeId={officeId}
-        members={members}
-        currentUserId={session.user.id}
-      />
+
+      <Suspense fallback={<MembersTableFallback />}>
+        <MembersTableSection
+          officeId={officeId}
+          currentUserId={session.user.id}
+          page={page}
+        />
+      </Suspense>
     </div>
   );
 }

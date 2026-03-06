@@ -1,10 +1,8 @@
-import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { Suspense } from "react";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
-import { ReimbursementPeriodCard } from "@/components/reimbursement-period-card";
+import { getTranslations } from "next-intl/server";
 import { GenerateMissingPeriodsButton } from "./generate-button";
+import { PeriodsSection, PeriodsSectionFallback } from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
@@ -15,57 +13,8 @@ export default async function ReimbursementsPage({ params }: Props) {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
-  const periods = await prisma.reimbursementPeriod.findMany({
-    where: { officeId },
-    orderBy: { startDate: "desc" },
-    include: {
-      lines: {
-        include: {
-          fromUser: { select: { name: true, image: true } },
-          toUser: { select: { name: true, image: true } },
-        },
-      },
-    },
-  });
-
-  // Calculate shares for each period
-  const periodsWithShares = await Promise.all(
-    periods.map(async (period) => {
-      const result = await calculateReimbursements(
-        officeId,
-        period.startDate,
-        period.endDate
-      );
-
-      const paidCount = period.lines.filter((l) => l.status === "PAID").length;
-
-      return {
-        period: {
-          id: period.id,
-          startDate: period.startDate.toISOString(),
-          endDate: period.endDate.toISOString(),
-          lines: await Promise.all(
-            period.lines.map(async (l) => ({
-              id: l.id,
-              fromUserName: l.fromUser.name,
-              fromUserImage: await resolveAvatarUrl(l.fromUser.image),
-              toUserName: l.toUser.name,
-              toUserImage: await resolveAvatarUrl(l.toUser.image),
-              amount: l.amount.toNumber(),
-              status: l.status,
-            })),
-          ),
-        },
-        shares: result.shares,
-        totalConsumption: result.totalConsumption,
-        totalCost: result.totalCost,
-        paidCount,
-      };
-    })
-  );
-
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">{t('reimbursements.adminTitle')}</h1>
@@ -76,24 +25,9 @@ export default async function ReimbursementsPage({ params }: Props) {
         <GenerateMissingPeriodsButton officeId={officeId} />
       </div>
 
-      {periodsWithShares.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {t('reimbursements.noPeriodsYet')}
-        </p>
-      ) : (
-        <div className="space-y-4">
-          {periodsWithShares.map((p) => (
-            <ReimbursementPeriodCard
-              key={p.period.id}
-              officeId={officeId}
-              period={p.period}
-              shares={p.shares}
-              totalConsumption={p.totalConsumption}
-              totalCost={p.totalCost}
-            />
-          ))}
-        </div>
-      )}
+      <Suspense fallback={<PeriodsSectionFallback />}>
+        <PeriodsSection officeId={officeId} />
+      </Suspense>
     </div>
   );
 }

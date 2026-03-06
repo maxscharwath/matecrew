@@ -1,57 +1,35 @@
-import { prisma } from "@/lib/prisma";
+import { Suspense } from "react";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
+import { prisma } from "@/lib/prisma";
 import { PurchaseForm } from "@/components/purchase-form";
-import { PurchaseList } from "@/components/purchase-list";
 import { getTranslations } from "next-intl/server";
+import { PurchaseListSection, PurchaseListFallback } from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
+  readonly searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
-export default async function PurchasesPage({ params }: Props) {
+export default async function PurchasesPage({ params, searchParams }: Props) {
   const { officeId } = await params;
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.page) || 1);
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
-  const [batches, memberships] = await Promise.all([
-    prisma.purchaseBatch.findMany({
-      where: { officeId },
-      orderBy: { purchasedAt: "desc" },
-      include: {
-        paidBy: { select: { name: true, image: true } },
-        invoices: { select: { id: true, filename: true } },
-      },
-    }),
-    prisma.membership.findMany({
-      where: { officeId },
-      include: { user: { select: { id: true, name: true } } },
-      orderBy: { user: { name: "asc" } },
-    }),
-  ]);
+  const memberships = await prisma.membership.findMany({
+    where: { officeId },
+    include: { user: { select: { id: true, name: true } } },
+    orderBy: { user: { name: "asc" } },
+  });
 
   const members = memberships.map((m) => ({
     userId: m.user.id,
     name: m.user.name,
   }));
 
-  const serializedBatches = await Promise.all(
-    batches.map(async (b) => ({
-      id: b.id,
-      status: b.status as "ORDERED" | "DELIVERED",
-      purchasedAt: b.purchasedAt.toISOString(),
-      qty: b.qty,
-      unitPrice: b.unitPrice.toNumber(),
-      totalPrice: b.totalPrice.toNumber(),
-      paidByName: b.paidBy.name,
-      paidByImage: await resolveAvatarUrl(b.paidBy.image),
-      notes: b.notes,
-      invoices: b.invoices,
-    })),
-  );
-
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">{t('purchases.title')}</h1>
         <p className="mt-1 text-muted-foreground">
@@ -60,7 +38,10 @@ export default async function PurchasesPage({ params }: Props) {
       </div>
 
       <PurchaseForm officeId={officeId} members={members} />
-      <PurchaseList officeId={officeId} batches={serializedBatches} />
+
+      <Suspense fallback={<PurchaseListFallback />}>
+        <PurchaseListSection officeId={officeId} page={page} />
+      </Suspense>
     </div>
   );
 }

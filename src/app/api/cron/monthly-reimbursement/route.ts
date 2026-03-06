@@ -12,11 +12,11 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
-  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const month = prevMonth.getMonth() + 1;
-  const year = prevMonth.getFullYear();
+  const prevMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1));
+  const month = prevMonth.getUTCMonth() + 1;
+  const year = prevMonth.getUTCFullYear();
   const startDate = prevMonth;
-  const endDate = new Date(year, month, 0);
+  const endDate = new Date(Date.UTC(year, month, 0));
 
   const offices = await prisma.office.findMany({
     select: { id: true, name: true },

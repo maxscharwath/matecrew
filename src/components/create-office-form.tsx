@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TimezoneCombobox } from "@/components/timezone-combobox";
 import {
   Card,
   CardContent,
@@ -50,12 +51,7 @@ export function CreateOfficeForm() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="timezone">{t("office.timezone")}</Label>
-            <Input
-              id="timezone"
-              name="timezone"
-              defaultValue="Europe/Zurich"
-              placeholder="Europe/Zurich"
-            />
+            <TimezoneCombobox name="timezone" defaultValue="Europe/Zurich" />
           </div>
           <Button type="submit" disabled={isPending} className="w-full">
             {isPending ? t("office.creating") : t("office.create")}

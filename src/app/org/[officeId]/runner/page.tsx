@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
+import { resolveAvatarUrl } from "@/lib/storage";
 import { getTodayDate, getDayOfWeek } from "@/lib/date";
 import { getSessionsForDay, getActiveSession, getMostRecentSession, isSessionOpen } from "@/lib/session-utils";
 import { RunnerView } from "@/components/runner-view";
@@ -56,7 +56,7 @@ export default async function RunnerPage({ params }: Props) {
   );
 
   return (
-    <div className="mx-auto max-w-4xl p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <RunnerView
         requests={resolvedRequests}
         date={today}

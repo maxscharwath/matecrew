@@ -38,6 +38,9 @@ export type ReimbursementPeriodId = z.infer<typeof ReimbursementPeriodId>;
 export const ReimbursementLineId = z.string().brand("ReimbursementLineId");
 export type ReimbursementLineId = z.infer<typeof ReimbursementLineId>;
 
+export const JoinRequestId = z.string().brand("JoinRequestId");
+export type JoinRequestId = z.infer<typeof JoinRequestId>;
+
 export const SessionId = z.string().brand("SessionId");
 export type SessionId = z.infer<typeof SessionId>;
 

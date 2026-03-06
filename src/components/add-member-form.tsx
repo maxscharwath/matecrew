@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
-import { UserPlus } from "lucide-react";
+import { ChevronDown, ShieldCheck, User, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +14,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { addMember } from "@/app/org/[officeId]/admin/members/actions";
 
 type Role = "ADMIN" | "USER";
+
+const ROLE_ICON: Record<Role, typeof ShieldCheck> = {
+  ADMIN: ShieldCheck,
+  USER: User,
+};
 
 const ALL_ROLES: Role[] = ["USER", "ADMIN"];
 
@@ -26,15 +37,30 @@ interface AddMemberFormProps {
 
 export function AddMemberForm({ officeId }: AddMemberFormProps) {
   const [isPending, startTransition] = useTransition();
+  const [selectedRoles, setSelectedRoles] = useState<Role[]>(["USER"]);
   const formRef = useRef<HTMLFormElement>(null);
   const t = useTranslations();
 
+  function toggleRole(role: Role) {
+    setSelectedRoles((prev) => {
+      if (prev.includes(role)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((r) => r !== role);
+      }
+      return [...prev, role].sort((a, b) => a.localeCompare(b));
+    });
+  }
+
   function handleSubmit(formData: FormData) {
+    for (const role of selectedRoles) {
+      formData.append("roles", role);
+    }
     startTransition(async () => {
       const result = await addMember(officeId, formData);
       if (result.success) {
         toast.success(t("members.memberAdded"));
         formRef.current?.reset();
+        setSelectedRoles(["USER"]);
       } else {
         toast.error(result.error);
       }
@@ -64,22 +90,38 @@ export function AddMemberForm({ officeId }: AddMemberFormProps) {
           </div>
           <div className="space-y-2">
             <Label>{t("members.roles")}</Label>
-            <div className="flex gap-1">
-              {ALL_ROLES.map((role) => (
-                <label key={role} className="cursor-pointer">
-                  <input
-                    type="checkbox"
-                    name="roles"
-                    value={role}
-                    defaultChecked={role === "USER"}
-                    className="peer sr-only"
-                  />
-                  <span className="inline-block rounded-md border px-3 py-2 text-sm transition-colors peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground">
-                    {t(`members.roleLabels.${role}`)}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" type="button" className="gap-1.5">
+                  <span className="text-sm">
+                    {selectedRoles
+                      .toSorted((a, b) => a.localeCompare(b))
+                      .map((role) => t(`members.roleLabels.${role}`))
+                      .join(", ")}
                   </span>
-                </label>
-              ))}
-            </div>
+                  <ChevronDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {ALL_ROLES.map((role) => {
+                  const checked = selectedRoles.includes(role);
+                  const isOnly = checked && selectedRoles.length === 1;
+                  const Icon = ROLE_ICON[role];
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={role}
+                      checked={checked}
+                      disabled={isOnly}
+                      onCheckedChange={() => toggleRole(role)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      <Icon className="mr-1.5 h-3.5 w-3.5" />
+                      {t(`members.roleLabels.${role}`)}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <Button type="submit" disabled={isPending}>
             {isPending ? t("members.adding") : t("members.addButton")}

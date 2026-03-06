@@ -8,6 +8,67 @@ import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
+export async function approveJoinRequest(
+  officeId: string,
+  joinRequestId: string
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const request = await prisma.joinRequest.findUnique({
+    where: { id: joinRequestId },
+  });
+
+  if (!request || request.officeId !== officeId) {
+    return { success: false, error: t("errors.joinRequestNotFound") };
+  }
+
+  if (request.status !== "PENDING") {
+    return { success: false, error: t("errors.joinRequestAlreadyHandled") };
+  }
+
+  await prisma.$transaction([
+    prisma.membership.create({
+      data: { userId: request.userId, officeId, roles: ["USER"] },
+    }),
+    prisma.joinRequest.update({
+      where: { id: joinRequestId },
+      data: { status: "APPROVED" },
+    }),
+  ]);
+
+  revalidatePath(`/org/${officeId}/admin/members`);
+  return { success: true };
+}
+
+export async function rejectJoinRequest(
+  officeId: string,
+  joinRequestId: string
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const request = await prisma.joinRequest.findUnique({
+    where: { id: joinRequestId },
+  });
+
+  if (!request || request.officeId !== officeId) {
+    return { success: false, error: t("errors.joinRequestNotFound") };
+  }
+
+  if (request.status !== "PENDING") {
+    return { success: false, error: t("errors.joinRequestAlreadyHandled") };
+  }
+
+  await prisma.joinRequest.update({
+    where: { id: joinRequestId },
+    data: { status: "REJECTED" },
+  });
+
+  revalidatePath(`/org/${officeId}/admin/members`);
+  return { success: true };
+}
+
 export async function addMember(
   officeId: string,
   formData: FormData

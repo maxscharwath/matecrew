@@ -27,10 +27,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   submitDailyRequest,
   cancelDailyRequest,
 } from "@/app/org/[officeId]/request/actions";
+import { takeACan } from "@/app/org/[officeId]/dashboard/actions";
 import { formatDateDisplay } from "@/lib/date";
 
 interface DailyRequest {
@@ -305,6 +307,7 @@ export function RequestView({
   nextSessionLabel,
 }: RequestViewProps) {
   const [isPending, startTransition] = useTransition();
+  const [takeCanOpen, setTakeCanOpen] = useState(false);
   const t = useTranslations();
 
   function handleRequest() {
@@ -312,6 +315,18 @@ export function RequestView({
       const result = await submitDailyRequest(officeId, date, activeSession?.id ?? null);
       if (result.success) {
         toast.success(t('request.mateRequestedToast'));
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleTakeCanConfirm() {
+    startTransition(async () => {
+      const result = await takeACan(officeId);
+      setTakeCanOpen(false);
+      if (result.success) {
+        toast.success(t('dashboard.canTaken'));
       } else {
         toast.error(result.error);
       }
@@ -351,19 +366,48 @@ export function RequestView({
             <RequestedState isPending={isPending} onCancel={handleCancel} />
           )}
           {status === null && !activeSession && nextSessionLabel && (
-            <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-muted-foreground">
+                  {t('request.noActiveSession')}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t('request.nextSession', { label: nextSessionLabel })}
+                </p>
+              </div>
+              <Button
+                size="lg"
+                variant="outline"
+                className="gap-2"
+                disabled={isPending}
+                onClick={() => setTakeCanOpen(true)}
+              >
+                <CupSoda className="h-5 w-5" />
+                {isPending ? t('common.processing') : t('dashboard.takeCan')}
+              </Button>
+            </div>
+          )}
+          {status === null && !activeSession && !nextSessionLabel && (
+            <div className="space-y-4">
               <p className="text-muted-foreground">
                 {t('request.noActiveSession')}
               </p>
-              <p className="text-sm text-muted-foreground">
-                {t('request.nextSession', { label: nextSessionLabel })}
-              </p>
+              <Button
+                size="lg"
+                variant="outline"
+                className="gap-2"
+                disabled={isPending}
+                onClick={() => setTakeCanOpen(true)}
+              >
+                <CupSoda className="h-5 w-5" />
+                {isPending ? t('common.processing') : t('dashboard.takeCan')}
+              </Button>
             </div>
           )}
-          {status === null && (activeSession || !nextSessionLabel) && (
+          {status === null && activeSession && (
             <EmptyState
               isPending={isPending}
-              cutoffPassed={cutoffPassed || !activeSession}
+              cutoffPassed={cutoffPassed}
               onRequest={handleRequest}
             />
           )}
@@ -399,6 +443,17 @@ export function RequestView({
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={takeCanOpen}
+        onOpenChange={setTakeCanOpen}
+        onConfirm={handleTakeCanConfirm}
+        title={t('dashboard.takeCanConfirmTitle')}
+        description={t('dashboard.takeCanConfirmDescription')}
+        confirmLabel={t('dashboard.takeCan')}
+        confirmVariant="default"
+        isPending={isPending}
+      />
     </div>
   );
 }

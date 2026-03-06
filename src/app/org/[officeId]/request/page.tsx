@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
+import { resolveAvatarUrl } from "@/lib/storage";
 import { getTodayDate } from "@/lib/date";
 import { getActiveSession, getNextSession, isSessionOpen } from "@/lib/session-utils";
 import { RequestView } from "@/components/request-view";
@@ -71,7 +71,7 @@ export default async function RequestPage({ params }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-8">
+    <div className="mx-auto max-w-4xl space-y-6">
       <RequestView
         officeId={officeId}
         officeName={membership.office.name}

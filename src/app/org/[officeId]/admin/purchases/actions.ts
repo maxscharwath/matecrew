@@ -5,11 +5,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import {
-  uploadToR2,
+  uploadFile,
   buildInvoiceKey,
-  getR2SignedUrl,
-  deleteFromR2,
-} from "@/lib/r2-helpers";
+  getSignedUrl,
+  deleteFile,
+} from "@/lib/storage";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { getTranslations } from "next-intl/server";
 
@@ -86,7 +86,7 @@ export async function createPurchaseBatch(
     for (const file of validFiles) {
       const key = buildInvoiceKey(batchId, file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
-      await uploadToR2({ key, body: buffer, contentType: file.type });
+      await uploadFile({ key, body: buffer, contentType: file.type });
       uploadedKeys.push(key);
       invoiceRecords.push({
         storageKey: key,
@@ -115,7 +115,7 @@ export async function createPurchaseBatch(
     });
   } catch (e) {
     // Cleanup orphan uploads on failure
-    await Promise.allSettled(uploadedKeys.map(deleteFromR2));
+    await Promise.allSettled(uploadedKeys.map(deleteFile));
     throw e;
   }
 
@@ -193,6 +193,6 @@ export async function getInvoiceUrl(
     return { success: false, error: t('errors.invoiceNotFound') };
   }
 
-  const url = await getR2SignedUrl(invoice.storageKey);
+  const url = await getSignedUrl(invoice.storageKey);
   return { success: true, url };
 }

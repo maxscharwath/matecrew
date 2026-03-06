@@ -8,10 +8,10 @@ import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { generateUserSettlementPdf } from "@/lib/pdf-export";
 import {
   buildUserSettlementKey,
-  r2ObjectExists,
-  uploadToR2,
-  getR2SignedUrl,
-} from "@/lib/r2-helpers";
+  fileExists,
+  uploadFile,
+  getSignedUrl,
+} from "@/lib/storage";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -121,8 +121,8 @@ export async function exportUserPeriodPdf(
   const key = buildUserSettlementKey(periodId, userId);
 
   // Serve cached PDF if available
-  if (await r2ObjectExists(key)) {
-    const url = await getR2SignedUrl(key);
+  if (await fileExists(key)) {
+    const url = await getSignedUrl(key);
     return { success: true, url };
   }
 
@@ -164,7 +164,7 @@ export async function exportUserPeriodPdf(
     locale: user.locale,
   });
 
-  await uploadToR2({ key, body: pdfBuffer, contentType: "application/pdf" });
-  const url = await getR2SignedUrl(key);
+  await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
+  const url = await getSignedUrl(key);
   return { success: true, url };
 }

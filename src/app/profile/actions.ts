@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth-utils";
 import { setLocaleCookie } from "@/lib/locale";
 import { type Locale, locales } from "@/i18n/request";
-import { uploadToR2, deleteFromR2, buildAvatarKey } from "@/lib/r2-helpers";
+import { uploadFile, deleteFile, buildAvatarKey } from "@/lib/storage";
 
 const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg"];
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -60,7 +60,7 @@ export async function updateProfile(
 
     const imageKey = buildAvatarKey(userId, avatarFile.name);
     const buffer = Buffer.from(await avatarFile.arrayBuffer());
-    await uploadToR2({ key: imageKey, body: buffer, contentType: avatarFile.type });
+    await uploadFile({ key: imageKey, body: buffer, contentType: avatarFile.type });
     imageUpdate = { image: imageKey };
   } else if (removeAvatar) {
     imageUpdate = { image: null };
@@ -73,7 +73,7 @@ export async function updateProfile(
       select: { image: true },
     });
     if (current?.image?.startsWith("avatars/")) {
-      await deleteFromR2(current.image).catch(() => {});
+      await deleteFile(current.image).catch(() => {});
     }
   }
 

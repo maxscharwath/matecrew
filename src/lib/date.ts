@@ -8,6 +8,15 @@ export function getTodayDate(): Date {
 }
 
 /**
+ * Creates a UTC midnight Date for a given year/month/day.
+ * Use this instead of `new Date(year, month, day)` when comparing
+ * against Prisma @db.Date columns to avoid timezone drift.
+ */
+export function utcDate(year: number, month: number, day: number = 1): Date {
+  return new Date(Date.UTC(year, month, day));
+}
+
+/**
  * Formats a date for display: "3 mars 2026" style using fr-CH locale.
  */
 export function formatDateDisplay(date: Date): string {

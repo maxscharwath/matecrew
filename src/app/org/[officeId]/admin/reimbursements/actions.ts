@@ -9,11 +9,11 @@ import { generateReimbursementCsv } from "@/lib/csv-export";
 import { generateSettlementPdf } from "@/lib/pdf-export";
 import {
   buildSettlementKey,
-  r2ObjectExists,
-  uploadToR2,
-  getR2SignedUrl,
-  deleteFromR2,
-} from "@/lib/r2-helpers";
+  fileExists,
+  uploadFile,
+  getSignedUrl,
+  deleteFile,
+} from "@/lib/storage";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -58,18 +58,18 @@ export async function generateMissingPeriods(
 
   // Generate months from earliest to last month
   const now = new Date();
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1));
   let created = 0;
 
-  const cursor = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
+  const cursor = new Date(Date.UTC(earliest.getFullYear(), earliest.getMonth(), 1));
   while (cursor <= lastMonth) {
-    const month = cursor.getMonth() + 1;
-    const year = cursor.getFullYear();
+    const month = cursor.getUTCMonth() + 1;
+    const year = cursor.getUTCFullYear();
     const key = `${year}-${month}`;
 
     if (!existingSet.has(key)) {
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
+      const startDate = new Date(Date.UTC(year, month - 1, 1));
+      const endDate = new Date(Date.UTC(year, month, 0));
 
       const result = await calculateReimbursements(officeId, startDate, endDate);
 
@@ -95,7 +95,7 @@ export async function generateMissingPeriods(
       }
     }
 
-    cursor.setMonth(cursor.getMonth() + 1);
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
 
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
@@ -124,7 +124,7 @@ export async function deletePeriod(
   ]);
 
   // Purge cached settlement PDF if present
-  deleteFromR2(buildSettlementKey(periodId)).catch(() => {});
+  deleteFile(buildSettlementKey(periodId)).catch(() => {});
 
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
   revalidatePath(`/org/${officeId}/reimbursements`);
@@ -185,8 +185,8 @@ export async function exportPeriodPdf(
   const key = buildSettlementKey(periodId);
 
   // Serve cached PDF if available
-  if (await r2ObjectExists(key)) {
-    const url = await getR2SignedUrl(key);
+  if (await fileExists(key)) {
+    const url = await getSignedUrl(key);
     return { success: true, url };
   }
 
@@ -209,7 +209,7 @@ export async function exportPeriodPdf(
     locale: period.office.locale,
   });
 
-  await uploadToR2({ key, body: pdfBuffer, contentType: "application/pdf" });
-  const url = await getR2SignedUrl(key);
+  await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
+  const url = await getSignedUrl(key);
   return { success: true, url };
 }

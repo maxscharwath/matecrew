@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
-import { MoreHorizontal, ShieldCheck, Trash2 } from "lucide-react";
+import { MoreHorizontal, ShieldCheck, Trash2, User } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,9 +49,9 @@ interface MembersTableProps {
 
 const ALL_ROLES: Role[] = ["ADMIN", "USER"];
 
-const ROLE_VARIANT: Record<Role, "default" | "secondary"> = {
-  ADMIN: "default",
-  USER: "secondary",
+const ROLE_CONFIG: Record<Role, { variant: "default" | "secondary"; icon: typeof ShieldCheck }> = {
+  ADMIN: { variant: "default", icon: ShieldCheck },
+  USER: { variant: "secondary", icon: User },
 };
 
 export function MembersTable({
@@ -153,11 +153,15 @@ export function MembersTable({
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      {member.roles.map((role) => (
-                        <Badge key={role} variant={ROLE_VARIANT[role]}>
-                          {t(`members.roleLabels.${role}`)}
-                        </Badge>
-                      ))}
+                      {member.roles.map((role) => {
+                        const Icon = ROLE_CONFIG[role].icon;
+                        return (
+                          <Badge key={role} variant={ROLE_CONFIG[role].variant}>
+                            <Icon className="mr-1 h-3 w-3" />
+                            {t(`members.roleLabels.${role}`)}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </TableCell>
                   <TableCell>

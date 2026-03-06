@@ -85,7 +85,23 @@
     "lastRequests": "Vos 10 dernières demandes",
     "noRequestsYet": "Pas encore de demande. Rendez-vous sur la page Demander pour commander votre premier maté !",
     "served": "Servi",
-    "requested": "Demandé"
+    "requested": "Demandé",
+    "cancelled": "Annulé",
+    "takeCan": "Prendre une canette",
+    "takeCanConfirmTitle": "Prendre une canette ?",
+    "takeCanConfirmDescription": "Cette canette sera directement facturée sur votre compte.",
+    "canTaken": "Canette prise ! Bonne dégustation !",
+    "cancelConsumption": "Annuler",
+    "cancelConsumptionTitle": "Annuler cette consommation ?",
+    "cancelConsumptionDescription": "La consommation sera annulée, le paiement inversé et le maté remis en stock. L'historique sera conservé.",
+    "consumptionCancelled": "Consommation annulée — stock et facturation corrigés",
+    "todayConsumptions": "Consommations du jour",
+    "noConsumptionsToday": "Aucune consommation aujourd'hui.",
+    "selfServe": "Libre-service",
+    "dailyRequest": "Demande du jour",
+    "stockLevel": "Niveau de stock",
+    "stockLow": "Le stock est bas !",
+    "stockOk": "canettes disponibles"
   },
   "request": {
     "mateOfTheDay": "Maté du jour",
@@ -305,7 +321,10 @@
     "markAsPaid": "Marquer comme payé",
     "confirmReceived": "Confirmer la réception",
     "paymentsCompleted": "{paid}/{total} paiements complétés",
-    "exportPdf": "Exporter PDF"
+    "exportPdf": "Exporter PDF",
+    "consumptionHistory": "Historique des consommations",
+    "consumptionHistoryDescription": "Toutes vos consommations de maté. Vous pouvez annuler une erreur.",
+    "noConsumptions": "Aucune consommation enregistrée."
   },
   "members": {
     "title": "Membres",
@@ -333,6 +352,27 @@
       "USER": "Utilisateur"
     }
   },
+  "joinRequest": {
+    "title": "Rejoindre {office}",
+    "description": "Vous n'êtes pas membre de ce bureau. Envoyez une demande pour rejoindre et un admin l'examinera.",
+    "requestToJoin": "Demander à rejoindre",
+    "requesting": "Envoi de la demande...",
+    "pendingTitle": "Demande en attente",
+    "pendingDescription": "Votre demande pour rejoindre {office} a été envoyée. Un admin l'examinera prochainement.",
+    "rejectedTitle": "Demande refusée",
+    "rejectedDescription": "Votre demande pour rejoindre {office} a été refusée. Vous pouvez soumettre une nouvelle demande.",
+    "requestAgain": "Redemander",
+    "requestSent": "Demande d'adhésion envoyée !",
+    "goHome": "Retour à l'accueil",
+    "pendingRequests": "Demandes en attente",
+    "pendingRequestsDescription": "{count} demande{count, plural, one {} other {s}} d'adhésion en attente",
+    "noPendingRequests": "Aucune demande d'adhésion en attente.",
+    "approve": "Approuver",
+    "reject": "Refuser",
+    "approved": "Demande approuvée",
+    "rejected": "Demande refusée",
+    "requestedAt": "Demandé le {date}"
+  },
   "office": {
     "createOffice": "Créer un bureau",
     "createTitle": "Créer un nouveau bureau",
@@ -355,6 +395,9 @@
     "requestNotFound": "Demande introuvable.",
     "notYourRequest": "Ce n'est pas votre demande.",
     "cannotCancelServed": "Impossible d'annuler une demande déjà servie.",
+    "consumptionNotFound": "Consommation introuvable.",
+    "notYourConsumption": "Ce n'est pas votre consommation.",
+    "alreadyCancelled": "Cette consommation a déjà été annulée.",
     "alreadyServed": "Déjà servi.",
     "notYetServed": "Pas encore servi.",
     "noPendingRequests": "Aucune demande en attente.",
@@ -390,6 +433,9 @@
     "cannotRemoveLastAdmin": "Impossible de retirer le dernier admin de ce bureau",
     "userNotFound": "Aucun utilisateur trouvé avec cette adresse email",
     "alreadyMember": "Cet utilisateur est déjà membre de ce bureau",
+    "joinRequestAlreadyPending": "Vous avez déjà une demande en attente pour rejoindre ce bureau",
+    "joinRequestNotFound": "Demande d'adhésion introuvable",
+    "joinRequestAlreadyHandled": "Cette demande d'adhésion a déjà été traitée",
     "invalidEmail": "Adresse email invalide",
     "nameRequired": "Le nom est requis",
     "invalidUrl": "URL invalide",
@@ -400,6 +446,13 @@
     "notificationsSent": "{count} notification(s) envoyée(s) : {sessions}",
     "notificationErrors": "{count} erreur(s) : {errors}",
     "periodCreated": "Période {month}/{year} créée — {lines} ligne(s) de remboursement."
+  },
+  "pagination": {
+    "showing": "{from}–{to} sur {total}",
+    "pageOf": "{current} / {total}",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "morePages": "Plus de pages"
   },
   "pdf": {
     "settlementStatement": "Relevé de règlement",

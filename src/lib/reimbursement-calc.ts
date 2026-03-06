@@ -57,25 +57,52 @@ export async function calculateReimbursements(
   startDate: Date,
   endDate: Date,
 ): Promise<ReimbursementResult> {
-  // 1. Consumption in this period, grouped by user
+  // 1. Active consumption in this period, grouped by user
   const consumptionByUser = await prisma.consumptionEntry.groupBy({
     by: ["userId"],
     where: {
       officeId,
       date: { gte: startDate, lte: endDate },
+      cancelledAt: null,
     },
     _sum: { qty: true },
   });
 
-  const userIds = consumptionByUser.map((c) => c.userId);
+  // 1b. Credits: entries from OTHER periods that were cancelled DURING this
+  //     period. These act as negative consumption (credit notes).
+  //     An entry cancelled in its own period is already excluded by (1).
+  const cancelCredits = await prisma.consumptionEntry.groupBy({
+    by: ["userId"],
+    where: {
+      officeId,
+      cancelledAt: { not: null, gte: startDate, lte: endDate },
+      date: { not: { gte: startDate, lte: endDate } }, // original date outside this period
+    },
+    _sum: { qty: true },
+  });
+
+  // Merge consumption and credits into a single map
+  const qtyMap = new Map<string, number>();
+  for (const c of consumptionByUser) {
+    qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) + (c._sum.qty ?? 0));
+  }
+  for (const c of cancelCredits) {
+    // Subtract: these were already billed in a past frozen period
+    qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) - (c._sum.qty ?? 0));
+  }
+
+  const allUserIds = [...new Set([
+    ...consumptionByUser.map((c) => c.userId),
+    ...cancelCredits.map((c) => c.userId),
+  ])];
   const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
+    where: { id: { in: allUserIds } },
     select: { id: true, name: true },
   });
   const userMap = new Map(users.map((u) => [u.id, u.name]));
 
-  const totalConsumption = consumptionByUser.reduce(
-    (sum, c) => sum + (c._sum.qty ?? 0),
+  const totalConsumption = [...qtyMap.values()].reduce(
+    (sum, qty) => sum + qty,
     0,
   );
 
@@ -131,14 +158,13 @@ export async function calculateReimbursements(
   // 6. Build shares: each consumer's cost vs their payer credit
   const shares: ConsumptionShare[] = [];
 
-  for (const entry of consumptionByUser) {
-    const qty = entry._sum.qty ?? 0;
+  for (const [userId, qty] of qtyMap) {
     const costShare = Math.round(qty * unitPrice * 100) / 100;
-    const amountPaid = Math.round((paidMap.get(entry.userId) ?? 0) * 100) / 100;
+    const amountPaid = Math.round((paidMap.get(userId) ?? 0) * 100) / 100;
 
     shares.push({
-      userId: entry.userId,
-      userName: userMap.get(entry.userId) ?? "Unknown",
+      userId,
+      userName: userMap.get(userId) ?? "Unknown",
       qty,
       costShare,
       amountPaid,

@@ -85,7 +85,23 @@
     "lastRequests": "Your last 10 daily requests",
     "noRequestsYet": "No requests yet. Head to the Request page to get your first maté!",
     "served": "Served",
-    "requested": "Requested"
+    "requested": "Requested",
+    "cancelled": "Cancelled",
+    "takeCan": "Take a can",
+    "takeCanConfirmTitle": "Take a can?",
+    "takeCanConfirmDescription": "This can will be charged directly to your account.",
+    "canTaken": "Can taken! Enjoy your mate!",
+    "cancelConsumption": "Cancel",
+    "cancelConsumptionTitle": "Cancel this consumption?",
+    "cancelConsumptionDescription": "The consumption will be reversed, the charge undone, and the can added back to stock. The audit trail will be preserved.",
+    "consumptionCancelled": "Consumption cancelled — stock and billing corrected",
+    "todayConsumptions": "Today's consumptions",
+    "noConsumptionsToday": "No consumptions today.",
+    "selfServe": "Self-serve",
+    "dailyRequest": "Daily request",
+    "stockLevel": "Stock level",
+    "stockLow": "Stock is running low!",
+    "stockOk": "cans available"
   },
   "request": {
     "mateOfTheDay": "Maté of the Day",
@@ -305,7 +321,10 @@
     "markAsPaid": "Mark as Paid",
     "confirmReceived": "Confirm Received",
     "paymentsCompleted": "{paid}/{total} payments completed",
-    "exportPdf": "Export PDF"
+    "exportPdf": "Export PDF",
+    "consumptionHistory": "Consumption History",
+    "consumptionHistoryDescription": "All your maté consumptions. You can cancel mistakes.",
+    "noConsumptions": "No consumptions recorded."
   },
   "members": {
     "title": "Members",
@@ -333,6 +352,27 @@
       "USER": "User"
     }
   },
+  "joinRequest": {
+    "title": "Join {office}",
+    "description": "You are not a member of this office. Send a request to join and an admin will review it.",
+    "requestToJoin": "Request to Join",
+    "requesting": "Sending request...",
+    "pendingTitle": "Request Pending",
+    "pendingDescription": "Your request to join {office} has been sent. An admin will review it shortly.",
+    "rejectedTitle": "Request Declined",
+    "rejectedDescription": "Your request to join {office} was declined. You can submit a new request.",
+    "requestAgain": "Request Again",
+    "requestSent": "Join request sent!",
+    "goHome": "Go to home",
+    "pendingRequests": "Pending Requests",
+    "pendingRequestsDescription": "{count} pending join {count, plural, one {request} other {requests}}",
+    "noPendingRequests": "No pending join requests.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approved": "Request approved",
+    "rejected": "Request declined",
+    "requestedAt": "Requested {date}"
+  },
   "office": {
     "createOffice": "Create Office",
     "createTitle": "Create a new office",
@@ -355,6 +395,9 @@
     "requestNotFound": "Request not found.",
     "notYourRequest": "Not your request.",
     "cannotCancelServed": "Cannot cancel a served request.",
+    "consumptionNotFound": "Consumption entry not found.",
+    "notYourConsumption": "This is not your consumption.",
+    "alreadyCancelled": "This consumption has already been cancelled.",
     "alreadyServed": "Already served.",
     "notYetServed": "Not yet served.",
     "noPendingRequests": "No pending requests.",
@@ -390,6 +433,9 @@
     "cannotRemoveLastAdmin": "Cannot remove the last admin of this office",
     "userNotFound": "No user found with this email address",
     "alreadyMember": "This user is already a member of this office",
+    "joinRequestAlreadyPending": "You already have a pending request to join this office",
+    "joinRequestNotFound": "Join request not found",
+    "joinRequestAlreadyHandled": "This join request has already been handled",
     "invalidEmail": "Invalid email address",
     "nameRequired": "Name is required",
     "invalidUrl": "Invalid URL",
@@ -400,6 +446,13 @@
     "notificationsSent": "{count} notification(s) sent: {sessions}",
     "notificationErrors": "{count} error(s): {errors}",
     "periodCreated": "Period {month}/{year} created — {lines} reimbursement line(s)."
+  },
+  "pagination": {
+    "showing": "{from}–{to} of {total}",
+    "pageOf": "{current} / {total}",
+    "previous": "Previous",
+    "next": "Next",
+    "morePages": "More pages"
   },
   "pdf": {
     "settlementStatement": "Settlement Statement",

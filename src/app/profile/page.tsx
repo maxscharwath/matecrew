@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { requireSession, getUserMemberships } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
-import { resolveAvatarUrl } from "@/lib/r2-helpers";
+import { resolveAvatarUrl } from "@/lib/storage";
 import { ProfileForm } from "@/components/profile-form";
 
 export default async function ProfilePage() {
@@ -24,10 +24,10 @@ export default async function ProfilePage() {
   }));
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold">{t("profile.title")}</h1>
-        <p className="text-muted-foreground">{t("profile.subtitle")}</p>
+        <p className="mt-1 text-muted-foreground">{t("profile.subtitle")}</p>
       </div>
       <ProfileForm user={user} avatarUrl={avatarUrl} offices={offices} />
     </div>

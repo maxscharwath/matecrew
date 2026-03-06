@@ -82,7 +82,7 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
   }
 
   return (
-    <form action={handleSubmit} className="space-y-6">
+    <form action={handleSubmit} className="max-w-2xl space-y-6">
       {/* Profile card */}
       <Card>
         <CardContent className="space-y-6 pt-6">

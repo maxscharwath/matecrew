@@ -41,6 +41,12 @@ enum PaymentStatus {
   PAID
 }
 
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
@@ -60,6 +66,7 @@ model User {
 
   // App relations
   memberships        Membership[]
+  joinRequests       JoinRequest[]
   dailyRequests      DailyRequest[]
   consumptionEntries ConsumptionEntry[]
   orderedBatches     PurchaseBatch[]    @relation("OrderedBy")
@@ -122,6 +129,7 @@ model Office {
   updatedAt DateTime @updatedAt
 
   memberships          Membership[]
+  joinRequests         JoinRequest[]
   defaultForUsers      User[]               @relation("DefaultOffice")
   dailyRequests        DailyRequest[]
   stock                Stock?
@@ -139,6 +147,18 @@ model Membership {
   office   Office   @relation(fields: [officeId], references: [id])
   roles    Role[]   @default([USER])
   createdAt DateTime @default(now())
+
+  @@unique([userId, officeId])
+}
+
+model JoinRequest {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  officeId  String
+  office    Office            @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  status    JoinRequestStatus @default(PENDING)
+  createdAt DateTime          @default(now())
 
   @@unique([userId, officeId])
 }
@@ -240,6 +260,7 @@ model ConsumptionEntry {
   source          ConsumptionSource @default(DAILY_REQUEST)
   purchaseBatchId String?
   purchaseBatch   PurchaseBatch?    @relation(fields: [purchaseBatchId], references: [id])
+  cancelledAt     DateTime?
   createdAt       DateTime          @default(now())
 }
 
