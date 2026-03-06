@@ -9,12 +9,21 @@ try {
   // .env.local may not exist in CI/production
 }
 
+/** Ensure connect_timeout is set (Neon cold starts can exceed the default). */
+function appendConnectTimeout(url: string, seconds = 30): string {
+  if (!url) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return url.includes("connect_timeout") ? url : `${url}${sep}connect_timeout=${seconds}`;
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? "",
+    url: appendConnectTimeout(
+      process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? "",
+    ),
   },
 });
