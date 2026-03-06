@@ -1,6 +1,6 @@
 import type { StorageProvider } from "./types";
 
-export type { StorageProvider } from "./types";
+export type { StorageProvider, DownloadResult } from "./types";
 
 function createProvider(): StorageProvider {
   const provider = process.env.STORAGE_PROVIDER ?? "vercel-blob";
@@ -32,11 +32,8 @@ export async function uploadFile(opts: {
   await storage.upload(opts);
 }
 
-export async function getSignedUrl(
-  key: string,
-  expiresIn = 3600
-): Promise<string> {
-  return storage.getSignedUrl(key, expiresIn);
+export async function downloadFile(key: string) {
+  return storage.download(key);
 }
 
 export async function deleteFile(key: string): Promise<void> {

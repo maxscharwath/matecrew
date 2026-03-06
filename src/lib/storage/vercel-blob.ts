@@ -1,5 +1,5 @@
 import { put, del, list, getDownloadUrl } from "@vercel/blob";
-import type { StorageProvider } from "./types";
+import type { DownloadResult, StorageProvider } from "./types";
 
 /** Resolve a storage key to the full Vercel Blob URL. */
 async function resolveUrl(key: string): Promise<string | null> {
@@ -16,10 +16,16 @@ export class VercelBlobProvider implements StorageProvider {
     });
   }
 
-  async getSignedUrl(key: string): Promise<string> {
+  async download(key: string): Promise<DownloadResult> {
     const url = await resolveUrl(key);
     if (!url) throw new Error(`Blob not found: ${key}`);
-    return getDownloadUrl(url);
+    const downloadUrl = getDownloadUrl(url);
+    const res = await fetch(downloadUrl);
+    if (!res.ok || !res.body) throw new Error(`Download failed: ${res.status}`);
+    return {
+      body: res.body,
+      contentType: res.headers.get("content-type") ?? "application/octet-stream",
+    };
   }
 
   async delete(key: string): Promise<void> {

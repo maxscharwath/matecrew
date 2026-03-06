@@ -5,8 +5,7 @@ import {
   HeadObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { StorageProvider } from "./types";
+import type { DownloadResult, StorageProvider } from "./types";
 
 function createClient(): S3Client {
   const isDev = process.env.NODE_ENV === "development";
@@ -47,12 +46,15 @@ export class R2Provider implements StorageProvider {
     );
   }
 
-  async getSignedUrl(key: string, expiresIn = 3600): Promise<string> {
-    return getSignedUrl(
-      this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      { expiresIn }
+  async download(key: string): Promise<DownloadResult> {
+    const res = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key })
     );
+    const stream = res.Body as ReadableStream<Uint8Array>;
+    return {
+      body: stream,
+      contentType: res.ContentType ?? "application/octet-stream",
+    };
   }
 
   async delete(key: string): Promise<void> {
