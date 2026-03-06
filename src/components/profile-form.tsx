@@ -21,6 +21,30 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { updateProfile } from "@/app/profile/actions";
 
+function resizeImage(file: File, maxSize: number, quality: number): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          resolve(new File([blob!], file.name, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        quality,
+      );
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 interface ProfileFormProps {
   readonly user: {
     name: string;
@@ -40,6 +64,7 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
     user.defaultOfficeId ?? offices[0]?.id ?? "",
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resizedFileRef = useRef<File | null>(null);
   const router = useRouter();
   const t = useTranslations();
 
@@ -55,11 +80,16 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
     if (!file) return;
     setRemoveAvatar(false);
     setPreviewUrl(URL.createObjectURL(file));
+    // Resize the image client-side to avoid FUNCTION_PAYLOAD_TOO_LARGE on Vercel
+    resizeImage(file, 512, 0.85).then((resized) => {
+      resizedFileRef.current = resized;
+    });
   }
 
   function handleRemoveAvatar() {
     setRemoveAvatar(true);
     setPreviewUrl(undefined);
+    resizedFileRef.current = null;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -69,10 +99,15 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
     if (removeAvatar) {
       formData.set("removeAvatar", "true");
     }
+    // Replace original file with resized version to avoid payload size limits
+    if (resizedFileRef.current) {
+      formData.set("avatar", resizedFileRef.current);
+    }
     formData.set("defaultOfficeId", selectedDefault);
     startTransition(async () => {
       const result = await updateProfile(formData);
       if (result.success) {
+        resizedFileRef.current = null;
         toast.success(t("profile.profileSaved"));
         router.refresh();
       } else {
