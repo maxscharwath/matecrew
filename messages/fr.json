@@ -212,8 +212,8 @@
     "generalDescription": "Mettez à jour la configuration de votre bureau et l'intégration Slack.",
     "name": "Nom",
     "timezone": "Fuseau horaire",
-    "slackWebhookUrl": "URL du Webhook Slack",
-    "slackWebhookPlaceholder": "https://hooks.slack.com/services/...",
+    "slackChannelId": "ID du canal Slack",
+    "slackChannelIdPlaceholder": "C01234ABCDE",
     "slackChannelLabel": "Libellé du canal Slack",
     "slackChannelPlaceholder": "#maté-lausanne",
     "lowStockThreshold": "Seuil de stock bas",
@@ -408,8 +408,8 @@
     "notYetServed": "Pas encore servi.",
     "noPendingRequests": "Aucune demande en attente.",
     "officeNotFound": "Bureau introuvable.",
-    "noSlackWebhook": "Aucune URL de webhook Slack configurée.",
-    "slackFailed": "Le webhook Slack a échoué. Vérifiez l'URL.",
+    "noSlackChannel": "Aucun ID de canal Slack configuré.",
+    "slackFailed": "L'envoi Slack a échoué. Vérifiez le token et l'ID du canal.",
     "officeNameExists": "Un bureau avec ce nom existe déjà.",
     "periodNotFound": "Période introuvable.",
     "noActivityData": "Aucune donnée de consommation ou d'achat trouvée.",
@@ -429,7 +429,7 @@
     "sessionOverlap": "Chevauchement avec la session {label} {start}–{end}.",
     "noSessionOnDay": "Aucune session le {day}.",
     "cronUnknown": "Tâche cron inconnue.",
-    "noSlackWebhookConfigured": "Aucun webhook Slack configuré.",
+    "noSlackChannelConfigured": "Aucun ID de canal Slack configuré.",
     "noSessionsToNotify": "Aucune session à notifier (déjà envoyées ou aucune session aujourd'hui).",
     "periodAlreadyExists": "La période {month}/{year} existe déjà.",
     "noConsumptionForPeriod": "Aucune consommation pour {month}/{year}.",
@@ -536,7 +536,7 @@
     "iWantMate": "Je veux un maté !",
     "lowStock": ":warning: *Stock bas — {office}*\n{qty} canettes restantes (seuil: {threshold})",
     "lowStockFallback": "Stock bas: {qty} canettes ({office})",
-    "testMessage": "*Test de MateCrew*\nLe webhook pour *{office}* fonctionne !",
-    "testFallback": "Test du webhook pour {office}"
+    "testMessage": "*Test de MateCrew*\nL'intégration Slack pour *{office}* fonctionne !",
+    "testFallback": "Message de test pour {office}"
   }
 }

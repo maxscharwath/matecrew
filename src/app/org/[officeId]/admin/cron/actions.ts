@@ -33,11 +33,11 @@ async function triggerSessionNotifications(officeId: string): Promise<TriggerRes
 
   const office = await prisma.office.findUnique({
     where: { id: officeId },
-    select: { slackWebhookUrl: true },
+    select: { slackChannelId: true },
   });
 
-  if (!office?.slackWebhookUrl) {
-    return { success: false, error: t('errors.noSlackWebhookConfigured') };
+  if (!office?.slackChannelId) {
+    return { success: false, error: t('errors.noSlackChannelConfigured') };
   }
 
   const results = await sendSessionNotifications({

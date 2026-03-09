@@ -121,7 +121,7 @@ model Office {
   name              String  @unique
   timezone          String  @default("Europe/Zurich")
   locale            String  @default("fr")
-  slackWebhookUrl   String?
+  slackChannelId    String?
   slackChannelLabel String?
   lowStockThreshold Int     @default(30)
 

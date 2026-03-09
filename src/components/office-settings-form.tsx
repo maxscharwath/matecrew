@@ -26,7 +26,7 @@ interface Office {
   id: string;
   name: string;
   timezone: string;
-  slackWebhookUrl: string | null;
+  slackChannelId: string | null;
   slackChannelLabel: string | null;
   lowStockThreshold: number;
 }
@@ -100,14 +100,13 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="slackWebhookUrl">{t('settings.slackWebhookUrl')}</Label>
+            <Label htmlFor="slackChannelId">{t('settings.slackChannelId')}</Label>
             <div className="flex gap-2">
               <Input
-                id="slackWebhookUrl"
-                name="slackWebhookUrl"
-                type="url"
-                defaultValue={office.slackWebhookUrl ?? ""}
-                placeholder={t('settings.slackWebhookPlaceholder')}
+                id="slackChannelId"
+                name="slackChannelId"
+                defaultValue={office.slackChannelId ?? ""}
+                placeholder={t('settings.slackChannelIdPlaceholder')}
                 className="flex-1"
               />
               <Button

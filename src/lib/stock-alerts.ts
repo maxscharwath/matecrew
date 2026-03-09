@@ -14,7 +14,7 @@ export async function checkAndAlertLowStock(
   if (!stock) return;
 
   const { office } = stock;
-  if (!office.slackWebhookUrl) return;
+  if (!office.slackChannelId) return;
 
   if (stock.currentQty <= office.lowStockThreshold) {
     // Check cooldown — don't spam
@@ -32,7 +32,7 @@ export async function checkAndAlertLowStock(
       office.locale,
     );
 
-    await sendSlackMessage(office.slackWebhookUrl, blocks, fallback);
+    await sendSlackMessage(office.slackChannelId, blocks, fallback);
 
     await prisma.stock.update({
       where: { officeId },

@@ -212,8 +212,8 @@
     "generalDescription": "Update your office configuration and Slack integration.",
     "name": "Name",
     "timezone": "Timezone",
-    "slackWebhookUrl": "Slack Webhook URL",
-    "slackWebhookPlaceholder": "https://hooks.slack.com/services/...",
+    "slackChannelId": "Slack Channel ID",
+    "slackChannelIdPlaceholder": "C01234ABCDE",
     "slackChannelLabel": "Slack Channel Label",
     "slackChannelPlaceholder": "#maté-lausanne",
     "lowStockThreshold": "Low Stock Threshold",
@@ -408,8 +408,8 @@
     "notYetServed": "Not yet served.",
     "noPendingRequests": "No pending requests.",
     "officeNotFound": "Office not found.",
-    "noSlackWebhook": "No Slack webhook URL configured.",
-    "slackFailed": "Slack webhook failed. Check the URL.",
+    "noSlackChannel": "No Slack channel ID configured.",
+    "slackFailed": "Slack message failed. Check the bot token and channel ID.",
     "officeNameExists": "An office with this name already exists.",
     "periodNotFound": "Period not found.",
     "noActivityData": "No consumption or purchase data found.",
@@ -429,7 +429,7 @@
     "sessionOverlap": "Overlap with session {label} {start}–{end}.",
     "noSessionOnDay": "No sessions on {day}.",
     "cronUnknown": "Unknown cron job.",
-    "noSlackWebhookConfigured": "No Slack webhook configured.",
+    "noSlackChannelConfigured": "No Slack channel ID configured.",
     "noSessionsToNotify": "No sessions to notify (already sent or no sessions today).",
     "periodAlreadyExists": "Period {month}/{year} already exists.",
     "noConsumptionForPeriod": "No consumption for {month}/{year}.",
@@ -536,7 +536,7 @@
     "iWantMate": "I want a maté!",
     "lowStock": ":warning: *Low stock — {office}*\n{qty} cans remaining (threshold: {threshold})",
     "lowStockFallback": "Low stock: {qty} cans ({office})",
-    "testMessage": "*Test from MateCrew*\nWebhook for *{office}* is working!",
-    "testFallback": "Test webhook for {office}"
+    "testMessage": "*Test from MateCrew*\nSlack integration for *{office}* is working!",
+    "testFallback": "Test message for {office}"
   }
 }

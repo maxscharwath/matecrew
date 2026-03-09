@@ -22,10 +22,10 @@ export async function sendSessionNotifications(options?: {
 }): Promise<NotificationResult[]> {
   const offices = await prisma.office.findMany({
     where: {
-      slackWebhookUrl: { not: null },
+      slackChannelId: { not: null },
       ...(options?.officeId ? { id: options.officeId } : {}),
     },
-    select: { id: true, name: true, slackWebhookUrl: true, timezone: true, locale: true },
+    select: { id: true, name: true, slackChannelId: true, timezone: true, locale: true },
   });
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -64,7 +64,7 @@ export async function sendSessionNotifications(options?: {
           appUrl,
           office.locale,
         );
-        await sendSlackMessage(office.slackWebhookUrl!, blocks, fallback);
+        await sendSlackMessage(office.slackChannelId!, blocks, fallback);
 
         await prisma.mateSession.update({
           where: { id: session.id },

@@ -21,7 +21,7 @@ export async function updateOffice(
   const OfficeSchema = z.object({
     name: z.string().min(1, t('errors.nameRequired')).max(100),
     timezone: z.string().min(1).default("Europe/Zurich"),
-    slackWebhookUrl: z.string().url(t('errors.invalidUrl')).optional().or(z.literal("")),
+    slackChannelId: z.string().max(100).optional().or(z.literal("")),
     slackChannelLabel: z.string().max(100).optional().or(z.literal("")),
     lowStockThreshold: z.coerce.number().int().min(0).default(30),
   });
@@ -29,7 +29,7 @@ export async function updateOffice(
   const parsed = OfficeSchema.safeParse({
     name: formData.get("name"),
     timezone: formData.get("timezone") || "Europe/Zurich",
-    slackWebhookUrl: formData.get("slackWebhookUrl"),
+    slackChannelId: formData.get("slackChannelId"),
     slackChannelLabel: formData.get("slackChannelLabel"),
     lowStockThreshold: formData.get("lowStockThreshold") ?? 30,
   });
@@ -46,7 +46,7 @@ export async function updateOffice(
       data: {
         name: data.name,
         timezone: data.timezone,
-        slackWebhookUrl: data.slackWebhookUrl || null,
+        slackChannelId: data.slackChannelId || null,
         slackChannelLabel: data.slackChannelLabel || null,
         lowStockThreshold: data.lowStockThreshold,
       },
@@ -75,13 +75,13 @@ export async function testSlackWebhook(officeId: string): Promise<ActionResult> 
     return { success: false, error: t('errors.officeNotFound') };
   }
 
-  if (!office.slackWebhookUrl) {
-    return { success: false, error: t('errors.noSlackWebhook') };
+  if (!office.slackChannelId) {
+    return { success: false, error: t('errors.noSlackChannel') };
   }
 
   try {
     const { blocks, fallback } = await buildTestMessage(office.name, office.locale);
-    await sendSlackMessage(office.slackWebhookUrl, blocks, fallback);
+    await sendSlackMessage(office.slackChannelId, blocks, fallback);
   } catch {
     return { success: false, error: t('errors.slackFailed') };
   }

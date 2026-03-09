@@ -9,7 +9,7 @@ Mate consumption tracking web app for offices. Track daily requests, manage stoc
 - **Database**: PostgreSQL (Docker local / Neon production) + Prisma 7
 - **UI**: Tailwind CSS 4 + shadcn/ui + Recharts
 - **Storage**: Vercel Blob (default) or Cloudflare R2 (configurable via `STORAGE_PROVIDER`)
-- **Notifications**: Slack Incoming Webhooks + Upstash QStash (scheduled cron)
+- **Notifications**: Slack Bot API (chat.postMessage) + Upstash QStash (scheduled cron)
 - **PDF**: @react-pdf/renderer for settlement exports
 - **i18n**: next-intl (French / English)
 - **Runtime**: Bun
@@ -127,6 +127,21 @@ To enable, register an app in [Azure Entra ID](https://entra.microsoft.com):
 2. Certificates & secrets > New client secret
 3. Copy Client ID + Secret into env vars
 
+### Slack Bot
+
+| Variable | Description | Default |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) | Required |
+| `SLACK_BOT_USERNAME` | Override bot display name in messages | `MateCrew` |
+| `SLACK_BOT_ICON_URL` | Override bot avatar URL in messages | |
+
+To set up:
+1. Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps)
+2. Go to **OAuth & Permissions**, add the `chat:write` bot scope
+3. Install to workspace, copy the Bot User OAuth Token (`xoxb-...`)
+4. Invite the bot to each office's Slack channel
+5. In admin settings, enter each channel's ID (right-click channel > "Copy channel ID")
+
 ### Cron / QStash
 
 | Variable | Description | Default |
@@ -195,7 +210,7 @@ src/
     auth-utils.ts                    # requireSession, requireRoles helpers
     prisma.ts                        # Prisma client singleton
     storage/                         # Pluggable storage (Vercel Blob / R2)
-    slack.ts                         # Slack webhook helper
+    slack.ts                         # Slack Bot API messaging
     stock-alerts.ts                  # Low stock Slack alerts
     reimbursement-calc.ts            # Cost sharing + settlement algorithm
     pdf-export.tsx                   # React-PDF settlement export
@@ -235,7 +250,7 @@ prisma/
 
 ### For Admins
 - **Member management**: Approve/reject join requests, add members, manage roles
-- **Office settings**: Configure Slack webhook, timezone, locale, low stock threshold
+- **Office settings**: Configure Slack channel ID, timezone, locale, low stock threshold
 - **Schedule editor**: Configure mate sessions per day of week with start/cutoff times
 - **Stock management**: Adjust stock manually, view 30-day chart and audit trail
 - **Purchases**: Record bulk purchases (ORDERED -> DELIVERED workflow), upload invoices
@@ -325,11 +340,11 @@ Roles are per-office (via Membership):
 
 ## Slack Integration
 
-Each office can have a Slack webhook configured. Used for:
+Each office can have a Slack channel ID configured. Messages are sent via a shared Slack Bot App using `chat.postMessage`. Used for:
 
 1. **Daily request message**: Posted at the configured session time via QStash/Cron, with a button linking to the request page
 2. **Low stock alert**: Sent when stock drops below the configured threshold (once per 24h)
-3. **Test message**: Sendable from admin settings to verify webhook works
+3. **Test message**: Sendable from admin settings to verify integration works
 
 ### Cron Setup
 
@@ -360,5 +375,7 @@ Required env vars for production:
 - `BLOB_READ_WRITE_TOKEN` (Vercel Blob) or R2 credentials
 - `CRON_SECRET`
 - `QSTASH_TOKEN` / `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY`
+- `SLACK_BOT_TOKEN`
+- Optionally: `SLACK_BOT_USERNAME` / `SLACK_BOT_ICON_URL`
 - Optionally: `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID`
 - Optionally: `ALLOWED_EMAIL_DOMAINS`

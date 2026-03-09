@@ -16,18 +16,37 @@ async function getTranslator(locale: string) {
 }
 
 export async function sendSlackMessage(
-  webhookUrl: string,
+  channelId: string,
   blocks: SlackBlock[],
   text: string,
 ) {
-  const response = await fetch(webhookUrl, {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) {
+    throw new Error("SLACK_BOT_TOKEN is not configured");
+  }
+
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, blocks }),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      text,
+      blocks,
+      ...(process.env.SLACK_BOT_USERNAME && { username: process.env.SLACK_BOT_USERNAME }),
+      ...(process.env.SLACK_BOT_ICON_URL && { icon_url: process.env.SLACK_BOT_ICON_URL }),
+    }),
   });
 
   if (!response.ok) {
-    throw new Error(`Slack webhook failed: ${response.status}`);
+    throw new Error(`Slack API request failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!data.ok) {
+    throw new Error(`Slack API error: ${data.error}`);
   }
 }
 
