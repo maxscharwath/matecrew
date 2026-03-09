@@ -50,6 +50,7 @@
     "settings": "Paramètres",
     "stock": "Stock",
     "purchases": "Achats",
+    "consumption": "Consommation",
     "settlements": "Règlements",
     "members": "Membres",
     "switchOffice": "Changer de bureau"
@@ -504,6 +505,29 @@
     "saving": "Enregistrement...",
     "saveChanges": "Enregistrer les modifications",
     "profileSaved": "Profil enregistré"
+  },
+  "bulkConsumption": {
+    "title": "Consommation",
+    "subtitle": "Ajouter des consommations de maté en masse. Idéal pour migrer des données depuis un autre système.",
+    "formTitle": "Ajout en masse",
+    "formDescription": "Ajoutez des consommations pour n'importe quel membre. Les entrées apparaîtront comme impayées dans la période de facturation en cours.",
+    "addRow": "Ajouter une ligne",
+    "fillAllMembers": "Remplir tous les membres",
+    "member": "Membre",
+    "date": "Date",
+    "qty": "Qté",
+    "createdAt": "Créé le",
+    "submit": "Créer les entrées",
+    "noRows": "Ajoutez au moins une ligne avec un membre sélectionné.",
+    "noRowsHint": "Cliquez sur « Ajouter une ligne » ou « Remplir tous les membres » pour commencer.",
+    "invalidDate": "Format de date invalide. Utilisez AAAA-MM-JJ.",
+    "summary": "{rows} ligne(s) valide(s) — {total} maté(s) au total",
+    "created": "{count} entrée(s) de consommation créée(s)",
+    "stock": "Stock",
+    "deductStock": "Déduire du stock",
+    "deductStockHint": "Basculez l'interrupteur principal pour définir toutes les lignes, ou ajustez par ligne dans le tableau.",
+    "recentEntries": "Entrées manuelles récentes",
+    "noEntries": "Aucune entrée de consommation manuelle."
   },
   "slack": {
     "newMessage": "Nouveau message de MateCrew",

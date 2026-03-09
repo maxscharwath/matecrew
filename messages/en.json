@@ -50,6 +50,7 @@
     "settings": "Settings",
     "stock": "Stock",
     "purchases": "Purchases",
+    "consumption": "Consumption",
     "settlements": "Settlements",
     "members": "Members",
     "switchOffice": "Switch office"
@@ -504,6 +505,29 @@
     "saving": "Saving...",
     "saveChanges": "Save Changes",
     "profileSaved": "Profile saved"
+  },
+  "bulkConsumption": {
+    "title": "Consumption",
+    "subtitle": "Bulk-add maté consumption entries. Ideal for migrating data from another system.",
+    "formTitle": "Bulk Add Consumption",
+    "formDescription": "Add consumption entries for any member. Entries will appear as unpaid in the current billing period.",
+    "addRow": "Add row",
+    "fillAllMembers": "Fill all members",
+    "member": "Member",
+    "date": "Date",
+    "qty": "Qty",
+    "createdAt": "Created",
+    "submit": "Create entries",
+    "noRows": "Add at least one row with a member selected.",
+    "noRowsHint": "Click \"Add row\" or \"Fill all members\" to start.",
+    "invalidDate": "Invalid date format. Use YYYY-MM-DD.",
+    "summary": "{rows} valid row(s) — {total} maté(s) total",
+    "created": "{count} consumption entry/entries created",
+    "stock": "Stock",
+    "deductStock": "Deduct from stock",
+    "deductStockHint": "Toggle the master switch to set all rows at once, or adjust per row in the table.",
+    "recentEntries": "Recent Manual Entries",
+    "noEntries": "No manual consumption entries yet."
   },
   "slack": {
     "newMessage": "New message from MateCrew",

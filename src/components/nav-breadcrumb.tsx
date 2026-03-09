@@ -18,6 +18,7 @@ const LABELS: Record<string, string> = {
   schedule: "nav.schedule",
   cron: "nav.cronJobs",
   stock: "nav.stock",
+  consumption: "nav.consumption",
   purchases: "nav.purchases",
   settings: "nav.settings",
   profile: "profile.title",

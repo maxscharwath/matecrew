@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Check,
   ChevronsUpDown,
+  ClipboardList,
   CupSoda,
   HandCoins,
   LogOut,
@@ -91,6 +92,7 @@ export function AppSidebar({
     { path: "/admin/schedule", label: t("nav.schedule"), icon: CalendarDays },
     { path: "/admin/cron", label: t("nav.cronJobs"), icon: Timer },
     { path: "/admin/stock", label: t("nav.stock"), icon: Package },
+    { path: "/admin/consumption", label: t("nav.consumption"), icon: ClipboardList },
     { path: "/admin/purchases", label: t("nav.purchases"), icon: Receipt },
     {
       path: "/admin/reimbursements",
