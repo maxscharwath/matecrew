@@ -78,7 +78,12 @@ export function SignInForm({ oauthProviders, allowedDomain, redirectTo }: { oaut
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">{t('auth.password')}</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">{t('auth.password')}</Label>
+                <Link href="/forgot-password" className="text-sm text-muted-foreground underline">
+                  {t('auth.forgotPassword')}
+                </Link>
+              </div>
               <Input
                 id="password"
                 name="password"

@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { prisma } from "@/lib/prisma";
+import { sendPasswordResetEmail, sendEmailVerificationEmail } from "@/lib/email";
 
 const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
   .split(",")
@@ -36,6 +37,12 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     autoSignIn: true,
+    sendResetPassword: async ({ user, url }) => {
+      await sendPasswordResetEmail(user.email, url);
+    },
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendEmailVerificationEmail(user.email, url);
+    },
   },
 
   session: {

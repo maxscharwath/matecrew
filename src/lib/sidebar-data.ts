@@ -35,5 +35,7 @@ export async function getSidebarData() {
     })),
     avatarUrl,
     userLocale: user?.locale ?? "fr",
+    emailVerified: session.user.emailVerified,
+    userEmail: session.user.email,
   };
 }

@@ -60,6 +60,8 @@ export async function MembershipGate({ children, officeId }: Props) {
         officeName: m.office.name,
       }))}
       avatarUrl={avatarUrl}
+      emailVerified={session.user.emailVerified}
+      userEmail={session.user.email}
     >
       <OfficeCookie officeId={officeId} />
       <LocaleSync userLocale={membership.user.locale ?? "fr"} />
