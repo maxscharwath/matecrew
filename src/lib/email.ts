@@ -3,7 +3,7 @@ import { passwordResetTemplate, emailVerificationTemplate } from "@/lib/email-te
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const from = process.env.EMAIL_FROM ?? "MateCrew <noreply@mail.stmx.ch>";
+const from = process.env.EMAIL_FROM ?? "MateCrew <matecrew@mail.stmx.ch>";
 
 export async function sendEmailVerificationEmail(to: string, verifyUrl: string) {
   await resend.emails.send({
