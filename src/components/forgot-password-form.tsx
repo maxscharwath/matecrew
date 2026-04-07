@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { forgetPassword } from "@/lib/auth-client";
+import { requestPasswordReset } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,7 @@ export function ForgotPasswordForm() {
     const formData = new FormData(e.currentTarget);
     const email = formData.get("email") as string;
 
-    await forgetPassword({
+    await requestPasswordReset({
       email,
       redirectTo: "/reset-password",
     });
