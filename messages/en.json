@@ -273,7 +273,25 @@
     },
     "chartTitle": "Stock Level — {office}",
     "chartSubtitle": "Last 30 days",
-    "chartLabel": "Stock"
+    "chartLabel": "Stock",
+    "prediction": {
+      "title": "Reorder Forecast",
+      "subtitle": "Estimated date stock will reach the reorder threshold.",
+      "estimatedReorderDate": "Estimated reorder date",
+      "inDays": "in {days} days",
+      "avgDailyConsumption": "Avg. daily consumption",
+      "cansPerDay": "cans / day",
+      "reorderThreshold": "Reorder threshold",
+      "cans": "cans",
+      "notEnoughData": "Not enough consumption data yet — check back after a few days of activity.",
+      "alreadyBelowThreshold": "Stock is already at or below the reorder threshold.",
+      "confidence": {
+        "high": "High confidence",
+        "medium": "Medium confidence",
+        "low": "Low confidence",
+        "insufficient": "Insufficient data"
+      }
+    }
   },
   "purchases": {
     "title": "Purchases",

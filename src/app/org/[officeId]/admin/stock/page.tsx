@@ -6,6 +6,8 @@ import { getTranslations } from "next-intl/server";
 import {
   StockChartSection,
   StockChartFallback,
+  StockPredictionSection,
+  StockPredictionFallback,
   AuditLogSection,
   AuditLogFallback,
 } from "./_sections";
@@ -44,6 +46,14 @@ export default async function StockPage({ params, searchParams }: Props) {
         currentQty={currentQty}
         lowStockThreshold={office.lowStockThreshold}
       />
+
+      <Suspense fallback={<StockPredictionFallback />}>
+        <StockPredictionSection
+          officeId={officeId}
+          currentQty={currentQty}
+          lowStockThreshold={office.lowStockThreshold}
+        />
+      </Suspense>
 
       <Suspense fallback={<StockChartFallback />}>
         <StockChartSection

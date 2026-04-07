@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { StockChart } from "@/components/stock-chart";
 import { DataPagination } from "@/components/pagination";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -14,10 +14,26 @@ import {
 } from "@/components/ui/table";
 import { toISODateString } from "@/lib/date";
 import { getTranslations, getLocale } from "next-intl/server";
+import { predictReorder, type PredictionConfidence } from "@/lib/stock-prediction";
+import { CalendarClock, TrendingDown, AlertTriangle, Info } from "lucide-react";
 
 const PAGE_SIZE = 20;
 
 // ── Skeleton fallbacks ───────────────────────────────────
+
+export function StockPredictionFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-4 w-72 mt-1" />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-16 w-full rounded-md" />
+      </CardContent>
+    </Card>
+  );
+}
 
 export function StockChartFallback() {
   return (
@@ -48,6 +64,112 @@ export function AuditLogFallback() {
 }
 
 // ── Async sections ───────────────────────────────────────
+
+interface PredictionProps {
+  readonly officeId: string;
+  readonly currentQty: number;
+  readonly lowStockThreshold: number;
+}
+
+const CONFIDENCE_STYLE: Record<PredictionConfidence, { className: string; variant: "outline" | "secondary" | "destructive" }> = {
+  high:         { className: "text-green-600 dark:text-green-400",  variant: "outline" },
+  medium:       { className: "text-yellow-600 dark:text-yellow-400", variant: "outline" },
+  low:          { className: "text-orange-600 dark:text-orange-400", variant: "outline" },
+  insufficient: { className: "text-muted-foreground",                variant: "secondary" },
+};
+
+export async function StockPredictionSection({ officeId, currentQty, lowStockThreshold }: PredictionProps) {
+  const t = await getTranslations();
+  const locale = await getLocale();
+
+  const sixtyDaysAgo = new Date();
+  sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
+  const movements = await prisma.stockMovement.findMany({
+    where: { officeId, createdAt: { gte: sixtyDaysAgo } },
+    orderBy: { createdAt: "asc" },
+    select: { delta: true, reason: true, createdAt: true },
+  });
+
+  const prediction = predictReorder(currentQty, lowStockThreshold, movements);
+  const { className: confidenceClass, variant: confidenceVariant } = CONFIDENCE_STYLE[prediction.confidence];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarClock className="h-4 w-4" />
+            {t("stock.prediction.title")}
+          </CardTitle>
+          <CardDescription>{t("stock.prediction.subtitle")}</CardDescription>
+        </div>
+        <Badge variant={confidenceVariant} className={`gap-1 ${confidenceClass}`}>
+          {t(`stock.prediction.confidence.${prediction.confidence}`)}
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        {prediction.confidence === "insufficient" && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Info className="h-4 w-4 shrink-0" />
+            {t("stock.prediction.notEnoughData")}
+          </div>
+        )}
+        {prediction.confidence !== "insufficient" && prediction.predictedDepletionDate === null && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Info className="h-4 w-4 shrink-0" />
+            {t("stock.prediction.alreadyBelowThreshold")}
+          </div>
+        )}
+        {prediction.confidence !== "insufficient" && prediction.predictedDepletionDate !== null && (
+          <div className="flex flex-wrap gap-6">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                {t("stock.prediction.estimatedReorderDate")}
+              </p>
+              <p className="text-2xl font-bold flex items-center gap-2">
+                {prediction.predictedDepletionDate.toLocaleDateString(locale, {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                  timeZone: "Europe/Zurich",
+                })}
+              </p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {t("stock.prediction.inDays", { days: Math.round(prediction.daysUntilThreshold ?? 0) })}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                {t("stock.prediction.avgDailyConsumption")}
+              </p>
+              <p className="text-2xl font-bold flex items-center gap-2">
+                <TrendingDown className="h-5 w-5 text-muted-foreground" />
+                {prediction.avgDailyConsumption.toFixed(1)}
+              </p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {t("stock.prediction.cansPerDay")}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+                {t("stock.prediction.reorderThreshold")}
+              </p>
+              <p className="text-2xl font-bold flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+                {lowStockThreshold}
+              </p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {t("stock.prediction.cans")}
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 interface ChartProps {
   readonly officeId: string;

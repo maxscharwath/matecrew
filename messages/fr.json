@@ -273,7 +273,25 @@
     },
     "chartTitle": "Niveau de stock — {office}",
     "chartSubtitle": "30 derniers jours",
-    "chartLabel": "Stock"
+    "chartLabel": "Stock",
+    "prediction": {
+      "title": "Prévision de réapprovisionnement",
+      "subtitle": "Date estimée à laquelle le stock atteindra le seuil de réapprovisionnement.",
+      "estimatedReorderDate": "Date estimée de réapprovisionnement",
+      "inDays": "dans {days} jours",
+      "avgDailyConsumption": "Consommation journalière moy.",
+      "cansPerDay": "canettes / jour",
+      "reorderThreshold": "Seuil de réapprovisionnement",
+      "cans": "canettes",
+      "notEnoughData": "Pas encore assez de données — revenez après quelques jours d'activité.",
+      "alreadyBelowThreshold": "Le stock est déjà en dessous du seuil de réapprovisionnement.",
+      "confidence": {
+        "high": "Haute confiance",
+        "medium": "Confiance moyenne",
+        "low": "Faible confiance",
+        "insufficient": "Données insuffisantes"
+      }
+    }
   },
   "purchases": {
     "title": "Achats",
