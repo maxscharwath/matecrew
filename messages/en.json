@@ -369,7 +369,12 @@
     "exportPdf": "Export PDF",
     "consumptionHistory": "Consumption History",
     "consumptionHistoryDescription": "All your maté consumptions. You can cancel mistakes.",
-    "noConsumptions": "No consumptions recorded."
+    "noConsumptions": "No consumptions recorded.",
+    "sync": "Sync",
+    "syncThisPeriod": "Sync this period?",
+    "syncDescription": "Recalculate payments based on current consumption data. Already-paid payments will be preserved, only pending payments will be updated.",
+    "syncPeriod": "Sync Period",
+    "periodSynced": "Period synced successfully"
   },
   "members": {
     "title": "Members",

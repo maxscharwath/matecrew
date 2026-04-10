@@ -369,7 +369,12 @@
     "exportPdf": "Exporter PDF",
     "consumptionHistory": "Historique des consommations",
     "consumptionHistoryDescription": "Toutes vos consommations de maté. Vous pouvez annuler une erreur.",
-    "noConsumptions": "Aucune consommation enregistrée."
+    "noConsumptions": "Aucune consommation enregistrée.",
+    "sync": "Synchroniser",
+    "syncThisPeriod": "Synchroniser cette période ?",
+    "syncDescription": "Recalcule les paiements en fonction des données de consommation actuelles. Les paiements déjà marqués comme payés seront conservés, seuls les paiements en attente seront mis à jour.",
+    "syncPeriod": "Synchroniser",
+    "periodSynced": "Période synchronisée avec succès"
   },
   "members": {
     "title": "Membres",

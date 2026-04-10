@@ -9,6 +9,7 @@ import { generateReimbursementCsv } from "@/lib/csv-export";
 import { generateSettlementPdf } from "@/lib/pdf-export";
 import {
   buildSettlementKey,
+  buildUserSettlementKey,
   fileExists,
   uploadFile,
   internalFileUrl,
@@ -212,4 +213,123 @@ export async function exportPeriodPdf(
   await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
   const url = internalFileUrl(key);
   return { success: true, url };
+}
+
+export async function syncPeriod(
+  officeId: string,
+  periodId: string
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const period = await prisma.reimbursementPeriod.findUnique({
+    where: { id: periodId },
+    include: {
+      lines: true,
+    },
+  });
+
+  if (!period || period.officeId !== officeId) {
+    return { success: false, error: t("errors.periodNotFound") };
+  }
+
+  // Recalculate what the period should look like now
+  const result = await calculateReimbursements(
+    officeId,
+    period.startDate,
+    period.endDate
+  );
+
+  // Separate existing lines by status
+  const paidLines = period.lines.filter((l) => l.status === "PAID");
+  const pendingLineIds = period.lines
+    .filter((l) => l.status === "PENDING")
+    .map((l) => l.id);
+
+  // Build residual balances: start from the fresh calculation,
+  // then subtract what PAID lines already cover.
+  // netOwed > 0 means user owes money (debtor), < 0 means user is owed (creditor)
+  const balanceMap = new Map<string, number>();
+  for (const share of result.shares) {
+    balanceMap.set(share.userId, share.netOwed);
+  }
+
+  for (const paid of paidLines) {
+    // fromUser paid toUser → reduce fromUser's debt, reduce toUser's credit
+    const fromBal = balanceMap.get(paid.fromUserId) ?? 0;
+    balanceMap.set(paid.fromUserId, fromBal - paid.amount.toNumber());
+
+    const toBal = balanceMap.get(paid.toUserId) ?? 0;
+    balanceMap.set(paid.toUserId, toBal + paid.amount.toNumber());
+  }
+
+  // Generate new payment lines from residual balances
+  const debtors: { userId: string; remaining: number }[] = [];
+  const creditors: { userId: string; remaining: number }[] = [];
+
+  for (const [userId, balance] of balanceMap) {
+    const rounded = Math.round(balance * 100) / 100;
+    if (rounded > 0.01) {
+      debtors.push({ userId, remaining: rounded });
+    } else if (rounded < -0.01) {
+      creditors.push({ userId, remaining: -rounded });
+    }
+  }
+
+  debtors.sort((a, b) => b.remaining - a.remaining);
+  creditors.sort((a, b) => b.remaining - a.remaining);
+
+  const newLines: { fromUserId: string; toUserId: string; amount: number }[] = [];
+  let di = 0;
+  let ci = 0;
+
+  while (di < debtors.length && ci < creditors.length) {
+    const amount = Math.min(debtors[di].remaining, creditors[ci].remaining);
+    if (amount > 0.01) {
+      newLines.push({
+        fromUserId: debtors[di].userId,
+        toUserId: creditors[ci].userId,
+        amount: Math.round(amount * 100) / 100,
+      });
+    }
+    debtors[di].remaining -= amount;
+    creditors[ci].remaining -= amount;
+    if (debtors[di].remaining < 0.01) di++;
+    if (creditors[ci].remaining < 0.01) ci++;
+  }
+
+  // Transaction: delete old PENDING lines, create new ones
+  await prisma.$transaction([
+    prisma.reimbursementLine.deleteMany({
+      where: { id: { in: pendingLineIds } },
+    }),
+    ...newLines.map((l) =>
+      prisma.reimbursementLine.create({
+        data: {
+          periodId,
+          fromUserId: l.fromUserId,
+          toUserId: l.toUserId,
+          amount: l.amount,
+          currency: "CHF",
+        },
+      })
+    ),
+  ]);
+
+  // Purge cached PDFs (they are now stale)
+  const allUserIds = new Set([
+    ...result.shares.map((s) => s.userId),
+    ...paidLines.flatMap((l) => [l.fromUserId, l.toUserId]),
+  ]);
+  const pdfDeletes = [
+    deleteFile(buildSettlementKey(periodId)),
+    ...[...allUserIds].map((uid) =>
+      deleteFile(buildUserSettlementKey(periodId, uid))
+    ),
+  ];
+  await Promise.allSettled(pdfDeletes);
+
+  revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  revalidatePath(`/org/${officeId}/reimbursements`);
+  return { success: true };
 }

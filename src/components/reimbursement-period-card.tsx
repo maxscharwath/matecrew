@@ -15,6 +15,7 @@ import {
   ArrowRightLeft,
   Check,
   Undo2,
+  RefreshCw,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import {
   deletePeriod,
   exportPeriodCsv,
   exportPeriodPdf,
+  syncPeriod,
 } from "@/app/org/[officeId]/admin/reimbursements/actions";
 import {
   markPaymentPaid,
@@ -112,6 +114,7 @@ export function ReimbursementPeriodCard({
   const [isPending, startTransition] = useTransition();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const t = useTranslations();
 
   const paidCount = period.lines.filter((l) => l.status === "PAID").length;
@@ -155,6 +158,18 @@ export function ReimbursementPeriodCard({
         a.href = result.url;
         a.download = `settlement-${period.startDate.slice(0, 7)}.pdf`;
         a.click();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleSync() {
+    startTransition(async () => {
+      const result = await syncPeriod(officeId, period.id);
+      if (result.success) {
+        toast.success(t('reimbursements.periodSynced'));
+        setSyncOpen(false);
       } else {
         toast.error(result.error);
       }
@@ -431,6 +446,15 @@ export function ReimbursementPeriodCard({
                   <FileText className="mr-1 size-4" />
                   PDF
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setSyncOpen(true)}
+                >
+                  <RefreshCw className="mr-1 size-4" />
+                  {t('reimbursements.sync')}
+                </Button>
               </div>
               <Button
                 variant="destructive"
@@ -454,6 +478,16 @@ export function ReimbursementPeriodCard({
         description={t('reimbursements.deleteDescription')}
         confirmLabel={t('reimbursements.deletePeriod')}
         confirmVariant="destructive"
+        isPending={isPending}
+      />
+
+      <ConfirmDialog
+        open={syncOpen}
+        onOpenChange={setSyncOpen}
+        onConfirm={handleSync}
+        title={t('reimbursements.syncThisPeriod')}
+        description={t('reimbursements.syncDescription')}
+        confirmLabel={t('reimbursements.syncPeriod')}
         isPending={isPending}
       />
     </>
