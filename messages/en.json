@@ -173,7 +173,12 @@
     "allServed": "Everyone is served!",
     "allServedToast": "All served!",
     "inProgress": "Processing...",
-    "serveAll": "Serve all ({count})"
+    "serveAll": "Serve all ({count})",
+    "currentSession": "Current session",
+    "previousSession": "Previous session",
+    "nextSession": "Next session",
+    "titlePast": "Preparation",
+    "noRequestsPast": "No requests on this day."
   },
   "schedule": {
     "title": "Schedule",

@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
-import { getTodayDate } from "@/lib/date";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -93,7 +92,6 @@ export async function markUnserved(
   });
 
   const newQty = (stock?.currentQty ?? 0) + 1;
-  const today = getTodayDate();
 
   await prisma.$transaction([
     prisma.dailyRequest.update({
@@ -104,7 +102,7 @@ export async function markUnserved(
       where: {
         officeId,
         userId: request.userId,
-        date: today,
+        date: request.date,
         source: "DAILY_REQUEST",
       },
     }),
@@ -130,13 +128,13 @@ export async function markUnserved(
 export async function markAllServed(
   officeId: string,
   mateSessionId: string | null,
+  date: Date,
 ): Promise<ActionResult> {
   const { membership } = await requireMembership(officeId);
   const t = await getTranslations();
 
-  const today = getTodayDate();
   const pending = await prisma.dailyRequest.findMany({
-    where: { officeId, date: today, status: "REQUESTED", mateSessionId },
+    where: { officeId, date, status: "REQUESTED", mateSessionId },
   });
 
   if (pending.length === 0) {

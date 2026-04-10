@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Check, CheckCheck, CupSoda, Clock } from "lucide-react";
+import { Check, CheckCheck, CupSoda, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,7 +32,7 @@ interface DailyRequest {
   };
 }
 
-interface SessionTab {
+interface SessionInfo {
   id: string;
   label: string | null;
   startTime: string;
@@ -43,8 +44,11 @@ interface RunnerViewProps {
   readonly requests: DailyRequest[];
   readonly date: Date;
   readonly officeId: string;
-  readonly todaySessions: SessionTab[];
-  readonly currentSessionId: string | null;
+  readonly session: SessionInfo | null;
+  readonly isToday: boolean;
+  readonly prevHref: string | null;
+  readonly nextHref: string | null;
+  readonly currentSessionHref: string | null;
 }
 
 function getInitials(name: string): string {
@@ -56,36 +60,67 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-function SessionTabs({
-  sessions,
-  activeId,
-  onSelect,
+function SessionNavigator({
+  date,
+  session,
+  isToday,
+  prevHref,
+  nextHref,
+  currentSessionHref,
 }: {
-  readonly sessions: SessionTab[];
-  readonly activeId: string | null;
-  readonly onSelect: (id: string | null) => void;
+  readonly date: Date;
+  readonly session: SessionInfo | null;
+  readonly isToday: boolean;
+  readonly prevHref: string | null;
+  readonly nextHref: string | null;
+  readonly currentSessionHref: string | null;
 }) {
-  if (sessions.length <= 1) return null;
+  const router = useRouter();
+  const pathname = usePathname();
+  const t = useTranslations("runner");
+
+  const label = session
+    ? `${formatDateDisplay(date)} — ${session.label ?? session.startTime}`
+    : formatDateDisplay(date);
 
   return (
-    <div className="flex gap-1.5 rounded-lg bg-muted p-1">
-      {sessions.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          onClick={() => onSelect(s.id)}
-          className={`flex-1 rounded-md px-3 py-1.5 text-sm transition-colors ${
-            activeId === s.id
-              ? "bg-background font-medium shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+    <div className="flex items-center gap-2">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        disabled={!prevHref}
+        onClick={() => prevHref && router.push(`${pathname}${prevHref}`)}
+        aria-label={t("previousSession")}
+      >
+        <ChevronLeft className="size-4" />
+      </Button>
+
+      <span className="min-w-40 text-center text-sm text-muted-foreground">
+        {label}
+      </span>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        disabled={!nextHref}
+        onClick={() => nextHref && router.push(`${pathname}${nextHref}`)}
+        aria-label={t("nextSession")}
+      >
+        <ChevronRight className="size-4" />
+      </Button>
+
+      {currentSessionHref && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-1 h-7 text-xs"
+          onClick={() => router.push(`${pathname}${currentSessionHref}`)}
         >
-          {s.label ?? s.startTime}
-          <span className="ml-1.5 text-xs opacity-60">
-            {s.startTime}–{s.cutoffTime}
-          </span>
-        </button>
-      ))}
+          {t("currentSession")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -94,26 +129,23 @@ export function RunnerView({
   requests,
   date,
   officeId,
-  todaySessions,
-  currentSessionId,
+  session,
+  isToday,
+  prevHref,
+  nextHref,
+  currentSessionHref,
 }: RunnerViewProps) {
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(currentSessionId);
   const [isPending, startTransition] = useTransition();
   const t = useTranslations();
 
-  const activeSession = todaySessions.find((s) => s.id === selectedSessionId);
-  const filteredRequests = selectedSessionId
-    ? requests.filter((r) => r.mateSessionId === selectedSessionId)
-    : requests;
-
-  const served = filteredRequests.filter((r) => r.status === "SERVED").length;
-  const total = filteredRequests.length;
+  const served = requests.filter((r) => r.status === "SERVED").length;
+  const total = requests.length;
   const pendingCount = total - served;
   const pct = total === 0 ? 0 : Math.round((served / total) * 100);
 
   function handleServeAll() {
     startTransition(async () => {
-      const result = await markAllServed(officeId, selectedSessionId);
+      const result = await markAllServed(officeId, session?.id ?? null, date);
       if (result.success) {
         toast.success(t('runner.allServedToast'));
       } else {
@@ -126,37 +158,39 @@ export function RunnerView({
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">{t('runner.title')}</h1>
-        <p className="text-muted-foreground">{formatDateDisplay(date)}</p>
+        <h1 className="text-2xl font-bold">
+          {isToday ? t('runner.title') : t('runner.titlePast')}
+        </h1>
+        <SessionNavigator
+          date={date}
+          session={session}
+          isToday={isToday}
+          prevHref={prevHref}
+          nextHref={nextHref}
+          currentSessionHref={currentSessionHref}
+        />
       </div>
 
-      {/* Session tabs */}
-      <SessionTabs
-        sessions={todaySessions}
-        activeId={selectedSessionId}
-        onSelect={setSelectedSessionId}
-      />
-
       {/* Session status badge */}
-      {activeSession && (
+      {isToday && session && (
         <div className="flex items-center gap-2">
           <Clock className="size-3.5 text-muted-foreground" />
           <span className="text-xs text-muted-foreground">
-            {activeSession.label ?? t('runner.session')} {activeSession.startTime}–{activeSession.cutoffTime}
+            {session.label ?? t('runner.session')} {session.startTime}–{session.cutoffTime}
           </span>
-          <Badge variant={activeSession.isOpen ? "default" : "secondary"} className="text-[10px]">
-            {activeSession.isOpen ? t('runner.open') : t('runner.closed')}
+          <Badge variant={session.isOpen ? "default" : "secondary"} className="text-[10px]">
+            {session.isOpen ? t('runner.open') : t('runner.closed')}
           </Badge>
         </div>
       )}
 
-      {/* Closed alert */}
-      {activeSession && !activeSession.isOpen && (
+      {/* Closed alert — only show for today */}
+      {isToday && session && !session.isOpen && (
         <Alert>
           <Clock className="h-4 w-4" />
           <AlertTitle>{t('runner.ordersClosed')}</AlertTitle>
           <AlertDescription>
-            {t('runner.ordersClosedDescription', { time: activeSession.cutoffTime })}
+            {t('runner.ordersClosedDescription', { time: session.cutoffTime })}
           </AlertDescription>
         </Alert>
       )}
@@ -169,7 +203,7 @@ export function RunnerView({
               <CupSoda className="h-8 w-8 text-muted-foreground" />
             </div>
             <p className="text-muted-foreground">
-              {t('runner.noRequests')}
+              {isToday ? t('runner.noRequests') : t('runner.noRequestsPast')}
             </p>
           </CardContent>
         </Card>
@@ -194,7 +228,7 @@ export function RunnerView({
 
             {/* Request list */}
             <div className="divide-y">
-              {filteredRequests.map((r) => (
+              {requests.map((r) => (
                 <div
                   key={r.id}
                   className="flex items-center gap-3 py-2.5"
