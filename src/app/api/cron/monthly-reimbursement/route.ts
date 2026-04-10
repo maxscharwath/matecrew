@@ -1,6 +1,32 @@
 import { prisma } from "@/lib/prisma";
 import { verifyQStashSignature } from "@/lib/qstash";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
+import { calculateReimbursements, type ReimbursementResult } from "@/lib/reimbursement-calc";
+import { sendSlackMessage, buildMonthlyBillMessage } from "@/lib/slack";
+
+async function notifySlack(
+  office: { id: string; name: string; slackChannelId: string; locale: string },
+  month: number,
+  year: number,
+  result: ReimbursementResult,
+  appUrl: string,
+) {
+  try {
+    const { blocks, fallback } = await buildMonthlyBillMessage({
+      officeName: office.name,
+      month,
+      year,
+      totalConsumption: result.totalConsumption,
+      totalCost: result.totalCost,
+      consumers: result.shares.length,
+      appUrl,
+      officeId: office.id,
+      locale: office.locale,
+    });
+    await sendSlackMessage(office.slackChannelId, blocks, fallback);
+  } catch {
+    // Best-effort — period was already created
+  }
+}
 
 /**
  * Monthly reimbursement cron — triggered by Upstash QStash on the 1st of each month.
@@ -19,8 +45,10 @@ export async function POST(request: Request) {
   const endDate = new Date(Date.UTC(year, month, 0));
 
   const offices = await prisma.office.findMany({
-    select: { id: true, name: true },
+    select: { id: true, name: true, slackChannelId: true, locale: true },
   });
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   const results: { office: string; created: boolean; error?: string }[] = [];
 
@@ -67,6 +95,10 @@ export async function POST(request: Request) {
       });
 
       results.push({ office: office.name, created: true });
+
+      if (office.slackChannelId) {
+        await notifySlack(office as typeof office & { slackChannelId: string }, month, year, result, appUrl);
+      }
     } catch (e) {
       results.push({
         office: office.name,

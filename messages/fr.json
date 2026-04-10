@@ -570,12 +570,15 @@
   },
   "slack": {
     "newMessage": "Nouveau message de MateCrew",
-    "mateOfTheDay": ":coffee: *Maté du jour — {office}*\n:calendar: {date}\n\nQui veut un maté aujourd'hui ?",
-    "sessionRequest": ":coffee: *Maté{label} — {office}*\n:alarm_clock: Commandes ouvertes jusqu'à {cutoff}\n\nQui veut un maté ?",
+    "mateOfTheDay": "<!here> :coffee: *Maté du jour — {office}*\n:calendar: {date}\n\nQui veut un maté aujourd'hui ?",
+    "sessionRequest": "<!here> :coffee: *Maté{label} — {office}*\n:alarm_clock: Commandes ouvertes jusqu'à {cutoff}\n\nQui veut un maté ?",
     "iWantMate": "Je veux un maté !",
     "lowStock": ":warning: *Stock bas — {office}*\n{qty} canettes restantes (seuil: {threshold})",
     "lowStockFallback": "Stock bas: {qty} canettes ({office})",
     "testMessage": "*Test de MateCrew*\nL'intégration Slack pour *{office}* fonctionne !",
-    "testFallback": "Message de test pour {office}"
+    "testFallback": "Message de test pour {office}",
+    "monthlyBill": "<!here> :receipt: *Facture mensuelle — {office}*\n:calendar: {month}/{year}\n\n:busts_in_silhouette: {consumers} consommateurs · :coffee: {totalQty} matés · :moneybag: {totalCost} CHF\n\nConsultez vos remboursements dans l'app !",
+    "monthlyBillFallback": "Facture mensuelle générée pour {office} ({month}/{year})",
+    "viewReimbursements": "Voir les remboursements"
   }
 }

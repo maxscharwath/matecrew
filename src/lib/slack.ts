@@ -142,6 +142,52 @@ export async function buildLowStockMessage(
   };
 }
 
+export async function buildMonthlyBillMessage(opts: {
+  officeName: string;
+  month: number;
+  year: number;
+  totalConsumption: number;
+  totalCost: number;
+  consumers: number;
+  appUrl: string;
+  officeId: string;
+  locale: string;
+}) {
+  const { officeName, month, year, totalConsumption, totalCost, consumers, appUrl, officeId, locale } = opts;
+  const t = await getTranslator(locale);
+  const reimbursementsUrl = `${appUrl}/org/${officeId}/reimbursements`;
+
+  return {
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: t("slack.monthlyBill", {
+            office: officeName,
+            month,
+            year,
+            consumers,
+            totalQty: totalConsumption,
+            totalCost: totalCost.toFixed(2),
+          }),
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: t("slack.viewReimbursements") },
+            url: reimbursementsUrl,
+          },
+        ],
+      },
+    ],
+    fallback: t("slack.monthlyBillFallback", { office: officeName, month, year }),
+  };
+}
+
 export async function buildTestMessage(
   officeName: string,
   locale: string,

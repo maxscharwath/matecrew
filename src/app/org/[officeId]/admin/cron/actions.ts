@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { sendSessionNotifications } from "@/lib/notifications";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
+import { sendSlackMessage, buildMonthlyBillMessage } from "@/lib/slack";
 
 type TriggerResult =
   | { success: true; message: string }
@@ -115,6 +116,27 @@ async function triggerMonthlyReimbursement(officeId: string): Promise<TriggerRes
       },
     },
   });
+
+  const office = await prisma.office.findUniqueOrThrow({
+    where: { id: officeId },
+    select: { name: true, slackChannelId: true, locale: true },
+  });
+
+  if (office.slackChannelId) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const { blocks, fallback } = await buildMonthlyBillMessage({
+      officeName: office.name,
+      month,
+      year,
+      totalConsumption: result.totalConsumption,
+      totalCost: result.totalCost,
+      consumers: result.shares.length,
+      appUrl,
+      officeId,
+      locale: office.locale,
+    });
+    await sendSlackMessage(office.slackChannelId, blocks, fallback);
+  }
 
   return {
     success: true,
