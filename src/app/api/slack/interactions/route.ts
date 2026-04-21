@@ -7,6 +7,8 @@ import {
   buildSessionRequestMessage,
   decodeActionValue,
   fetchSlackUserEmail,
+  getTranslator,
+  postToResponseUrl,
   verifySlackSignature,
 } from "@/lib/slack";
 import { createSlackLinkToken } from "@/lib/slack-link-token";
@@ -123,19 +125,11 @@ function mapErrorReason(
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const ts = request.headers.get("x-slack-request-timestamp");
-  const sig = request.headers.get("x-slack-signature");
-  const isValid = verifySlackSignature(rawBody, ts, sig);
-  console.log("[slack-interactions] incoming", {
-    hasSecret: !!process.env.SLACK_SIGNING_SECRET,
-    secretLen: process.env.SLACK_SIGNING_SECRET?.length ?? 0,
-    secretPrefix: process.env.SLACK_SIGNING_SECRET?.slice(0, 4) ?? "",
-    ts,
-    sigPrefix: sig?.slice(0, 10) ?? "",
-    bodyLen: rawBody.length,
-    bodyPrefix: rawBody.slice(0, 80),
-    isValid,
-  });
+  const isValid = verifySlackSignature(
+    rawBody,
+    request.headers.get("x-slack-request-timestamp"),
+    request.headers.get("x-slack-signature"),
+  );
   if (!isValid) {
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
@@ -234,5 +228,24 @@ export async function POST(request: Request) {
     });
     return ephemeral(blocks, "Unknown error");
   }
+
+  const confirmKey = CONFIRM_KEYS[result.kind] ?? "slack.confirmNotRegistered";
+  try {
+    const t = await getTranslator(locale);
+    await postToResponseUrl(payload.response_url, {
+      response_type: "ephemeral",
+      text: t(confirmKey),
+    });
+  } catch {
+    // ephemeral confirmation is best-effort; main update is more important
+  }
+
   return updateOriginal(rebuilt.blocks, rebuilt.fallback);
 }
+
+const CONFIRM_KEYS: Record<string, string> = {
+  created: "slack.confirmCreated",
+  already_registered: "slack.confirmAlreadyRegistered",
+  cancelled: "slack.confirmCancelled",
+  not_registered: "slack.confirmNotRegistered",
+};

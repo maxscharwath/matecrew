@@ -14,7 +14,7 @@ interface SlackBlock {
   }>;
 }
 
-async function getTranslator(locale: string) {
+export async function getTranslator(locale: string) {
   const messages = (await import(`../../messages/${locale}.json`)).default;
   return createTranslator({ locale, messages });
 }
@@ -194,6 +194,9 @@ export async function buildSessionRequestMessage(opts: {
     });
   }
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const openUrl = `${appUrl}/org/${opts.officeId}/request`;
+
   blocks.push({
     type: "actions",
     elements: [
@@ -209,6 +212,11 @@ export async function buildSessionRequestMessage(opts: {
         text: { type: "plain_text", text: t("slack.cancelMate") },
         action_id: SLACK_CANCEL_ACTION_ID,
         value: actionValue,
+      },
+      {
+        type: "button",
+        text: { type: "plain_text", text: t("slack.openInApp") },
+        url: openUrl,
       },
     ],
   });
