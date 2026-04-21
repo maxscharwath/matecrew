@@ -7,8 +7,6 @@ import {
   buildSessionRequestMessage,
   decodeActionValue,
   fetchSlackUserEmail,
-  getTranslator,
-  postToResponseUrl,
   verifySlackSignature,
 } from "@/lib/slack";
 import { createSlackLinkToken } from "@/lib/slack-link-token";
@@ -229,23 +227,5 @@ export async function POST(request: Request) {
     return ephemeral(blocks, "Unknown error");
   }
 
-  const confirmKey = CONFIRM_KEYS[result.kind] ?? "slack.confirmNotRegistered";
-  try {
-    const t = await getTranslator(locale);
-    await postToResponseUrl(payload.response_url, {
-      response_type: "ephemeral",
-      text: t(confirmKey),
-    });
-  } catch {
-    // ephemeral confirmation is best-effort; main update is more important
-  }
-
   return updateOriginal(rebuilt.blocks, rebuilt.fallback);
 }
-
-const CONFIRM_KEYS: Record<string, string> = {
-  created: "slack.confirmCreated",
-  already_registered: "slack.confirmAlreadyRegistered",
-  cancelled: "slack.confirmCancelled",
-  not_registered: "slack.confirmNotRegistered",
-};
