@@ -147,6 +147,7 @@
     "orderClosedSince": "Commandes fermées depuis {time}",
     "closingIn": "Fermeture dans {remaining}",
     "servedTooltip": " — servi",
+    "youLabel": "Toi",
     "dayLabels": {
       "0": "dimanche",
       "1": "lundi",

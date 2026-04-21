@@ -41,10 +41,11 @@ interface DailyRequest {
   status: "REQUESTED" | "SERVED";
 }
 
-interface OtherRequester {
+interface Requester {
   name: string;
   image?: string;
   status: "REQUESTED" | "SERVED";
+  isMe: boolean;
 }
 
 interface SessionInfo {
@@ -59,7 +60,7 @@ interface RequestViewProps {
   readonly officeName: string;
   readonly date: Date;
   readonly existingRequest: DailyRequest | null;
-  readonly otherRequesters: OtherRequester[];
+  readonly requesters: Requester[];
   readonly cutoffTime: string | null;
   readonly cutoffPassed: boolean;
   readonly timezone: string;
@@ -82,7 +83,7 @@ const MAX_VISIBLE_AVATARS = 8;
 function RequesterAvatars({
   requesters,
 }: {
-  readonly requesters: OtherRequester[];
+  readonly requesters: Requester[];
 }) {
   const t = useTranslations();
   if (requesters.length === 0) return null;
@@ -93,27 +94,27 @@ function RequesterAvatars({
   return (
     <TooltipProvider>
       <AvatarGroup>
-        {visible.map((r) => (
-          <Tooltip key={r.name}>
-            <TooltipTrigger asChild>
-              <Avatar
-                size="sm"
-                className={
-                  r.status === "SERVED" ? "ring-green-500!" : ""
-                }
-              >
-                <AvatarImage src={r.image} alt={r.name} />
-                <AvatarFallback>{getInitials(r.name)}</AvatarFallback>
-              </Avatar>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                {r.name}
-                {r.status === "SERVED" ? t('request.servedTooltip') : ""}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        ))}
+        {visible.map((r) => {
+          let ringClass = "";
+          if (r.isMe) ringClass = "ring-amber-500!";
+          else if (r.status === "SERVED") ringClass = "ring-green-500!";
+          return (
+            <Tooltip key={r.name}>
+              <TooltipTrigger asChild>
+                <Avatar size="sm" className={ringClass}>
+                  <AvatarImage src={r.image} alt={r.name} />
+                  <AvatarFallback>{getInitials(r.name)}</AvatarFallback>
+                </Avatar>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>
+                  {r.isMe ? t('request.youLabel') : r.name}
+                  {r.status === "SERVED" ? t('request.servedTooltip') : ""}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
         {remaining > 0 && (
           <AvatarGroupCount>+{remaining}</AvatarGroupCount>
         )}
@@ -298,7 +299,7 @@ export function RequestView({
   officeName,
   date,
   existingRequest,
-  otherRequesters,
+  requesters,
   cutoffTime,
   cutoffPassed,
   timezone,
@@ -433,13 +434,7 @@ export function RequestView({
               </Badge>
             </div>
             <Separator className="my-3" />
-            {otherRequesters.length > 0 ? (
-              <RequesterAvatars requesters={otherRequesters} />
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {t('request.onlyOneForNow')}
-              </p>
-            )}
+            <RequesterAvatars requesters={requesters} />
           </CardContent>
         </Card>
       )}

@@ -45,14 +45,13 @@ export default async function RequestPage({ params }: Props) {
     }),
   ]);
 
-  const otherRequesters = await Promise.all(
-    todayRequests
-      .filter((r) => r.user.id !== session.user.id)
-      .map(async (r) => ({
-        name: r.user.name,
-        image: resolveAvatarUrl(r.user.image),
-        status: r.status as "REQUESTED" | "SERVED",
-      })),
+  const requesters = await Promise.all(
+    todayRequests.map(async (r) => ({
+      name: r.user.name,
+      image: resolveAvatarUrl(r.user.image),
+      status: r.status as "REQUESTED" | "SERVED",
+      isMe: r.user.id === session.user.id,
+    })),
   );
 
   const cutoffPassed = activeSession
@@ -77,7 +76,7 @@ export default async function RequestPage({ params }: Props) {
         officeName={membership.office.name}
         date={date}
         existingRequest={existingRequest}
-        otherRequesters={otherRequesters}
+        requesters={requesters}
         cutoffTime={activeSession?.cutoffTime ?? null}
         cutoffPassed={cutoffPassed}
         timezone={office.timezone}

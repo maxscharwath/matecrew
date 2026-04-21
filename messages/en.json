@@ -147,6 +147,7 @@
     "orderClosedSince": "Orders closed since {time}",
     "closingIn": "Closing in {remaining}",
     "servedTooltip": " — served",
+    "youLabel": "You",
     "dayLabels": {
       "0": "Sunday",
       "1": "Monday",
