@@ -56,6 +56,7 @@ model User {
   emailVerified   Boolean   @default(false)
   image           String?
   locale          String    @default("fr")
+  slackUserId     String?   @unique
   defaultOfficeId String?
   defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id], onDelete: SetNull)
   createdAt       DateTime  @default(now())

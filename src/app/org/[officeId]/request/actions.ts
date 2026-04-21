@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
-import { isSessionOpen } from "@/lib/session-utils";
+import { createMateRequest } from "@/lib/mate-request";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -15,51 +15,30 @@ export async function submitDailyRequest(
 ): Promise<ActionResult> {
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
-  const userId = session.user.id;
 
-  const office = await prisma.office.findUniqueOrThrow({
-    where: { id: officeId },
-    select: { timezone: true },
+  const result = await createMateRequest({
+    userId: session.user.id,
+    officeId,
+    mateSessionId,
+    date,
   });
 
-  // Validate session is open if provided
-  if (mateSessionId) {
-    const mateSession = await prisma.mateSession.findUnique({
-      where: { id: mateSessionId },
-    });
-    if (!mateSession || mateSession.officeId !== officeId) {
+  switch (result.kind) {
+    case "not_member":
+      return { success: false, error: t('errors.notYourRequest') };
+    case "session_not_found":
       return { success: false, error: t('errors.sessionNotFound') };
-    }
-    if (!isSessionOpen(mateSession, office.timezone)) {
+    case "closed":
       return {
         success: false,
-        error: t('errors.requestsClosed', { time: mateSession.cutoffTime }),
+        error: t('errors.requestsClosed', { time: result.cutoffTime }),
       };
-    }
+    case "created":
+    case "already_registered":
+      revalidatePath(`/org/${officeId}/request`);
+      revalidatePath(`/org/${officeId}/runner`);
+      return { success: true };
   }
-
-  // Check if already requested for this session
-  const existing = await prisma.dailyRequest.findFirst({
-    where: { date, officeId, userId, mateSessionId },
-  });
-
-  if (existing) {
-    return { success: true }; // Already requested — idempotent
-  }
-
-  await prisma.dailyRequest.create({
-    data: {
-      date,
-      officeId,
-      userId,
-      mateSessionId,
-      status: "REQUESTED",
-    },
-  });
-
-  revalidatePath(`/org/${officeId}/request`);
-  revalidatePath(`/org/${officeId}/runner`);
-  return { success: true };
 }
 
 export async function cancelDailyRequest(

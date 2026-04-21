@@ -582,7 +582,16 @@
     "newMessage": "Nouveau message de MateCrew",
     "mateOfTheDay": "<!here> :coffee: *Maté du jour — {office}*\n:calendar: {date}\n\nQui veut un maté aujourd'hui ?",
     "sessionRequest": "<!here> :coffee: *Maté{label} — {office}*\n:alarm_clock: Commandes ouvertes jusqu'à {cutoff}\n\nQui veut un maté ?",
-    "iWantMate": "Je veux un maté !",
+    "iWantMate": "🧉 Je veux un maté !",
+    "cancelMate": "Annuler",
+    "noRequestsYet": "_Personne encore — sois le premier !_",
+    "requestersList": "✅ *Inscrits :* {names}",
+    "connectPrompt": "Lie ton compte Slack à MateCrew pour t'inscrire depuis Slack.",
+    "connectButton": "Connecter mon compte MateCrew",
+    "errorClosed": ":no_entry: Désolé — les commandes sont fermées pour cette session.",
+    "errorSessionNotFound": ":no_entry: Désolé — session introuvable.",
+    "errorServed": ":no_entry: Ton maté a déjà été servi — tu ne peux plus annuler.",
+    "errorUnknown": ":no_entry: Une erreur est survenue. Merci d'utiliser l'app web.",
     "lowStock": ":warning: *Stock bas — {office}*\n{qty} canettes restantes (seuil: {threshold})",
     "lowStockFallback": "Stock bas: {qty} canettes ({office})",
     "testMessage": "*Test de MateCrew*\nL'intégration Slack pour *{office}* fonctionne !",
@@ -590,5 +599,17 @@
     "monthlyBill": "<!here> :receipt: *Facture mensuelle — {office}*\n:calendar: {month}/{year}\n\n:busts_in_silhouette: {consumers} consommateurs · :coffee: {totalQty} matés · :moneybag: {totalCost} CHF\n\nConsultez vos remboursements dans l'app !",
     "monthlyBillFallback": "Facture mensuelle générée pour {office} ({month}/{year})",
     "viewReimbursements": "Voir les remboursements"
+  },
+  "slackLink": {
+    "invalidTitle": "Lien indisponible",
+    "invalidBody": "Ce lien est invalide ou a expiré. Clique à nouveau sur le bouton dans Slack.",
+    "missingToken": "Aucun jeton fourni.",
+    "takenTitle": "Compte Slack déjà lié",
+    "takenBody": "Cet utilisateur Slack est déjà lié à un autre compte MateCrew.",
+    "alreadyLinkedTitle": "Un autre compte Slack est lié",
+    "alreadyLinkedBody": "Ton compte MateCrew est déjà lié à un autre utilisateur Slack.",
+    "confirmTitle": "Lier ton compte Slack",
+    "confirmBody": "Lier l'utilisateur Slack {slackUser} à {email} ? Tu seras ensuite inscrit pour la session de maté en cours.",
+    "confirmButton": "Confirmer et m'inscrire"
   }
 }

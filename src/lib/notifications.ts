@@ -1,6 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { sendSlackMessage, buildSessionRequestMessage } from "@/lib/slack";
-import { getDayOfWeek, getCurrentTimeInTimezone, timeToMinutes, getTodayDate, SCHEDULE_STEP_MINUTES } from "@/lib/date";
+import { listRequesterNames } from "@/lib/mate-request";
+import {
+  getDayOfWeek,
+  getCurrentTimeInTimezone,
+  timeToMinutes,
+  getTodayDate,
+  toISODateString,
+  SCHEDULE_STEP_MINUTES,
+} from "@/lib/date";
 
 export interface NotificationResult {
   office: string;
@@ -28,8 +36,8 @@ export async function sendSessionNotifications(options?: {
     select: { id: true, name: true, slackChannelId: true, timezone: true, locale: true },
   });
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const today = getTodayDate();
+  const todayIso = toISODateString(today);
   const results: NotificationResult[] = [];
 
   for (const office of offices) {
@@ -56,14 +64,21 @@ export async function sendSessionNotifications(options?: {
       }
 
       try {
-        const { blocks, fallback } = await buildSessionRequestMessage(
-          office.id,
-          office.name,
-          session.label,
-          session.cutoffTime,
-          appUrl,
-          office.locale,
-        );
+        const requesters = await listRequesterNames({
+          officeId: office.id,
+          mateSessionId: session.id,
+          date: today,
+        });
+        const { blocks, fallback } = await buildSessionRequestMessage({
+          officeId: office.id,
+          officeName: office.name,
+          mateSessionId: session.id,
+          sessionLabel: session.label,
+          cutoffTime: session.cutoffTime,
+          date: todayIso,
+          locale: office.locale,
+          requesters,
+        });
         await sendSlackMessage(office.slackChannelId!, blocks, fallback);
 
         await prisma.mateSession.update({

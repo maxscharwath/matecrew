@@ -132,15 +132,18 @@ To enable, register an app in [Azure Entra ID](https://entra.microsoft.com):
 | Variable | Description | Default |
 |---|---|---|
 | `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) | Required |
+| `SLACK_SIGNING_SECRET` | Signing Secret (Basic Information → App Credentials) — verifies interactive button clicks | Required |
 | `SLACK_BOT_USERNAME` | Override bot display name in messages | `MateCrew` |
 | `SLACK_BOT_ICON_URL` | Override bot avatar URL in messages | |
 
 To set up:
 1. Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps)
-2. Go to **OAuth & Permissions**, add the `chat:write` bot scope
+2. Go to **OAuth & Permissions**, add bot scopes: `chat:write`, `users:read`, `users:read.email`
 3. Install to workspace, copy the Bot User OAuth Token (`xoxb-...`)
-4. Invite the bot to each office's Slack channel
-5. In admin settings, enter each channel's ID (right-click channel > "Copy channel ID")
+4. Go to **Interactivity & Shortcuts**, enable it, set **Request URL** to `https://YOUR_DOMAIN/api/slack/interactions` (required for the in-message "I want a maté" / "Cancel" buttons)
+5. Copy the **Signing Secret** from **Basic Information → App Credentials** into `SLACK_SIGNING_SECRET`
+6. Invite the bot to each office's Slack channel
+7. In admin settings, enter each channel's ID (right-click channel > "Copy channel ID")
 
 ### Cron / QStash
 
@@ -342,7 +345,7 @@ Roles are per-office (via Membership):
 
 Each office can have a Slack channel ID configured. Messages are sent via a shared Slack Bot App using `chat.postMessage`. Used for:
 
-1. **Daily request message**: Posted at the configured session time via QStash/Cron, with a button linking to the request page
+1. **Session request message**: Posted at each session start via QStash/Cron. Users click **I want a maté** or **Cancel** directly in Slack — the handler at `/api/slack/interactions` registers the request (no browser redirect) and updates the message in place with the running list of registered users. First-time clickers whose Slack email matches a MateCrew user are auto-linked; others get an ephemeral "Connect" button that opens a signed one-time URL to `/slack/link` for an authenticated confirmation.
 2. **Low stock alert**: Sent when stock drops below the configured threshold (once per 24h)
 3. **Test message**: Sendable from admin settings to verify integration works
 

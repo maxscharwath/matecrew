@@ -582,7 +582,16 @@
     "newMessage": "New message from MateCrew",
     "mateOfTheDay": "<!here> :coffee: *Maté of the day — {office}*\n:calendar: {date}\n\nWho wants a maté today?",
     "sessionRequest": "<!here> :coffee: *Maté{label} — {office}*\n:alarm_clock: Orders open until {cutoff}\n\nWho wants a maté?",
-    "iWantMate": "I want a maté!",
+    "iWantMate": "🧉 I want a maté!",
+    "cancelMate": "Cancel",
+    "noRequestsYet": "_No one yet — be first!_",
+    "requestersList": "✅ *Registered:* {names}",
+    "connectPrompt": "Link your Slack to MateCrew to register for matés from Slack.",
+    "connectButton": "Connect MateCrew account",
+    "errorClosed": ":no_entry: Sorry — orders are closed for this session.",
+    "errorSessionNotFound": ":no_entry: Sorry — session not found.",
+    "errorServed": ":no_entry: Your maté was already served — you can no longer cancel.",
+    "errorUnknown": ":no_entry: Something went wrong. Please try from the web app.",
     "lowStock": ":warning: *Low stock — {office}*\n{qty} cans remaining (threshold: {threshold})",
     "lowStockFallback": "Low stock: {qty} cans ({office})",
     "testMessage": "*Test from MateCrew*\nSlack integration for *{office}* is working!",
@@ -590,5 +599,17 @@
     "monthlyBill": "<!here> :receipt: *Monthly bill — {office}*\n:calendar: {month}/{year}\n\n:busts_in_silhouette: {consumers} consumers · :coffee: {totalQty} matés · :moneybag: {totalCost} CHF\n\nCheck your reimbursements in the app!",
     "monthlyBillFallback": "Monthly bill generated for {office} ({month}/{year})",
     "viewReimbursements": "View reimbursements"
+  },
+  "slackLink": {
+    "invalidTitle": "Link unavailable",
+    "invalidBody": "This link is invalid or has expired. Click the button in Slack again to try.",
+    "missingToken": "No token was provided.",
+    "takenTitle": "Slack account already linked",
+    "takenBody": "That Slack user is already linked to another MateCrew account.",
+    "alreadyLinkedTitle": "Another Slack account is linked",
+    "alreadyLinkedBody": "Your MateCrew account is already linked to a different Slack user.",
+    "confirmTitle": "Link your Slack account",
+    "confirmBody": "Link Slack user {slackUser} to {email}? You will then be registered for the current maté session.",
+    "confirmButton": "Confirm and register"
   }
 }
