@@ -123,11 +123,19 @@ function mapErrorReason(
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const isValid = verifySlackSignature(
-    rawBody,
-    request.headers.get("x-slack-request-timestamp"),
-    request.headers.get("x-slack-signature"),
-  );
+  const ts = request.headers.get("x-slack-request-timestamp");
+  const sig = request.headers.get("x-slack-signature");
+  const isValid = verifySlackSignature(rawBody, ts, sig);
+  console.log("[slack-interactions] incoming", {
+    hasSecret: !!process.env.SLACK_SIGNING_SECRET,
+    secretLen: process.env.SLACK_SIGNING_SECRET?.length ?? 0,
+    secretPrefix: process.env.SLACK_SIGNING_SECRET?.slice(0, 4) ?? "",
+    ts,
+    sigPrefix: sig?.slice(0, 10) ?? "",
+    bodyLen: rawBody.length,
+    bodyPrefix: rawBody.slice(0, 80),
+    isValid,
+  });
   if (!isValid) {
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
