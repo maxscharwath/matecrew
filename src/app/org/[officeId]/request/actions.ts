@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
 import { createMateRequest } from "@/lib/mate-request";
+import { refreshSlackSessionMessage } from "@/lib/notifications";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -35,6 +36,7 @@ export async function submitDailyRequest(
       };
     case "created":
     case "already_registered":
+      await refreshSlackSessionMessage({ officeId, mateSessionId, date });
       revalidatePath(`/org/${officeId}/request`);
       revalidatePath(`/org/${officeId}/runner`);
       return { success: true };
@@ -65,6 +67,12 @@ export async function cancelDailyRequest(
   }
 
   await prisma.dailyRequest.delete({ where: { id: requestId } });
+
+  await refreshSlackSessionMessage({
+    officeId,
+    mateSessionId: request.mateSessionId,
+    date: request.date,
+  });
 
   revalidatePath(`/org/${officeId}/request`);
   revalidatePath(`/org/${officeId}/runner`);

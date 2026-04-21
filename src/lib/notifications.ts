@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { sendSlackMessage, buildSessionRequestMessage } from "@/lib/slack";
+import {
+  sendSlackMessage,
+  buildSessionRequestMessage,
+  updateSlackMessage,
+} from "@/lib/slack";
 import { listRequesterNames } from "@/lib/mate-request";
 import {
   getDayOfWeek,
@@ -79,11 +83,19 @@ export async function sendSessionNotifications(options?: {
           locale: office.locale,
           requesters,
         });
-        await sendSlackMessage(office.slackChannelId!, blocks, fallback);
+        const posted = await sendSlackMessage(
+          office.slackChannelId!,
+          blocks,
+          fallback,
+        );
 
         await prisma.mateSession.update({
           where: { id: session.id },
-          data: { lastNotifiedDate: today },
+          data: {
+            lastNotifiedDate: today,
+            lastNotifiedMessageTs: posted.ts,
+            lastNotifiedChannelId: posted.channel,
+          },
         });
 
         results.push({
@@ -103,4 +115,64 @@ export async function sendSessionNotifications(options?: {
   }
 
   return results;
+}
+
+/**
+ * Refreshes the previously posted Slack message for a session so the visible
+ * requester list stays in sync after create/cancel actions (from either the
+ * Slack buttons or the web UI). Silently no-ops when no ts was saved yet.
+ */
+export async function refreshSlackSessionMessage(opts: {
+  officeId: string;
+  mateSessionId: string | null;
+  date: Date;
+}): Promise<void> {
+  if (!opts.mateSessionId) return;
+
+  const [session, office] = await Promise.all([
+    prisma.mateSession.findUnique({
+      where: { id: opts.mateSessionId },
+      select: {
+        label: true,
+        cutoffTime: true,
+        lastNotifiedMessageTs: true,
+        lastNotifiedChannelId: true,
+      },
+    }),
+    prisma.office.findUnique({
+      where: { id: opts.officeId },
+      select: { name: true, locale: true },
+    }),
+  ]);
+  if (!session?.lastNotifiedMessageTs || !session.lastNotifiedChannelId) {
+    return;
+  }
+  if (!office) return;
+
+  const requesters = await listRequesterNames({
+    officeId: opts.officeId,
+    mateSessionId: opts.mateSessionId,
+    date: opts.date,
+  });
+  const { blocks, fallback } = await buildSessionRequestMessage({
+    officeId: opts.officeId,
+    officeName: office.name,
+    mateSessionId: opts.mateSessionId,
+    sessionLabel: session.label,
+    cutoffTime: session.cutoffTime,
+    date: toISODateString(opts.date),
+    locale: office.locale,
+    requesters,
+  });
+
+  try {
+    await updateSlackMessage({
+      channel: session.lastNotifiedChannelId,
+      ts: session.lastNotifiedMessageTs,
+      blocks,
+      text: fallback,
+    });
+  } catch {
+    // non-fatal: the DB state is authoritative
+  }
 }

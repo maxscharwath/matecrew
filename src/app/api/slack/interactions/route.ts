@@ -4,7 +4,6 @@ import {
   SLACK_REQUEST_ACTION_ID,
   buildConnectErrorMessage,
   buildConnectSlackMessage,
-  buildSessionRequestMessage,
   decodeActionValue,
   fetchSlackUserEmail,
   verifySlackSignature,
@@ -13,10 +12,10 @@ import { createSlackLinkToken } from "@/lib/slack-link-token";
 import {
   cancelMateRequest,
   createMateRequest,
-  listRequesterNames,
   type CancelResult,
   type RequestResult,
 } from "@/lib/mate-request";
+import { refreshSlackSessionMessage } from "@/lib/notifications";
 
 interface InteractionPayload {
   type: string;
@@ -31,15 +30,6 @@ function badRequest(message: string) {
 
 function ephemeral(blocks: unknown, text: string) {
   return Response.json({ response_type: "ephemeral", text, blocks });
-}
-
-function updateOriginal(blocks: unknown, text: string) {
-  return Response.json({
-    response_type: "in_channel",
-    replace_original: true,
-    text,
-    blocks,
-  });
 }
 
 async function resolveUser(
@@ -67,43 +57,6 @@ async function resolveUser(
     });
   }
   return { id: byEmail.id };
-}
-
-async function rebuildMessage(ctx: {
-  officeId: string;
-  mateSessionId: string | null;
-  date: Date;
-  dateIso: string;
-}) {
-  const [office, mateSession, requesters] = await Promise.all([
-    prisma.office.findUnique({
-      where: { id: ctx.officeId },
-      select: { name: true, locale: true },
-    }),
-    ctx.mateSessionId
-      ? prisma.mateSession.findUnique({
-          where: { id: ctx.mateSessionId },
-          select: { label: true, cutoffTime: true },
-        })
-      : Promise.resolve(null),
-    listRequesterNames({
-      officeId: ctx.officeId,
-      mateSessionId: ctx.mateSessionId,
-      date: ctx.date,
-    }),
-  ]);
-  if (!office) return null;
-
-  return buildSessionRequestMessage({
-    officeId: ctx.officeId,
-    officeName: office.name,
-    mateSessionId: ctx.mateSessionId,
-    sessionLabel: mateSession?.label ?? null,
-    cutoffTime: mateSession?.cutoffTime ?? "",
-    date: ctx.dateIso,
-    locale: office.locale,
-    requesters,
-  });
 }
 
 const ERROR_KINDS = new Set([
@@ -213,19 +166,11 @@ export async function POST(request: Request) {
     return ephemeral(blocks, "Request not processed");
   }
 
-  const rebuilt = await rebuildMessage({
+  await refreshSlackSessionMessage({
     officeId: ctx.officeId,
     mateSessionId: ctx.mateSessionId,
     date: dateObj,
-    dateIso: ctx.date,
   });
-  if (!rebuilt) {
-    const { blocks } = await buildConnectErrorMessage({
-      locale,
-      reason: "unknown",
-    });
-    return ephemeral(blocks, "Unknown error");
-  }
 
-  return updateOriginal(rebuilt.blocks, rebuilt.fallback);
+  return new Response(null, { status: 200 });
 }

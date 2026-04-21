@@ -172,7 +172,9 @@ model MateSession {
   startTime         String    // HH:mm — session opens & notification sent
   cutoffTime        String    // HH:mm — requests close
   label             String?   // e.g. "Matin", "Après-midi"
-  lastNotifiedDate  DateTime? @db.Date // idempotency: skip if already notified today
+  lastNotifiedDate      DateTime? @db.Date // idempotency: skip if already notified today
+  lastNotifiedMessageTs String?   // Slack message ts, used to chat.update the live message when requests change
+  lastNotifiedChannelId String?
 
   createdAt DateTime @default(now())
 

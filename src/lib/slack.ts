@@ -93,7 +93,7 @@ export async function sendSlackMessage(
   channelId: string,
   blocks: SlackBlock[],
   text: string,
-) {
+): Promise<{ ts: string; channel: string }> {
   const token = process.env.SLACK_BOT_TOKEN;
   if (!token) {
     throw new Error("SLACK_BOT_TOKEN is not configured");
@@ -118,9 +118,54 @@ export async function sendSlackMessage(
     throw new Error(`Slack API request failed: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    ts?: string;
+    channel?: string;
+  };
+  if (!data.ok || !data.ts || !data.channel) {
+    throw new Error(`Slack API error: ${data.error ?? "missing ts"}`);
+  }
+  return { ts: data.ts, channel: data.channel };
+}
+
+/**
+ * Updates a previously posted Slack message in place via chat.update.
+ * Used to refresh the live requester list when requests/cancels happen
+ * (from either a Slack button or the web UI).
+ */
+export async function updateSlackMessage(opts: {
+  channel: string;
+  ts: string;
+  blocks: SlackBlock[];
+  text: string;
+}): Promise<void> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) {
+    throw new Error("SLACK_BOT_TOKEN is not configured");
+  }
+
+  const response = await fetch("https://slack.com/api/chat.update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel: opts.channel,
+      ts: opts.ts,
+      text: opts.text,
+      blocks: opts.blocks,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Slack chat.update request failed: ${response.status}`);
+  }
+  const data = (await response.json()) as { ok: boolean; error?: string };
   if (!data.ok) {
-    throw new Error(`Slack API error: ${data.error}`);
+    throw new Error(`Slack chat.update error: ${data.error}`);
   }
 }
 
