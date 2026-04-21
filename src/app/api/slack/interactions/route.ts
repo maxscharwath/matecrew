@@ -22,6 +22,8 @@ interface InteractionPayload {
   response_url: string;
   user: { id: string; name?: string };
   actions: Array<{ action_id: string; value: string }>;
+  channel?: { id: string };
+  message?: { ts: string };
 }
 
 function badRequest(message: string) {
@@ -72,6 +74,26 @@ function mapErrorReason(
   if (!ERROR_KINDS.has(kind)) return null;
   if (kind === "not_member") return "unknown";
   return kind as "closed" | "session_not_found" | "served";
+}
+
+async function backfillSessionMessageRef(
+  mateSessionId: string | null,
+  payload: InteractionPayload,
+) {
+  if (!mateSessionId || !payload.message?.ts || !payload.channel?.id) return;
+  await prisma.mateSession.updateMany({
+    where: {
+      id: mateSessionId,
+      OR: [
+        { lastNotifiedMessageTs: null },
+        { lastNotifiedChannelId: null },
+      ],
+    },
+    data: {
+      lastNotifiedMessageTs: payload.message.ts,
+      lastNotifiedChannelId: payload.channel.id,
+    },
+  });
 }
 
 export async function POST(request: Request) {
@@ -165,6 +187,8 @@ export async function POST(request: Request) {
     });
     return ephemeral(blocks, "Request not processed");
   }
+
+  await backfillSessionMessageRef(ctx.mateSessionId, payload);
 
   await refreshSlackSessionMessage({
     officeId: ctx.officeId,
