@@ -18,11 +18,45 @@ const DOW_BY_NAME: Record<string, number> = Object.fromEntries(
 );
 
 /**
+ * UTC offset (in minutes, positive east of UTC) for `instant` interpreted in
+ * `timezone`. Reads the local wallclock via Intl and treats it as if it were
+ * UTC; the difference from the actual UTC instant is the offset. Works for
+ * any IANA zone including those beyond ±12h (Pacific/Auckland NZDT = +780,
+ * Pacific/Apia DST = +840) and fractional offsets (Asia/Kolkata = +330).
+ */
+function getUtcOffsetMinutes(instant: Date, timezone: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const localAsUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute"),
+    get("second"),
+  );
+  return Math.round((localAsUtc - instant.getTime()) / 60_000);
+}
+
+/**
  * Convert a (timezone, dayOfWeek, HH:mm) tuple into the corresponding UTC
  * (dayOfWeek, hour, minute). Probes upcoming dates for one whose local DOW in
- * `timezone` matches, then offsets by that day's actual UTC offset (so DST is
- * applied correctly for the sync moment — drift on the next transition is
- * caught by the weekly sync cron).
+ * `timezone` matches, treats hh:mm on that local date as a naive UTC instant,
+ * then subtracts the actual offset for that moment to get the real UTC.
+ *
+ * Robust for any offset in [-12h, +14h] and DST-on-transition-day, because
+ * `getUtcOffsetMinutes` returns the actual offset at the (almost-)target
+ * instant rather than an assumed range.
  */
 export function localToUtc(
   timezone: string,
@@ -49,22 +83,12 @@ export function localToUtc(
     }).format(probe);
     const [y, mo, d] = ymd.split("-").map(Number);
 
-    // Guess: treat hh:mm as UTC. Then read what wallclock that lands on in tz
-    // and correct by the diff (handles DST and arbitrary offsets uniformly).
-    const guess = new Date(Date.UTC(y, mo - 1, d, hh, mm));
-    const tzWall = new Intl.DateTimeFormat("en-GB", {
-      timeZone: timezone,
-      hourCycle: "h23",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(guess);
-    const [tzH, tzM] = tzWall.split(":").map(Number);
+    // Naive: pretend the local wallclock is UTC. Then subtract the actual
+    // offset for that instant in the tz — handles UTC±14h cleanly.
+    const naive = new Date(Date.UTC(y, mo - 1, d, hh, mm));
+    const offsetMin = getUtcOffsetMinutes(naive, timezone);
+    const utc = new Date(naive.getTime() - offsetMin * 60_000);
 
-    let diffMin = hh * 60 + mm - (tzH * 60 + tzM);
-    if (diffMin > 720) diffMin -= 1440;
-    if (diffMin < -720) diffMin += 1440;
-
-    const utc = new Date(guess.getTime() + diffMin * 60_000);
     return {
       dayOfWeek: utc.getUTCDay(),
       hour: utc.getUTCHours(),

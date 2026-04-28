@@ -2,9 +2,9 @@
   {
     "id": "sync-schedules",
     "name": "Sync session schedules",
-    "description": "Recompute QStash session triggers from DB (catches DST drift and missed admin syncs)",
+    "description": "Recompute QStash session triggers from DB daily — catches DST cutovers across all timezones (EU at 01:00 UTC, US at 06–07:00 UTC, NZ/AU around 14:00 UTC) within ~24h, plus any missed admin syncs",
     "path": "/api/cron/sync-schedules",
-    "cron": "0 2 * * 0"
+    "cron": "0 2 * * *"
   },
   {
     "id": "monthly-reimbursement",
