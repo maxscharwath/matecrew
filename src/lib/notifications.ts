@@ -32,13 +32,35 @@ export async function sendSessionNotifications(options?: {
   officeId?: string;
   skipTimeWindow?: boolean;
 }): Promise<NotificationResult[]> {
+  // Single query joins offices + their sessions so the cron tick avoids the
+  // N+1 roundtrip pattern and returns instantly when nothing is configured —
+  // both reduce time the Neon compute is awake.
   const offices = await prisma.office.findMany({
     where: {
       slackChannelId: { not: null },
       ...(options?.officeId ? { id: options.officeId } : {}),
     },
-    select: { id: true, name: true, slackChannelId: true, timezone: true, locale: true },
+    select: {
+      id: true,
+      name: true,
+      slackChannelId: true,
+      timezone: true,
+      locale: true,
+      mateSessions: {
+        select: {
+          id: true,
+          dayOfWeek: true,
+          startTime: true,
+          cutoffTime: true,
+          label: true,
+          lastNotifiedDate: true,
+        },
+        orderBy: { startTime: "asc" },
+      },
+    },
   });
+
+  if (offices.length === 0) return [];
 
   const today = getTodayDate();
   const todayIso = toISODateString(today);
@@ -49,10 +71,7 @@ export async function sendSessionNotifications(options?: {
     const currentTime = getCurrentTimeInTimezone(office.timezone);
     const nowMinutes = timeToMinutes(currentTime);
 
-    const sessions = await prisma.mateSession.findMany({
-      where: { officeId: office.id, dayOfWeek },
-      orderBy: { startTime: "asc" },
-    });
+    const sessions = office.mateSessions.filter((s) => s.dayOfWeek === dayOfWeek);
 
     for (const session of sessions) {
       // Time window check (skipped for manual admin triggers)

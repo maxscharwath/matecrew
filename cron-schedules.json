@@ -4,7 +4,7 @@
     "name": "Session notifications",
     "description": "Envoie les notifications Slack pour les sessions du jour",
     "path": "/api/cron/daily-request",
-    "cron": "*/5 * * * *"
+    "cron": "*/5 5-19 * * *"
   },
   {
     "id": "monthly-reimbursement",
