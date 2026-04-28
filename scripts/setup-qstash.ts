@@ -8,10 +8,12 @@
  *   QSTASH_TOKEN
  *   NEXT_PUBLIC_APP_URL  (your deployed URL, e.g. https://matecrew.vercel.app)
  *
- * Creates two schedules from cron-schedules.json. If a schedule already exists
- * for the destination URL but the cron string has changed, it is deleted and
- * recreated so the live QStash schedule stays in sync with the JSON file.
+ * Creates the static schedules from cron-schedules.json (recreating any whose
+ * cron string changed) and then bootstraps dynamic per-session schedules from
+ * the DB via syncSessionSchedules.
  */
+
+import { syncSessionSchedules } from "../src/lib/schedule-sync";
 
 const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
@@ -89,6 +91,21 @@ async function main() {
 
   for (const s of schedules) {
     await createSchedule(s.name, s.destination, s.cron);
+  }
+
+  console.log("\nSyncing dynamic session schedules from DB...");
+  try {
+    const r = await syncSessionSchedules();
+    console.log(
+      `  Created: ${r.created}, Deleted: ${r.deleted}, Kept: ${r.kept}`,
+    );
+    if (r.desired.length === 0) {
+      console.log("  (No offices with Slack channels configured yet.)");
+    } else {
+      for (const cron of r.desired) console.log(`  - ${cron}`);
+    }
+  } catch (e) {
+    console.error("  Failed:", e instanceof Error ? e.message : e);
   }
 
   console.log("\nDone! Manage at: https://console.upstash.com/qstash");

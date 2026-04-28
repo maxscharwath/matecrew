@@ -1,10 +1,10 @@
 [
   {
-    "id": "daily-request",
-    "name": "Session notifications",
-    "description": "Envoie les notifications Slack pour les sessions du jour",
-    "path": "/api/cron/daily-request",
-    "cron": "*/5 * * * *"
+    "id": "sync-schedules",
+    "name": "Sync session schedules",
+    "description": "Recompute QStash session triggers from DB daily — catches DST cutovers across all timezones (EU at 01:00 UTC, US at 06–07:00 UTC, NZ/AU around 14:00 UTC) within ~24h, plus any missed admin syncs",
+    "path": "/api/cron/sync-schedules",
+    "cron": "0 2 * * *"
   },
   {
     "id": "monthly-reimbursement",
