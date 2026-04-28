@@ -83,6 +83,8 @@ export function timeToMinutes(hhmm: string): number {
 
 /**
  * Session start/cutoff times must align to this interval (in minutes).
- * Must match the Vercel cron frequency so notifications fire reliably.
+ * Also bounds the cron detection window in sendSessionNotifications, so any
+ * minor delay between the QStash trigger and handler execution still hits the
+ * right session.
  */
 export const SCHEDULE_STEP_MINUTES = 5;
