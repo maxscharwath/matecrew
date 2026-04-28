@@ -8,10 +8,12 @@
  *   QSTASH_TOKEN
  *   NEXT_PUBLIC_APP_URL  (your deployed URL, e.g. https://matecrew.vercel.app)
  *
- * Creates two schedules:
- *   1. Session notifications — every 5 min, 24/7 (288 msg/day, within free tier)
- *   2. Monthly reimbursements — 1st of each month at 02:00 UTC
+ * Creates the static schedules from cron-schedules.json (recreating any whose
+ * cron string changed) and then bootstraps dynamic per-session schedules from
+ * the DB via syncSessionSchedules.
  */
+
+import { syncSessionSchedules } from "../src/lib/schedule-sync";
 
 const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
@@ -48,9 +50,20 @@ async function createSchedule(name: string, destination: string, cron: string) {
     const existing = (await listRes.json() as { destination: string; scheduleId: string; cron: string }[]);
     const match = existing.find((s) => s.destination === destination);
     if (match) {
-      console.log(`  Already exists (ID: ${match.scheduleId}, cron: ${match.cron})`);
-      console.log("  To update, delete it first from https://console.upstash.com/qstash");
-      return;
+      if (match.cron === cron) {
+        console.log(`  Already up to date (ID: ${match.scheduleId}, cron: ${match.cron})`);
+        return;
+      }
+      console.log(`  Cron changed (${match.cron} -> ${cron}), recreating schedule...`);
+      const delRes = await fetch(`https://qstash.upstash.io/v2/schedules/${match.scheduleId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${QSTASH_TOKEN}` },
+      });
+      if (!delRes.ok) {
+        const text = await delRes.text();
+        console.error(`  Failed to delete old schedule: ${delRes.status} ${text}`);
+        return;
+      }
     }
   }
 
@@ -78,6 +91,21 @@ async function main() {
 
   for (const s of schedules) {
     await createSchedule(s.name, s.destination, s.cron);
+  }
+
+  console.log("\nSyncing dynamic session schedules from DB...");
+  try {
+    const r = await syncSessionSchedules();
+    console.log(
+      `  Created: ${r.created}, Deleted: ${r.deleted}, Kept: ${r.kept}`,
+    );
+    if (r.desired.length === 0) {
+      console.log("  (No offices with Slack channels configured yet.)");
+    } else {
+      for (const cron of r.desired) console.log(`  - ${cron}`);
+    }
+  } catch (e) {
+    console.error("  Failed:", e instanceof Error ? e.message : e);
   }
 
   console.log("\nDone! Manage at: https://console.upstash.com/qstash");
