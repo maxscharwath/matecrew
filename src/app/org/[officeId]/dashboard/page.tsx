@@ -6,12 +6,12 @@ import {
   HeroSectionFallback,
   TodaySection,
   TodaySectionFallback,
+  PersonalStatsSection,
+  PersonalStatsFallback,
   StatsAndFinancialsSection,
   StatsSectionFallback,
   SettlementSection,
   SettlementSectionFallback,
-  RecentRequestsSection,
-  RecentRequestsFallback,
 } from "./_sections";
 
 interface Props {
@@ -41,16 +41,16 @@ export default async function DashboardPage({ params }: Props) {
         <TodaySection officeId={officeId} userId={userId} />
       </Suspense>
 
+      <Suspense fallback={<PersonalStatsFallback />}>
+        <PersonalStatsSection officeId={officeId} userId={userId} />
+      </Suspense>
+
       <Suspense fallback={<StatsSectionFallback />}>
         <StatsAndFinancialsSection officeId={officeId} userId={userId} />
       </Suspense>
 
       <Suspense fallback={<SettlementSectionFallback />}>
         <SettlementSection officeId={officeId} userId={userId} />
-      </Suspense>
-
-      <Suspense fallback={<RecentRequestsFallback />}>
-        <RecentRequestsSection officeId={officeId} userId={userId} />
       </Suspense>
     </div>
   );
