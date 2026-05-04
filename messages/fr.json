@@ -201,7 +201,17 @@
     "previousSession": "Session précédente",
     "nextSession": "Session suivante",
     "titlePast": "Préparation",
-    "noRequestsPast": "Aucune demande ce jour."
+    "noRequestsPast": "Aucune demande ce jour.",
+    "servedToast": "Marqué comme servi.",
+    "undo": "Annuler",
+    "stockCount": "{qty} en stock",
+    "show": "Voir",
+    "hide": "Masquer",
+    "forgottenTitle": "{count} {count, plural, one {demande oubliée} other {demandes oubliées}} de sessions précédentes",
+    "forgottenServe": "Marquer servi",
+    "forgottenCancel": "Annuler",
+    "forgottenServedToast": "Marqué comme servi.",
+    "forgottenCancelledToast": "Demande annulée."
   },
   "schedule": {
     "title": "Horaires",

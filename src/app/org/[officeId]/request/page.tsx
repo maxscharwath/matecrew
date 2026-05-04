@@ -31,11 +31,17 @@ export default async function RequestPage({ params }: Props) {
         officeId,
         userId: session.user.id,
         mateSessionId,
+        status: { in: ["REQUESTED", "SERVED"] },
       },
       select: { id: true, officeId: true, status: true },
     }),
     prisma.dailyRequest.findMany({
-      where: { date, officeId, mateSessionId },
+      where: {
+        date,
+        officeId,
+        mateSessionId,
+        status: { in: ["REQUESTED", "SERVED"] },
+      },
       select: {
         id: true,
         status: true,
@@ -75,7 +81,7 @@ export default async function RequestPage({ params }: Props) {
         officeId={officeId}
         officeName={membership.office.name}
         date={date}
-        existingRequest={existingRequest}
+        existingRequest={existingRequest as { id: string; officeId: string; status: "REQUESTED" | "SERVED" } | null}
         requesters={requesters}
         cutoffTime={activeSession?.cutoffTime ?? null}
         cutoffPassed={cutoffPassed}

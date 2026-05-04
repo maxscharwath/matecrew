@@ -3,6 +3,7 @@ import { requireMembership } from "@/lib/auth-utils";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { getTodayDate, getDayOfWeek, toISODateString } from "@/lib/date";
 import { getActiveSession, getMostRecentSession, isSessionOpen } from "@/lib/session-utils";
+import { getForgottenOrders } from "@/lib/forgotten-orders";
 import { RunnerView } from "@/components/runner-view";
 
 interface Props {
@@ -115,7 +116,12 @@ export default async function RunnerPage({ params, searchParams }: Props) {
 
   const office = await prisma.office.findUniqueOrThrow({
     where: { id: officeId },
-    select: { timezone: true },
+    select: { timezone: true, lowStockThreshold: true },
+  });
+
+  const stock = await prisma.stock.findUnique({
+    where: { officeId },
+    select: { currentQty: true },
   });
 
   const today = getTodayDate();
@@ -187,6 +193,8 @@ export default async function RunnerPage({ params, searchParams }: Props) {
     }
   }
 
+  const forgottenOrders = await getForgottenOrders(officeId);
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <RunnerView
@@ -198,6 +206,9 @@ export default async function RunnerPage({ params, searchParams }: Props) {
         prevHref={nav.prev ? `?date=${nav.prev.date}&session=${nav.prev.session}` : null}
         nextHref={nav.next ? `?date=${nav.next.date}&session=${nav.next.session}` : null}
         currentSessionHref={currentSessionHref}
+        stockQty={stock?.currentQty ?? 0}
+        lowStockThreshold={office.lowStockThreshold}
+        forgottenOrders={forgottenOrders}
       />
     </div>
   );

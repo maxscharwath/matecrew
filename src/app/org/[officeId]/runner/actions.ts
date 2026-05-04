@@ -68,6 +68,31 @@ export async function markServed(
   return { success: true };
 }
 
+export async function markCancelled(
+  officeId: string,
+  requestId: string,
+): Promise<ActionResult> {
+  await requireMembership(officeId);
+  const t = await getTranslations();
+
+  const request = await prisma.dailyRequest.findUnique({ where: { id: requestId } });
+  if (request?.officeId !== officeId) {
+    return { success: false, error: t('errors.requestNotFound') };
+  }
+  if (request.status === "SERVED") {
+    return { success: false, error: t('errors.cannotCancelServed') };
+  }
+
+  await prisma.dailyRequest.update({
+    where: { id: requestId },
+    data: { status: "CANCELLED" },
+  });
+
+  revalidatePath(`/org/${officeId}/runner`);
+  revalidatePath(`/org/${officeId}/request`);
+  return { success: true };
+}
+
 export async function markUnserved(
   officeId: string,
   requestId: string

@@ -17,6 +17,7 @@ enum Role {
 enum RequestStatus {
   REQUESTED
   SERVED
+  CANCELLED
 }
 
 enum ConsumptionSource {
