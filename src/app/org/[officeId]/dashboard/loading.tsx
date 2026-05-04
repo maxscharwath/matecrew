@@ -36,10 +36,26 @@ export default function DashboardLoading() {
         </CardContent>
       </Card>
 
+      {/* Personal stats + heatmap */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="mt-1 h-4 w-32" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {["total", "current", "longest", "last"].map((k) => (
+              <Skeleton key={k} className="h-19 w-full rounded-xl" />
+            ))}
+          </div>
+          <Skeleton className="h-28 w-full rounded-md" />
+        </CardContent>
+      </Card>
+
       {/* Stats grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
+        {["month", "all", "share", "balance"].map((k) => (
+          <Card key={k}>
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-28" />
               <Skeleton className="mt-1 h-9 w-16" />
@@ -58,21 +74,8 @@ export default function DashboardLoading() {
           <Skeleton className="mt-1 h-4 w-36" />
         </CardHeader>
         <CardContent className="space-y-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full rounded-md" />
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Recent requests */}
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="mt-1 h-4 w-48" />
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full rounded-md" />
+          {["a", "b"].map((k) => (
+            <Skeleton key={k} className="h-10 w-full rounded-md" />
           ))}
         </CardContent>
       </Card>
