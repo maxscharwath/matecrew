@@ -636,7 +636,11 @@
     "testFallback": "Test message for {office}",
     "monthlyBill": "<!here> :receipt: *Monthly bill — {office}*\n:calendar: {month}/{year}\n\n:busts_in_silhouette: {consumers} consumers · :coffee: {totalQty} matés · :moneybag: {totalCost} CHF\n\nCheck your reimbursements in the app!",
     "monthlyBillFallback": "Monthly bill generated for {office} ({month}/{year})",
-    "viewReimbursements": "View reimbursements"
+    "viewReimbursements": "View reimbursements",
+    "cutoffAlert": "<!here> :tea: *Maté{label} — {office}* — it's time!\n:package: *{count, plural, =1 {1 maté} other {# matés}}* to grab from the fridge.",
+    "cutoffFallback": "{count, plural, =1 {1 maté} other {# matés}} to serve ({office})",
+    "markAllServed": "✅ Mark all served",
+    "cutoffServedBy": ":white_check_mark: Served by *{name}* at {time}"
   },
   "slackLink": {
     "invalidTitle": "Link unavailable",

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   sendSlackMessage,
   buildSessionRequestMessage,
+  buildSessionCutoffMessage,
   updateSlackMessage,
 } from "@/lib/slack";
 import { listRequesterNames } from "@/lib/mate-request";
@@ -126,6 +127,128 @@ export async function sendSessionNotifications(options?: {
         results.push({
           office: office.name,
           session: session.label ?? session.startTime,
+          ok: false,
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Send cutoff-time Slack alerts: "Go fetch N matés" with a "mark all served"
+ * button. Mirrors `sendSessionNotifications` but keyed off `cutoffTime` and
+ * `cutoffNotifiedDate`. Skips silently when no one registered.
+ */
+export async function sendCutoffNotifications(options?: {
+  officeId?: string;
+  skipTimeWindow?: boolean;
+}): Promise<NotificationResult[]> {
+  const offices = await prisma.office.findMany({
+    where: {
+      slackChannelId: { not: null },
+      ...(options?.officeId ? { id: options.officeId } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      slackChannelId: true,
+      timezone: true,
+      locale: true,
+      mateSessions: {
+        select: {
+          id: true,
+          dayOfWeek: true,
+          cutoffTime: true,
+          label: true,
+          cutoffNotifiedDate: true,
+        },
+        orderBy: { cutoffTime: "asc" },
+      },
+    },
+  });
+
+  if (offices.length === 0) return [];
+
+  const today = getTodayDate();
+  const todayIso = toISODateString(today);
+  const results: NotificationResult[] = [];
+
+  for (const office of offices) {
+    const dayOfWeek = getDayOfWeek(office.timezone);
+    const currentTime = getCurrentTimeInTimezone(office.timezone);
+    const nowMinutes = timeToMinutes(currentTime);
+
+    const sessions = office.mateSessions.filter((s) => s.dayOfWeek === dayOfWeek);
+
+    for (const session of sessions) {
+      if (!options?.skipTimeWindow) {
+        const sessionMinutes = timeToMinutes(session.cutoffTime);
+        const diff = nowMinutes - sessionMinutes;
+        if (diff < 0 || diff >= SCHEDULE_STEP_MINUTES * 2) continue;
+      }
+
+      if (session.cutoffNotifiedDate?.getTime() === today.getTime()) {
+        continue;
+      }
+
+      try {
+        const requesters = await prisma.dailyRequest.findMany({
+          where: {
+            officeId: office.id,
+            mateSessionId: session.id,
+            date: today,
+            status: "REQUESTED",
+          },
+          include: { user: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        });
+
+        if (requesters.length === 0) {
+          // Still mark notified so we don't reprocess this slot all day.
+          await prisma.mateSession.update({
+            where: { id: session.id },
+            data: { cutoffNotifiedDate: today },
+          });
+          continue;
+        }
+
+        const { blocks, fallback } = await buildSessionCutoffMessage({
+          officeId: office.id,
+          officeName: office.name,
+          mateSessionId: session.id,
+          sessionLabel: session.label,
+          date: todayIso,
+          locale: office.locale,
+          count: requesters.length,
+          requesters: requesters.map((r) => r.user.name),
+        });
+        const posted = await sendSlackMessage(
+          office.slackChannelId!,
+          blocks,
+          fallback,
+        );
+
+        await prisma.mateSession.update({
+          where: { id: session.id },
+          data: {
+            cutoffNotifiedDate: today,
+            cutoffNotifiedMessageTs: posted.ts,
+            cutoffNotifiedChannelId: posted.channel,
+          },
+        });
+
+        results.push({
+          office: office.name,
+          session: session.label ?? session.cutoffTime,
+          ok: true,
+        });
+      } catch (e) {
+        results.push({
+          office: office.name,
+          session: session.label ?? session.cutoffTime,
           ok: false,
           error: e instanceof Error ? e.message : "Unknown error",
         });

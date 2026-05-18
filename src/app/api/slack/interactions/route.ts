@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import {
   SLACK_CANCEL_ACTION_ID,
+  SLACK_MARK_SERVED_ACTION_ID,
   SLACK_REQUEST_ACTION_ID,
   buildConnectErrorMessage,
   buildConnectSlackMessage,
+  buildSessionCutoffMessage,
   decodeActionValue,
   fetchSlackUserEmail,
+  updateSlackMessage,
   verifySlackSignature,
 } from "@/lib/slack";
 import { createSlackLinkToken } from "@/lib/slack-link-token";
@@ -16,6 +19,9 @@ import {
   type RequestResult,
 } from "@/lib/mate-request";
 import { refreshSlackSessionMessage } from "@/lib/notifications";
+import { serveSession } from "@/lib/serve-session";
+import { getCurrentTimeInTimezone } from "@/lib/date";
+import { revalidatePath } from "next/cache";
 
 interface InteractionPayload {
   type: string;
@@ -96,6 +102,96 @@ async function backfillSessionMessageRef(
   });
 }
 
+async function handleMarkServed(
+  ctx: { officeId: string; mateSessionId: string | null; date: string },
+  dateObj: Date,
+  payload: InteractionPayload,
+): Promise<Response> {
+  const office = await prisma.office.findUnique({
+    where: { id: ctx.officeId },
+    select: { name: true, locale: true, timezone: true },
+  });
+  const locale = office?.locale ?? "fr";
+
+  const user = await resolveUser(payload.user.id);
+
+  const result = await serveSession({
+    officeId: ctx.officeId,
+    mateSessionId: ctx.mateSessionId,
+    date: dateObj,
+    actingUserId: user?.id ?? null,
+    movementNote: `Slack mark-served by ${payload.user.name ?? payload.user.id}`,
+  });
+
+  if (result.kind === "empty") {
+    const { blocks } = await buildConnectErrorMessage({
+      locale,
+      reason: "served",
+    });
+    return ephemeral(blocks, "Nothing to serve");
+  }
+
+  revalidatePath(`/org/${ctx.officeId}/runner`);
+  revalidatePath(`/org/${ctx.officeId}/request`);
+
+  if (!office || !payload.channel?.id || !payload.message?.ts) {
+    return new Response(null, { status: 200 });
+  }
+
+  const sessionRow = ctx.mateSessionId
+    ? await prisma.mateSession.findUnique({
+        where: { id: ctx.mateSessionId },
+        select: { label: true },
+      })
+    : null;
+
+  const servedRequests = await prisma.dailyRequest.findMany({
+    where: {
+      officeId: ctx.officeId,
+      mateSessionId: ctx.mateSessionId,
+      date: dateObj,
+      status: "SERVED",
+    },
+    include: { user: { select: { name: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const userName = user
+    ? (await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { name: true },
+      }))?.name ?? payload.user.name ?? "?"
+    : payload.user.name ?? "?";
+
+  const { blocks, fallback } = await buildSessionCutoffMessage({
+    officeId: ctx.officeId,
+    officeName: office.name,
+    mateSessionId: ctx.mateSessionId,
+    sessionLabel: sessionRow?.label ?? null,
+    date: ctx.date,
+    locale,
+    count: servedRequests.length,
+    requesters: servedRequests.map((r) => r.user.name),
+    servedBy: {
+      name: userName,
+      time: getCurrentTimeInTimezone(office.timezone),
+    },
+  });
+
+  try {
+    await updateSlackMessage({
+      channel: payload.channel.id,
+      ts: payload.message.ts,
+      blocks,
+      text: fallback,
+    });
+  } catch {
+    // best-effort: serving already committed, message refresh isn't critical
+  }
+
+  return new Response(null, { status: 200 });
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const isValid = verifySlackSignature(
@@ -126,13 +222,18 @@ export async function POST(request: Request) {
   if (!action) return Response.json({});
   const isRequest = action.action_id === SLACK_REQUEST_ACTION_ID;
   const isCancel = action.action_id === SLACK_CANCEL_ACTION_ID;
-  if (!isRequest && !isCancel) return Response.json({});
+  const isMarkServed = action.action_id === SLACK_MARK_SERVED_ACTION_ID;
+  if (!isRequest && !isCancel && !isMarkServed) return Response.json({});
 
   const ctx = decodeActionValue(action.value);
   if (!ctx) return badRequest("Invalid action value");
 
   const dateObj = new Date(`${ctx.date}T00:00:00.000Z`);
   if (Number.isNaN(dateObj.getTime())) return badRequest("Invalid date");
+
+  if (isMarkServed) {
+    return handleMarkServed(ctx, dateObj, payload);
+  }
 
   const office = await prisma.office.findUnique({
     where: { id: ctx.officeId },

@@ -21,6 +21,7 @@ export async function getTranslator(locale: string) {
 
 export const SLACK_REQUEST_ACTION_ID = "request_mate";
 export const SLACK_CANCEL_ACTION_ID = "cancel_mate";
+export const SLACK_MARK_SERVED_ACTION_ID = "mark_session_served";
 
 /**
  * Encodes the (office, session, date) context into the button's `value`.
@@ -267,6 +268,89 @@ export async function buildSessionRequestMessage(opts: {
   });
 
   return { blocks, fallback: t("slack.newMessage") };
+}
+
+/**
+ * Cutoff-time message: posted when order registration closes, pings the channel
+ * to remind someone to fetch the requested matés and offers a one-click "mark
+ * everyone as served" button.
+ */
+export async function buildSessionCutoffMessage(opts: {
+  officeId: string;
+  officeName: string;
+  mateSessionId: string | null;
+  sessionLabel: string | null;
+  date: string;
+  locale: string;
+  count: number;
+  requesters: string[];
+  servedBy?: { name: string; time: string } | null;
+}) {
+  const t = await getTranslator(opts.locale);
+  const label = opts.sessionLabel ? ` — ${opts.sessionLabel}` : "";
+  const actionValue = encodeActionValue({
+    officeId: opts.officeId,
+    mateSessionId: opts.mateSessionId,
+    date: opts.date,
+  });
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: t("slack.cutoffAlert", {
+          label,
+          office: opts.officeName,
+          count: opts.count,
+        }),
+      },
+    },
+  ];
+
+  if (opts.requesters.length > 0) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: t("slack.requestersList", { names: opts.requesters.join(", ") }),
+      },
+    });
+  }
+
+  if (opts.servedBy) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: t("slack.cutoffServedBy", {
+          name: opts.servedBy.name,
+          time: opts.servedBy.time,
+        }),
+      },
+    });
+  } else {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: t("slack.markAllServed") },
+          action_id: SLACK_MARK_SERVED_ACTION_ID,
+          value: actionValue,
+          style: "primary",
+        },
+      ],
+    });
+  }
+
+  return {
+    blocks,
+    fallback: t("slack.cutoffFallback", {
+      office: opts.officeName,
+      count: opts.count,
+    }),
+  };
 }
 
 export async function buildLowStockMessage(

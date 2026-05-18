@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { serveSession } from "@/lib/serve-session";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -158,49 +159,16 @@ export async function markAllServed(
   const { membership } = await requireMembership(officeId);
   const t = await getTranslations();
 
-  const pending = await prisma.dailyRequest.findMany({
-    where: { officeId, date, status: "REQUESTED", mateSessionId },
+  const result = await serveSession({
+    officeId,
+    mateSessionId,
+    date,
+    actingUserId: membership.userId,
   });
 
-  if (pending.length === 0) {
+  if (result.kind === "empty") {
     return { success: false, error: t('errors.noPendingRequests') };
   }
-
-  const stock = await prisma.stock.findUnique({ where: { officeId } });
-  const newQty = (stock?.currentQty ?? 0) - pending.length;
-
-  await prisma.$transaction([
-    prisma.dailyRequest.updateMany({
-      where: { id: { in: pending.map((r) => r.id) } },
-      data: { status: "SERVED" },
-    }),
-    ...pending.map((r) =>
-      prisma.consumptionEntry.create({
-        data: {
-          officeId,
-          userId: r.userId,
-          date: r.date,
-          qty: 1,
-          source: "DAILY_REQUEST",
-        },
-      }),
-    ),
-    prisma.stockMovement.create({
-      data: {
-        officeId,
-        delta: -pending.length,
-        reason: "SERVED",
-        note: `Batch serve (${pending.length})`,
-        userId: membership.userId,
-      },
-    }),
-    prisma.stock.update({
-      where: { officeId },
-      data: { currentQty: newQty },
-    }),
-  ]);
-
-  checkAndAlertLowStock(officeId).catch(() => {});
 
   revalidatePath(`/org/${officeId}/runner`);
   revalidatePath(`/org/${officeId}/request`);

@@ -176,6 +176,9 @@ model MateSession {
   lastNotifiedDate      DateTime? @db.Date // idempotency: skip if already notified today
   lastNotifiedMessageTs String?   // Slack message ts, used to chat.update the live message when requests change
   lastNotifiedChannelId String?
+  cutoffNotifiedDate      DateTime? @db.Date
+  cutoffNotifiedMessageTs String?
+  cutoffNotifiedChannelId String?
 
   createdAt DateTime @default(now())
 
