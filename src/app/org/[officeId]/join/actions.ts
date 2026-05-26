@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth-utils";
 import { getTranslations } from "next-intl/server";
+import { notifyAdminsOfJoinRequest } from "@/lib/notify-join-request";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -45,6 +46,13 @@ export async function createJoinRequest(
     where: { userId_officeId: { userId: session.user.id, officeId } },
     create: { userId: session.user.id, officeId },
     update: { status: "PENDING", createdAt: new Date() },
+  });
+
+  notifyAdminsOfJoinRequest({
+    officeId,
+    requesterUserId: session.user.id,
+  }).catch((e) => {
+    console.error("[createJoinRequest] notification failed", e);
   });
 
   revalidatePath(`/org/${officeId}`);

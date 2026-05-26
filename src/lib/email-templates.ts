@@ -95,6 +95,34 @@ export function passwordResetTemplate(resetUrl: string): string {
   `);
 }
 
+export function joinRequestTemplate(opts: {
+  title: string;
+  intro: string;
+  requesterLabel: string;
+  requesterName: string;
+  requesterEmail: string;
+  officeLabel: string;
+  officeName: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}): string {
+  const row = (label: string, value: string) => `
+    <tr>
+      <td style="padding:6px 0;font-size:13px;color:${colors.mutedForeground};width:120px;">${label}</td>
+      <td style="padding:6px 0;font-size:14px;color:${colors.foreground};">${value}</td>
+    </tr>`;
+  return layout(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
+    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
+    ${divider()}
+    <table cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+      ${row(opts.requesterLabel, `${opts.requesterName} &lt;${opts.requesterEmail}&gt;`)}
+      ${row(opts.officeLabel, opts.officeName)}
+    </table>
+    ${button(opts.buttonLabel, opts.buttonUrl)}
+  `);
+}
+
 export function emailVerificationTemplate(verifyUrl: string): string {
   return layout(`
     <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">Verify your email</h1>

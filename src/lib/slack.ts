@@ -353,6 +353,50 @@ export async function buildSessionCutoffMessage(opts: {
   };
 }
 
+/**
+ * DM to office admins announcing a new pending join request, with a link to
+ * the admin members page where they can approve or reject.
+ */
+export async function buildJoinRequestMessage(opts: {
+  locale: string;
+  requesterName: string;
+  requesterEmail: string;
+  officeName: string;
+  reviewUrl: string;
+}) {
+  const t = await getTranslator(opts.locale);
+  return {
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: t("slack.joinRequest", {
+            name: opts.requesterName,
+            email: opts.requesterEmail,
+            office: opts.officeName,
+          }),
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: t("slack.joinRequestReview") },
+            url: opts.reviewUrl,
+            style: "primary",
+          },
+        ],
+      },
+    ],
+    fallback: t("slack.joinRequestFallback", {
+      name: opts.requesterName,
+      office: opts.officeName,
+    }),
+  };
+}
+
 export async function buildLowStockMessage(
   officeName: string,
   currentQty: number,

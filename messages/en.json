@@ -640,7 +640,20 @@
     "cutoffAlert": "<!here> :tea: *Maté{label} — {office}* — it's time!\n:package: *{count, plural, =1 {1 maté} other {# matés}}* to grab from the fridge.",
     "cutoffFallback": "{count, plural, =1 {1 maté} other {# matés}} to serve ({office})",
     "markAllServed": "✅ Mark all served",
-    "cutoffServedBy": ":white_check_mark: Served by *{name}* at {time}"
+    "cutoffServedBy": ":white_check_mark: Served by *{name}* at {time}",
+    "joinRequest": ":wave: *New join request — {office}*\n*{name}* (`{email}`) wants to join the office.",
+    "joinRequestReview": "Review request",
+    "joinRequestFallback": "{name} wants to join {office}"
+  },
+  "email": {
+    "joinRequest": {
+      "subject": "New join request — {office}",
+      "title": "New join request",
+      "intro": "Someone wants to join the {office} office.",
+      "requesterLabel": "Requester",
+      "officeLabel": "Office",
+      "button": "Review request"
+    }
   },
   "slackLink": {
     "invalidTitle": "Link unavailable",
