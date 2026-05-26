@@ -15,6 +15,8 @@ function isEmailAllowed(email: string): boolean {
   return !!domain && allowedDomains.includes(domain);
 }
 
+const passwordAuthEnabled = process.env.DISABLE_PASSWORD_AUTH !== "true";
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
@@ -34,7 +36,7 @@ export const auth = betterAuth({
   },
 
   emailAndPassword: {
-    enabled: true,
+    enabled: passwordAuthEnabled,
     minPasswordLength: 8,
     autoSignIn: true,
     sendResetPassword: async ({ user, url }) => {
@@ -43,7 +45,7 @@ export const auth = betterAuth({
   },
 
   emailVerification: {
-    sendOnSignUp: true,
+    sendOnSignUp: passwordAuthEnabled,
     sendVerificationEmail: async ({ user, url }) => {
       await sendEmailVerificationEmail(user.email, url);
     },
@@ -66,9 +68,11 @@ export const auth = betterAuth({
     },
   },
 
-  accountLinking: {
-    enabled: true,
-    trustedProviders: ["microsoft"],
+  account: {
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ["microsoft"],
+    },
   },
 
   plugins: [nextCookies()],

@@ -18,7 +18,7 @@ import {
 import { OAuthButtons } from "@/components/oauth-buttons";
 import type { OAuthProvider } from "@/lib/oauth-providers";
 
-export function SignInForm({ oauthProviders, allowedDomain, redirectTo }: { oauthProviders: OAuthProvider[]; allowedDomain: string | null; redirectTo?: string }) {
+export function SignInForm({ oauthProviders, allowedDomain, passwordEnabled, redirectTo }: { oauthProviders: OAuthProvider[]; allowedDomain: string | null; passwordEnabled: boolean; redirectTo?: string }) {
   const router = useRouter();
   const t = useTranslations();
   const [error, setError] = useState<string | null>(null);
@@ -64,46 +64,51 @@ export function SignInForm({ oauthProviders, allowedDomain, redirectTo }: { oaut
             loading={loading}
             onLoadingChange={setLoading}
             redirectTo={redirectTo}
+            showSeparator={passwordEnabled}
           />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">{t('auth.email')}</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder={allowedDomain ? `you@${allowedDomain}` : t('auth.emailPlaceholder')}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">{t('auth.password')}</Label>
-                <Link href="/forgot-password" className="text-sm text-muted-foreground underline">
-                  {t('auth.forgotPassword')}
+          {passwordEnabled && (
+            <>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">{t('auth.email')}</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder={allowedDomain ? `you@${allowedDomain}` : t('auth.emailPlaceholder')}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">{t('auth.password')}</Label>
+                    <Link href="/forgot-password" className="text-sm text-muted-foreground underline">
+                      {t('auth.forgotPassword')}
+                    </Link>
+                  </div>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    required
+                  />
+                </div>
+                {error && (
+                  <p className="text-sm text-red-500">{error}</p>
+                )}
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? t('auth.signingIn') : t('auth.signIn')}
+                </Button>
+              </form>
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                {t('auth.noAccount')}{" "}
+                <Link href={redirectTo ? `/sign-up?redirectTo=${encodeURIComponent(redirectTo)}` : "/sign-up"} className="text-primary underline">
+                  {t('auth.createOne')}
                 </Link>
-              </div>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-sm text-red-500">{error}</p>
-            )}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? t('auth.signingIn') : t('auth.signIn')}
-            </Button>
-          </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            {t('auth.noAccount')}{" "}
-            <Link href={redirectTo ? `/sign-up?redirectTo=${encodeURIComponent(redirectTo)}` : "/sign-up"} className="text-primary underline">
-              {t('auth.createOne')}
-            </Link>
-          </p>
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

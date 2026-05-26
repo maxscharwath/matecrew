@@ -23,12 +23,14 @@ export function OAuthButtons({
   loading,
   onLoadingChange,
   redirectTo,
+  showSeparator = true,
 }: {
   providers: OAuthProvider[];
   mode: "signIn" | "signUp";
   loading: boolean;
   onLoadingChange: (loading: boolean) => void;
   redirectTo?: string;
+  showSeparator?: boolean;
 }) {
   const t = useTranslations();
 
@@ -57,12 +59,14 @@ export function OAuthButtons({
         </Button>
       ))}
 
-      <div className="relative my-4">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          {t("common.or")}
-        </span>
-      </div>
+      {showSeparator && (
+        <div className="relative my-4">
+          <Separator />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+            {t("common.or")}
+          </span>
+        </div>
+      )}
     </>
   );
 }

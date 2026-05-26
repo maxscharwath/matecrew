@@ -31,3 +31,7 @@ export function getFirstAllowedDomain(): string | null {
   const first = raw.split(",").map((d) => d.trim().toLowerCase()).filter(Boolean)[0];
   return first ?? null;
 }
+
+export function isPasswordAuthEnabled(): boolean {
+  return process.env.DISABLE_PASSWORD_AUTH !== "true";
+}
