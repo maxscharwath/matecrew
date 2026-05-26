@@ -65,6 +65,9 @@ export const auth = betterAuth({
       clientId: process.env.MICROSOFT_CLIENT_ID!,
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
       tenantId: process.env.MICROSOFT_TENANT_ID ?? "common",
+      // Microsoft's ID token doesn't include `email_verified`; trust the
+      // provider so users don't get a verification email after SSO sign-in.
+      mapProfileToUser: () => ({ emailVerified: true }),
     },
   },
 
