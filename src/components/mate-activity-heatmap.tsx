@@ -39,7 +39,10 @@ export function MateActivityHeatmap({
   legendLess,
   legendMore,
 }: Props) {
-  const cellWidth = "0.85rem";
+  // Cells size fluidly: each column is at most 0.85rem (desktop look), but
+  // shrinks uniformly when the container is narrower so the whole year fits
+  // without a horizontal scrollbar.
+  const gridCols = `repeat(${weeks.length}, minmax(0, 0.85rem))`;
 
   return (
     <TooltipProvider delayDuration={120}>
@@ -57,96 +60,89 @@ export function MateActivityHeatmap({
           </div>
         </div>
 
-        <div className="relative">
-          <div className="overflow-x-auto pb-1">
-            <div className="inline-flex min-w-fit flex-col gap-2">
-              <div className="flex gap-2">
-                <div
-                  className="grid grid-rows-7 pt-4 text-[10px] text-muted-foreground"
-                  style={{ rowGap: "3px" }}
-                >
-                  {weekdayLabels.map((d, i) => (
-                    <div
-                      key={d + i}
-                      className="flex h-[0.85rem] items-center pr-1 leading-3"
-                      style={{ visibility: i % 2 === 1 ? "visible" : "hidden" }}
-                    >
-                      {d}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <div
-                    className="grid h-3 grid-flow-col gap-0.75 text-[10px] text-muted-foreground"
-                    style={{ gridAutoColumns: cellWidth }}
-                  >
-                    {monthLabels.map((label, i) => (
-                      <div
-                        key={`m-${i}-${label ?? "x"}`}
-                        className="whitespace-nowrap leading-3"
-                      >
-                        {label ?? ""}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div
-                    className="grid grid-flow-col grid-rows-7 gap-0.75"
-                    style={{ gridAutoColumns: cellWidth }}
-                  >
-                    {weeks.flatMap((week, w) =>
-                      week.map((cell, d) => {
-                        if (!cell.date) {
-                          return (
-                            <div
-                              key={`${w}-${d}`}
-                              className="size-[0.85rem]"
-                              aria-hidden
-                            />
-                          );
-                        }
-                        return (
-                          <Tooltip key={`${w}-${d}`}>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={cn(
-                                  "size-[0.85rem] rounded-[3px] transition-all",
-                                  "hover:ring-2 hover:ring-amber-500 hover:ring-offset-1 hover:ring-offset-background",
-                                  "focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none",
-                                  BUCKET_CLASSES[cell.bucket],
-                                )}
-                                tabIndex={cell.qty > 0 ? 0 : -1}
-                                aria-label={
-                                  cell.dateLabel && cell.countLabel
-                                    ? `${cell.countLabel}, ${cell.dateLabel}`
-                                    : undefined
-                                }
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent
-                              side="top"
-                              className="flex flex-col items-center gap-0.5 px-2.5 py-1.5"
-                            >
-                              <span className="font-semibold">
-                                {cell.countLabel}
-                              </span>
-                              {cell.dateLabel && (
-                                <span className="text-[10px] opacity-80">
-                                  {cell.dateLabel}
-                                </span>
-                              )}
-                            </TooltipContent>
-                          </Tooltip>
-                        );
-                      }),
-                    )}
-                  </div>
-                </div>
+        <div className="flex gap-2">
+          <div
+            className="hidden grid-rows-7 pt-4 text-[10px] text-muted-foreground sm:grid"
+            style={{ rowGap: "3px" }}
+          >
+            {weekdayLabels.map((d, i) => (
+              <div
+                key={d + i}
+                className="flex h-[0.85rem] items-center pr-1 leading-3"
+                style={{ visibility: i % 2 === 1 ? "visible" : "hidden" }}
+              >
+                {d}
               </div>
+            ))}
+          </div>
+
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div
+              className="grid h-3 gap-px text-[10px] text-muted-foreground sm:gap-0.75"
+              style={{ gridTemplateColumns: gridCols }}
+            >
+              {monthLabels.map((label, i) => (
+                <div
+                  key={`m-${i}-${label ?? "x"}`}
+                  className="overflow-hidden whitespace-nowrap leading-3"
+                >
+                  {label ?? ""}
+                </div>
+              ))}
+            </div>
+
+            <div
+              className="grid grid-rows-7 gap-px sm:gap-0.75"
+              style={{ gridTemplateColumns: gridCols, gridAutoFlow: "column" }}
+            >
+              {weeks.flatMap((week, w) =>
+                week.map((cell, d) => {
+                  if (!cell.date) {
+                    return (
+                      <div
+                        key={`${w}-${d}`}
+                        className="aspect-square w-full"
+                        aria-hidden
+                      />
+                    );
+                  }
+                  return (
+                    <Tooltip key={`${w}-${d}`}>
+                      <TooltipTrigger asChild>
+                        <div
+                          className={cn(
+                            "aspect-square w-full rounded-[3px] transition-all",
+                            "hover:ring-2 hover:ring-amber-500 hover:ring-offset-1 hover:ring-offset-background",
+                            "focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none",
+                            BUCKET_CLASSES[cell.bucket],
+                          )}
+                          tabIndex={cell.qty > 0 ? 0 : -1}
+                          aria-label={
+                            cell.dateLabel && cell.countLabel
+                              ? `${cell.countLabel}, ${cell.dateLabel}`
+                              : undefined
+                          }
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="top"
+                        className="flex flex-col items-center gap-0.5 px-2.5 py-1.5"
+                      >
+                        <span className="font-semibold">
+                          {cell.countLabel}
+                        </span>
+                        {cell.dateLabel && (
+                          <span className="text-[10px] opacity-80">
+                            {cell.dateLabel}
+                          </span>
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                }),
+              )}
             </div>
           </div>
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-linear-to-l from-card to-transparent sm:hidden" />
         </div>
       </div>
     </TooltipProvider>
