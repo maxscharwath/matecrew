@@ -57,7 +57,8 @@ export function getDomainAliasGroups(): string[][] {
 
 /** Resolve a domain to its canonical form (itself if not aliased). */
 export function canonicalizeDomain(domain: string): string {
-  const d = domain.trim().toLowerCase();
+  // Strip a trailing dot (valid FQDN form) so "owt.swiss." === "owt.swiss".
+  const d = domain.trim().toLowerCase().replace(/\.$/, "");
   return canonicalDomainMap.get(d) ?? d;
 }
 

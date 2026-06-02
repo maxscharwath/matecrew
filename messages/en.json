@@ -535,7 +535,10 @@
     "notificationsSent": "{count} notification(s) sent: {sessions}",
     "notificationErrors": "{count} error(s): {errors}",
     "periodCreated": "Period {month}/{year} created — {lines} reimbursement line(s).",
-    "mergeFailed": "Failed to merge accounts."
+    "mergeFailed": "Failed to merge accounts.",
+    "mergeSameAccount": "Cannot merge an account into itself.",
+    "mergeNotFound": "One or both accounts no longer exist.",
+    "mergeIdentityMismatch": "These accounts do not share the same email identity and cannot be merged."
   },
   "pagination": {
     "showing": "{from}–{to} of {total}",
@@ -682,6 +685,15 @@
     "mergeSuccess": "Accounts merged",
     "confirmTitle": "Merge accounts?",
     "confirmDescription": "Merge {count, plural, one {# account} other {# accounts}} into {email}? All their data will be moved onto the kept account and the {count, plural, one {duplicate} other {duplicates}} permanently deleted. This cannot be undone.",
-    "confirmMerge": "Merge"
+    "confirmMerge": "Merge",
+    "keepGroupLabel": "Choose which account to keep",
+    "slackLinked": "Slack linked",
+    "emailVerified": "Email verified",
+    "countMemberships": "{count, plural, one {# office membership} other {# office memberships}}",
+    "countRequests": "{count, plural, one {# daily request} other {# daily requests}}",
+    "countConsumption": "{count, plural, one {# consumption entry} other {# consumption entries}}",
+    "countReimbursements": "{count, plural, one {# reimbursement line} other {# reimbursement lines}}",
+    "mergingProgress": "Merging {done}/{total}…",
+    "mergePartial": "Merged {done} of {total}, then failed: {error}"
   }
 }

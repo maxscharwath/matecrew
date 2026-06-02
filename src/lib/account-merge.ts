@@ -11,6 +11,19 @@ import { prisma } from "@/lib/prisma";
 import { canonicalEmailKey } from "@/lib/email-identity";
 import type { Prisma } from "@/generated/prisma/client";
 
+export type MergeErrorCode =
+  | "SAME_ACCOUNT"
+  | "NOT_FOUND"
+  | "IDENTITY_MISMATCH";
+
+/** Thrown for expected, user-presentable merge failures (mapped to i18n). */
+export class MergeError extends Error {
+  constructor(public readonly code: MergeErrorCode) {
+    super(code);
+    this.name = "MergeError";
+  }
+}
+
 export interface DuplicateUser {
   id: string;
   name: string;
@@ -23,11 +36,7 @@ export interface DuplicateUser {
     memberships: number;
     dailyRequests: number;
     consumptionEntries: number;
-    purchaseBatches: number;
     reimbursementLines: number;
-    stockMovements: number;
-    sessions: number;
-    accounts: number;
   };
 }
 
@@ -62,13 +71,8 @@ export async function findDuplicateAccountGroups(): Promise<DuplicateGroup[]> {
           memberships: true,
           dailyRequests: true,
           consumptionEntries: true,
-          orderedBatches: true,
-          paidBatches: true,
           reimbursementsFrom: true,
           reimbursementsTo: true,
-          stockMovements: true,
-          sessions: true,
-          accounts: true,
         },
       },
     },
@@ -91,12 +95,8 @@ export async function findDuplicateAccountGroups(): Promise<DuplicateGroup[]> {
         memberships: u._count.memberships,
         dailyRequests: u._count.dailyRequests,
         consumptionEntries: u._count.consumptionEntries,
-        purchaseBatches: u._count.orderedBatches + u._count.paidBatches,
         reimbursementLines:
           u._count.reimbursementsFrom + u._count.reimbursementsTo,
-        stockMovements: u._count.stockMovements,
-        sessions: u._count.sessions,
-        accounts: u._count.accounts,
       },
     };
     const existing = groups.get(key);
@@ -113,177 +113,232 @@ export async function findDuplicateAccountGroups(): Promise<DuplicateGroup[]> {
 /**
  * Merge `sourceUserId` into `targetUserId`. The target is kept as the canonical
  * account; the source's records are re-homed onto the target and the source row
- * is deleted. Runs in a single transaction. Throws if the accounts don't exist,
- * are identical, or don't share the same canonical identity.
+ * is deleted. Runs in a single transaction. Throws a `MergeError` if the
+ * accounts don't exist, are identical, or don't share the same canonical
+ * identity (the latter doubles as the "same duplicate group" guard, since the
+ * canonical key *is* the group key).
  */
 export async function mergeAccounts(
   targetUserId: string,
   sourceUserId: string
 ): Promise<MergeSummary> {
   if (targetUserId === sourceUserId) {
-    throw new Error("Cannot merge an account into itself.");
+    throw new MergeError("SAME_ACCOUNT");
   }
 
-  return prisma.$transaction(async (tx) => {
-    const [target, source] = await Promise.all([
-      tx.user.findUnique({
-        where: { id: targetUserId },
-        include: {
-          memberships: true,
-          joinRequests: true,
-          accounts: { select: { providerId: true } },
-        },
-      }),
-      tx.user.findUnique({
-        where: { id: sourceUserId },
-        include: { dailyRequests: true },
-      }),
-    ]);
+  return prisma.$transaction(
+    async (tx) => {
+      const [target, source] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: targetUserId },
+          include: {
+            memberships: true,
+            joinRequests: true,
+            accounts: { select: { providerId: true } },
+            dailyRequests: {
+              select: { date: true, officeId: true, mateSessionId: true },
+            },
+          },
+        }),
+        tx.user.findUnique({
+          where: { id: sourceUserId },
+          include: {
+            memberships: true,
+            joinRequests: true,
+            accounts: { select: { id: true, providerId: true } },
+            dailyRequests: {
+              select: { id: true, date: true, officeId: true, mateSessionId: true },
+            },
+          },
+        }),
+      ]);
 
-    if (!target || !source) {
-      throw new Error("One or both accounts no longer exist.");
-    }
+      if (!target || !source) {
+        throw new MergeError("NOT_FOUND");
+      }
 
-    const targetKey = canonicalEmailKey(target.email);
-    const sourceKey = canonicalEmailKey(source.email);
-    if (!targetKey || targetKey !== sourceKey) {
-      throw new Error(
-        "These accounts do not share the same email identity and cannot be merged."
+      const targetKey = canonicalEmailKey(target.email);
+      const sourceKey = canonicalEmailKey(source.email);
+      if (!targetKey || targetKey !== sourceKey) {
+        throw new MergeError("IDENTITY_MISMATCH");
+      }
+
+      // ── Sessions: revoke the source's (never transfer auth to another
+      //    identity); the absorbed person must re-authenticate. ──
+      await tx.session.deleteMany({ where: { userId: sourceUserId } });
+
+      // ── Simple FK reassignments (no unique constraints) ──
+      const reassign = {
+        where: { userId: sourceUserId },
+        data: { userId: targetUserId },
+      };
+      await tx.consumptionEntry.updateMany(reassign);
+      await tx.stockMovement.updateMany(reassign);
+      await tx.purchaseBatch.updateMany({
+        where: { orderedByUserId: sourceUserId },
+        data: { orderedByUserId: targetUserId },
+      });
+      await tx.purchaseBatch.updateMany({
+        where: { paidByUserId: sourceUserId },
+        data: { paidByUserId: targetUserId },
+      });
+      await tx.reimbursementLine.updateMany({
+        where: { fromUserId: sourceUserId },
+        data: { fromUserId: targetUserId },
+      });
+      await tx.reimbursementLine.updateMany({
+        where: { toUserId: sourceUserId },
+        data: { toUserId: targetUserId },
+      });
+      // Drop lines that collapsed into self-reimbursements (the two parties
+      // turned out to be the same person — they net to zero).
+      await tx.reimbursementLine.deleteMany({
+        where: { fromUserId: targetUserId, toUserId: targetUserId },
+      });
+
+      // ── Provider accounts: move only providers the target lacks; drop dupes ──
+      const targetProviders = new Set(target.accounts.map((a) => a.providerId));
+      const accountsToMove: string[] = [];
+      const accountsToDrop: string[] = [];
+      for (const acc of source.accounts) {
+        if (targetProviders.has(acc.providerId)) {
+          accountsToDrop.push(acc.id);
+        } else {
+          accountsToMove.push(acc.id);
+          targetProviders.add(acc.providerId);
+        }
+      }
+      if (accountsToDrop.length > 0) {
+        await tx.account.deleteMany({ where: { id: { in: accountsToDrop } } });
+      }
+      if (accountsToMove.length > 0) {
+        await tx.account.updateMany({
+          where: { id: { in: accountsToMove } },
+          data: { userId: targetUserId },
+        });
+      }
+
+      // ── Memberships: unique [userId, officeId]; union roles on conflict ──
+      const targetMembershipByOffice = new Map(
+        target.memberships.map((m) => [m.officeId, m])
       );
-    }
-
-    // ── Simple FK reassignments (no unique constraints to worry about) ──
-    const reassign = { where: { userId: sourceUserId }, data: { userId: targetUserId } };
-    await tx.consumptionEntry.updateMany(reassign);
-    await tx.stockMovement.updateMany(reassign);
-    await tx.session.updateMany(reassign);
-    await tx.purchaseBatch.updateMany({
-      where: { orderedByUserId: sourceUserId },
-      data: { orderedByUserId: targetUserId },
-    });
-    await tx.purchaseBatch.updateMany({
-      where: { paidByUserId: sourceUserId },
-      data: { paidByUserId: targetUserId },
-    });
-    await tx.reimbursementLine.updateMany({
-      where: { fromUserId: sourceUserId },
-      data: { fromUserId: targetUserId },
-    });
-    await tx.reimbursementLine.updateMany({
-      where: { toUserId: sourceUserId },
-      data: { toUserId: targetUserId },
-    });
-
-    // ── Provider accounts: move only providers the target lacks; drop dupes ──
-    const targetProviders = new Set(target.accounts.map((a) => a.providerId));
-    const sourceAccounts = await tx.account.findMany({
-      where: { userId: sourceUserId },
-      select: { id: true, providerId: true },
-    });
-    for (const acc of sourceAccounts) {
-      if (targetProviders.has(acc.providerId)) {
-        await tx.account.delete({ where: { id: acc.id } });
-      } else {
-        await tx.account.update({
-          where: { id: acc.id },
-          data: { userId: targetUserId },
-        });
-        targetProviders.add(acc.providerId);
+      const membershipsToMove: string[] = [];
+      for (const m of source.memberships) {
+        const existing = targetMembershipByOffice.get(m.officeId);
+        if (existing) {
+          const mergedRoles = Array.from(
+            new Set([...existing.roles, ...m.roles])
+          );
+          await tx.membership.update({
+            where: { id: existing.id },
+            data: { roles: mergedRoles },
+          });
+          await tx.membership.delete({ where: { id: m.id } });
+        } else {
+          membershipsToMove.push(m.id);
+        }
       }
-    }
-
-    // ── Memberships: unique [userId, officeId]; union roles on conflict ──
-    const targetMembershipByOffice = new Map(
-      target.memberships.map((m) => [m.officeId, m])
-    );
-    const sourceMemberships = await tx.membership.findMany({
-      where: { userId: sourceUserId },
-    });
-    for (const m of sourceMemberships) {
-      const existing = targetMembershipByOffice.get(m.officeId);
-      if (existing) {
-        const mergedRoles = Array.from(new Set([...existing.roles, ...m.roles]));
-        await tx.membership.update({
-          where: { id: existing.id },
-          data: { roles: mergedRoles },
-        });
-        await tx.membership.delete({ where: { id: m.id } });
-      } else {
-        await tx.membership.update({
-          where: { id: m.id },
+      if (membershipsToMove.length > 0) {
+        await tx.membership.updateMany({
+          where: { id: { in: membershipsToMove } },
           data: { userId: targetUserId },
         });
       }
-    }
 
-    // ── Join requests: unique [userId, officeId]; keep the target's ──
-    const targetJoinOffices = new Set(target.joinRequests.map((j) => j.officeId));
-    const sourceJoinRequests = await tx.joinRequest.findMany({
-      where: { userId: sourceUserId },
-    });
-    for (const j of sourceJoinRequests) {
-      if (targetJoinOffices.has(j.officeId)) {
-        await tx.joinRequest.delete({ where: { id: j.id } });
-      } else {
-        await tx.joinRequest.update({
-          where: { id: j.id },
+      // ── Join requests: unique [userId, officeId]; keep the target's ──
+      const targetJoinOffices = new Set(
+        target.joinRequests.map((j) => j.officeId)
+      );
+      const joinToMove: string[] = [];
+      const joinToDrop: string[] = [];
+      for (const j of source.joinRequests) {
+        if (targetJoinOffices.has(j.officeId)) joinToDrop.push(j.id);
+        else joinToMove.push(j.id);
+      }
+      if (joinToDrop.length > 0) {
+        await tx.joinRequest.deleteMany({ where: { id: { in: joinToDrop } } });
+      }
+      if (joinToMove.length > 0) {
+        await tx.joinRequest.updateMany({
+          where: { id: { in: joinToMove } },
           data: { userId: targetUserId },
         });
-        targetJoinOffices.add(j.officeId);
       }
-    }
 
-    // ── Daily requests: unique [date, officeId, userId, mateSessionId] ──
-    const targetDailyKeys = new Set(
-      (
-        await tx.dailyRequest.findMany({
-          where: { userId: targetUserId },
-          select: { date: true, officeId: true, mateSessionId: true },
-        })
-      ).map((d) => dailyRequestKey(d.date, d.officeId, d.mateSessionId))
-    );
-    for (const d of source.dailyRequests) {
-      const key = dailyRequestKey(d.date, d.officeId, d.mateSessionId);
-      if (targetDailyKeys.has(key)) {
-        await tx.dailyRequest.delete({ where: { id: d.id } });
-      } else {
-        await tx.dailyRequest.update({
-          where: { id: d.id },
+      // ── Daily requests: unique [date, officeId, userId, mateSessionId].
+      //    Postgres treats NULLs as distinct, so rows with a null mateSessionId
+      //    never collide — always move them. Only dedupe the keyed ones. ──
+      const targetDailyKeys = new Set(
+        target.dailyRequests
+          .filter((d) => d.mateSessionId !== null)
+          .map((d) => dailyRequestKey(d.date, d.officeId, d.mateSessionId))
+      );
+      const dailyToMove: string[] = [];
+      const dailyToDrop: string[] = [];
+      for (const d of source.dailyRequests) {
+        if (d.mateSessionId === null) {
+          dailyToMove.push(d.id);
+          continue;
+        }
+        const key = dailyRequestKey(d.date, d.officeId, d.mateSessionId);
+        if (targetDailyKeys.has(key)) {
+          dailyToDrop.push(d.id);
+        } else {
+          dailyToMove.push(d.id);
+          targetDailyKeys.add(key);
+        }
+      }
+      if (dailyToDrop.length > 0) {
+        await tx.dailyRequest.deleteMany({ where: { id: { in: dailyToDrop } } });
+      }
+      if (dailyToMove.length > 0) {
+        await tx.dailyRequest.updateMany({
+          where: { id: { in: dailyToMove } },
           data: { userId: targetUserId },
         });
-        targetDailyKeys.add(key);
       }
-    }
 
-    // ── Scalar fields: fill gaps on the target, then free the source's ──
-    // Release the source's unique slackUserId before re-assigning it.
-    await tx.user.update({
-      where: { id: sourceUserId },
-      data: { slackUserId: null },
-    });
+      // ── Scalar fields: fill gaps on the target, then free the source's ──
+      // Release the source's unique slackUserId before re-assigning it.
+      await tx.user.update({
+        where: { id: sourceUserId },
+        data: { slackUserId: null },
+      });
 
-    const targetPatch: Prisma.UserUpdateInput = {};
-    if (!target.slackUserId && source.slackUserId) {
-      targetPatch.slackUserId = source.slackUserId;
-    }
-    if (!target.image && source.image) {
-      targetPatch.image = source.image;
-    }
-    if (!target.defaultOfficeId && source.defaultOfficeId) {
-      targetPatch.defaultOffice = { connect: { id: source.defaultOfficeId } };
-    }
-    if (!target.emailVerified && source.emailVerified) {
-      targetPatch.emailVerified = true;
-    }
-    if (Object.keys(targetPatch).length > 0) {
-      await tx.user.update({ where: { id: targetUserId }, data: targetPatch });
-    }
+      // Offices the target belongs to after the membership merge.
+      const targetOfficeIds = new Set<string>([
+        ...target.memberships.map((m) => m.officeId),
+        ...source.memberships.map((m) => m.officeId),
+      ]);
 
-    // ── Remove the now-empty source account ──
-    await tx.user.delete({ where: { id: sourceUserId } });
+      const targetPatch: Prisma.UserUpdateInput = {};
+      if (!target.slackUserId && source.slackUserId) {
+        targetPatch.slackUserId = source.slackUserId;
+      }
+      if (!target.image && source.image) {
+        targetPatch.image = source.image;
+      }
+      if (
+        !target.defaultOfficeId &&
+        source.defaultOfficeId &&
+        targetOfficeIds.has(source.defaultOfficeId)
+      ) {
+        targetPatch.defaultOffice = { connect: { id: source.defaultOfficeId } };
+      }
+      if (!target.emailVerified && source.emailVerified) {
+        targetPatch.emailVerified = true;
+      }
+      if (Object.keys(targetPatch).length > 0) {
+        await tx.user.update({ where: { id: targetUserId }, data: targetPatch });
+      }
 
-    return { targetUserId, sourceUserId };
-  });
+      // ── Remove the now-empty source account ──
+      await tx.user.delete({ where: { id: sourceUserId } });
+
+      return { targetUserId, sourceUserId };
+    },
+    { timeout: 30_000, maxWait: 10_000 }
+  );
 }
 
 function dailyRequestKey(

@@ -535,7 +535,10 @@
     "notificationsSent": "{count} notification(s) envoyée(s) : {sessions}",
     "notificationErrors": "{count} erreur(s) : {errors}",
     "periodCreated": "Période {month}/{year} créée — {lines} ligne(s) de remboursement.",
-    "mergeFailed": "Échec de la fusion des comptes."
+    "mergeFailed": "Échec de la fusion des comptes.",
+    "mergeSameAccount": "Impossible de fusionner un compte avec lui-même.",
+    "mergeNotFound": "Un ou les deux comptes n'existent plus.",
+    "mergeIdentityMismatch": "Ces comptes n'ont pas la même identité e-mail et ne peuvent pas être fusionnés."
   },
   "pagination": {
     "showing": "{from}–{to} sur {total}",
@@ -682,6 +685,15 @@
     "mergeSuccess": "Comptes fusionnés",
     "confirmTitle": "Fusionner les comptes ?",
     "confirmDescription": "Fusionner {count, plural, one {# compte} other {# comptes}} dans {email} ? Toutes les données seront transférées sur le compte conservé et {count, plural, one {le doublon sera supprimé} other {les doublons seront supprimés}} définitivement. Cette action est irréversible.",
-    "confirmMerge": "Fusionner"
+    "confirmMerge": "Fusionner",
+    "keepGroupLabel": "Choisir le compte à conserver",
+    "slackLinked": "Slack lié",
+    "emailVerified": "E-mail vérifié",
+    "countMemberships": "{count, plural, one {# adhésion} other {# adhésions}}",
+    "countRequests": "{count, plural, one {# demande} other {# demandes}}",
+    "countConsumption": "{count, plural, one {# consommation} other {# consommations}}",
+    "countReimbursements": "{count, plural, one {# ligne de remboursement} other {# lignes de remboursement}}",
+    "mergingProgress": "Fusion {done}/{total}…",
+    "mergePartial": "{done} sur {total} fusionné(s), puis échec : {error}"
   }
 }

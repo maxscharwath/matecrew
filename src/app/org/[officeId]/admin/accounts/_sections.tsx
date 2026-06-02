@@ -3,6 +3,7 @@ import { findDuplicateAccountGroups } from "@/lib/account-merge";
 import { getDomainAliasGroups } from "@/lib/email-identity";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { AccountMergeCard } from "@/components/account-merge-card";
+import type { MergeCandidate } from "@/components/account-merge-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle2 } from "lucide-react";
@@ -59,23 +60,21 @@ export async function DuplicatesSection({ officeId }: SectionProps) {
     );
   }
 
-  const cards = await Promise.all(
-    groups.map(async (group) => ({
-      key: group.key,
-      users: await Promise.all(
-        group.users.map(async (u) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          avatarUrl: resolveAvatarUrl(u.image),
-          slackLinked: u.slackUserId !== null,
-          emailVerified: u.emailVerified,
-          createdAt: u.createdAt.toISOString(),
-          counts: u.counts,
-        }))
-      ),
-    }))
-  );
+  const cards = groups.map((group) => ({
+    key: group.key,
+    users: group.users.map(
+      (u): MergeCandidate => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        avatarUrl: resolveAvatarUrl(u.image),
+        slackLinked: u.slackUserId !== null,
+        emailVerified: u.emailVerified,
+        createdAt: u.createdAt.toISOString(),
+        counts: u.counts,
+      })
+    ),
+  }));
 
   return (
     <div className="space-y-4">
