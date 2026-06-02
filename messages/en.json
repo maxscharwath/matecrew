@@ -74,6 +74,7 @@
     "consumption": "Consumption",
     "settlements": "Settlements",
     "members": "Members",
+    "accounts": "Accounts",
     "switchOffice": "Switch office"
   },
   "home": {
@@ -533,7 +534,11 @@
     "totalMustBePositive": "Total must be positive",
     "notificationsSent": "{count} notification(s) sent: {sessions}",
     "notificationErrors": "{count} error(s): {errors}",
-    "periodCreated": "Period {month}/{year} created — {lines} reimbursement line(s)."
+    "periodCreated": "Period {month}/{year} created — {lines} reimbursement line(s).",
+    "mergeFailed": "Failed to merge accounts.",
+    "mergeSameAccount": "Cannot merge an account into itself.",
+    "mergeNotFound": "One or both accounts no longer exist.",
+    "mergeIdentityMismatch": "These accounts do not share the same email identity and cannot be merged."
   },
   "pagination": {
     "showing": "{from}–{to} of {total}",
@@ -666,5 +671,29 @@
     "confirmTitle": "Link your Slack account",
     "confirmBody": "Link Slack user {slackUser} to {email}? You will then be registered for the current maté session.",
     "confirmButton": "Confirm and register"
+  },
+  "accounts": {
+    "title": "Duplicate Accounts",
+    "subtitle": "Detect and merge accounts that belong to the same person across multiple email domains.",
+    "noDuplicates": "No duplicate accounts detected.",
+    "aliasGroups": "Domains treated as equivalent",
+    "accountsCount": "{count, plural, one {# account} other {# accounts}}",
+    "keepBadge": "Keep",
+    "createdOn": "Created {date}",
+    "mergeButton": "{count, plural, =0 {Pick an account to keep} one {Merge # account} other {Merge # accounts}}",
+    "merging": "Merging...",
+    "mergeSuccess": "Accounts merged",
+    "confirmTitle": "Merge accounts?",
+    "confirmDescription": "Merge {count, plural, one {# account} other {# accounts}} into {email}? All their data will be moved onto the kept account and the {count, plural, one {duplicate} other {duplicates}} permanently deleted. This cannot be undone.",
+    "confirmMerge": "Merge",
+    "keepGroupLabel": "Choose which account to keep",
+    "slackLinked": "Slack linked",
+    "emailVerified": "Email verified",
+    "countMemberships": "{count, plural, one {# office membership} other {# office memberships}}",
+    "countRequests": "{count, plural, one {# daily request} other {# daily requests}}",
+    "countConsumption": "{count, plural, one {# consumption entry} other {# consumption entries}}",
+    "countReimbursements": "{count, plural, one {# reimbursement line} other {# reimbursement lines}}",
+    "mergingProgress": "Merging {done}/{total}…",
+    "mergePartial": "Merged {done} of {total}, then failed: {error}"
   }
 }
