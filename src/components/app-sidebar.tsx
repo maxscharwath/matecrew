@@ -11,6 +11,7 @@ import {
   ChevronsUpDown,
   ClipboardList,
   CupSoda,
+  GitMerge,
   HandCoins,
   LogOut,
   Package,
@@ -89,6 +90,7 @@ export function AppSidebar({
 
   const adminNav: NavItem[] = [
     { path: "/admin/members", label: t("nav.members"), icon: Users },
+    { path: "/admin/accounts", label: t("nav.accounts"), icon: GitMerge },
     { path: "/admin/schedule", label: t("nav.schedule"), icon: CalendarDays },
     { path: "/admin/cron", label: t("nav.cronJobs"), icon: Timer },
     { path: "/admin/stock", label: t("nav.stock"), icon: Package },
