@@ -12,6 +12,7 @@ import {
   verifySlackSignature,
 } from "@/lib/slack";
 import { createSlackLinkToken } from "@/lib/slack-link-token";
+import { aliasedEmails } from "@/lib/email-identity";
 import {
   cancelMateRequest,
   createMateRequest,
@@ -52,8 +53,13 @@ async function resolveUser(
   const email = await fetchSlackUserEmail(slackUserId);
   if (!email) return null;
 
-  const byEmail = await prisma.user.findUnique({
-    where: { email },
+  // Slack and the app account may use different alias domains for the same
+  // person (e.g. `owt.swiss` vs `openwt.com`), so match across the alias group.
+  const candidates = aliasedEmails(email);
+  if (candidates.length === 0) return null;
+
+  const byEmail = await prisma.user.findFirst({
+    where: { email: { in: candidates } },
     select: { id: true, slackUserId: true },
   });
   if (!byEmail) return null;

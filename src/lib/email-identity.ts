@@ -77,6 +77,23 @@ export function canonicalEmailKey(email: string): string | null {
 }
 
 /**
+ * Every concrete email that resolves to the same canonical identity as `email`:
+ * the lowercased address plus the same local part on each aliased domain in its
+ * group. Use this to look up an account that may have been created under a
+ * different alias domain than the one provided. Returns `[]` for malformed input.
+ */
+export function aliasedEmails(email: string): string[] {
+  const trimmed = email.trim().toLowerCase();
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0 || at === trimmed.length - 1) return [];
+  const local = trimmed.slice(0, at);
+  const domain = trimmed.slice(at + 1).replace(/\.$/, "");
+  const group = getDomainAliasGroups().find((g) => g.includes(domain));
+  const domains = group ?? [domain];
+  return [...new Set(domains.map((d) => `${local}@${d}`))];
+}
+
+/**
  * True when two emails resolve to the same canonical identity (same person on
  * different aliased domains, or simply the same address).
  */
