@@ -52,6 +52,9 @@ export async function PurchaseListSection({ officeId, page }: Props) {
       include: {
         paidBy: { select: { name: true, image: true } },
         invoices: { select: { id: true, filename: true } },
+        lines: {
+          include: { item: { select: { name: true } } },
+        },
       },
     }),
     prisma.purchaseBatch.count({ where: { officeId } }),
@@ -62,8 +65,12 @@ export async function PurchaseListSection({ officeId, page }: Props) {
       id: b.id,
       status: b.status as "ORDERED" | "DELIVERED",
       purchasedAt: b.purchasedAt.toISOString(),
-      qty: b.qty,
-      unitPrice: b.unitPrice.toNumber(),
+      totalQty: b.lines.reduce((sum, l) => sum + l.qty, 0),
+      lines: b.lines.map((l) => ({
+        itemName: l.item.name,
+        qty: l.qty,
+        unitPrice: l.unitPrice.toNumber(),
+      })),
       totalPrice: b.totalPrice.toNumber(),
       paidByName: b.paidBy.name,
       paidByImage: resolveAvatarUrl(b.paidBy.image),

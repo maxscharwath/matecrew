@@ -8,7 +8,8 @@ import {
   buildSessionRequestMessage,
   postToResponseUrl,
 } from "@/lib/slack";
-import { createMateRequest, listRequesterNames } from "@/lib/mate-request";
+import { createMateRequest, listRequestersByItem } from "@/lib/mate-request";
+import { getActiveItems } from "@/lib/items";
 
 export async function confirmSlackLink(token: string): Promise<void> {
   const session = await requireSession();
@@ -50,9 +51,10 @@ export async function confirmSlackLink(token: string): Promise<void> {
       officeId: payload.officeId,
       mateSessionId: payload.mateSessionId,
       date: dateObj,
+      itemId: payload.itemId,
     });
 
-    const [office, mateSession, requesters] = await Promise.all([
+    const [office, mateSession, items, requesterGroups] = await Promise.all([
       prisma.office.findUnique({
         where: { id: payload.officeId },
         select: { name: true, locale: true },
@@ -63,7 +65,8 @@ export async function confirmSlackLink(token: string): Promise<void> {
             select: { label: true, cutoffTime: true },
           })
         : Promise.resolve(null),
-      listRequesterNames({
+      getActiveItems(payload.officeId),
+      listRequestersByItem({
         officeId: payload.officeId,
         mateSessionId: payload.mateSessionId,
         date: dateObj,
@@ -79,7 +82,8 @@ export async function confirmSlackLink(token: string): Promise<void> {
         cutoffTime: mateSession?.cutoffTime ?? "",
         date: payload.date,
         locale: office.locale,
-        requesters,
+        items,
+        requesterGroups,
       });
       try {
         await postToResponseUrl(payload.responseUrl, {

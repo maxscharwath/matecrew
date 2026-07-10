@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
+import { getActiveItems } from "@/lib/items";
 import { StockCard } from "@/components/stock-card";
 import { getTranslations } from "next-intl/server";
 import {
@@ -24,12 +25,15 @@ export default async function StockPage({ params, searchParams }: Props) {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
-  const office = await prisma.office.findUniqueOrThrow({
-    where: { id: officeId },
-    include: { stock: true },
-  });
+  const [office, items] = await Promise.all([
+    prisma.office.findUniqueOrThrow({
+      where: { id: officeId },
+      select: { name: true, lowStockThreshold: true },
+    }),
+    getActiveItems(officeId),
+  ]);
 
-  const currentQty = office.stock?.currentQty ?? 0;
+  const currentQty = items.reduce((sum, i) => sum + i.stockQty, 0);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -40,12 +44,18 @@ export default async function StockPage({ params, searchParams }: Props) {
         </p>
       </div>
 
-      <StockCard
-        officeId={officeId}
-        officeName={office.name}
-        currentQty={currentQty}
-        lowStockThreshold={office.lowStockThreshold}
-      />
+      <div className="space-y-4">
+        {items.map((item) => (
+          <StockCard
+            key={item.id}
+            officeId={officeId}
+            itemId={item.id}
+            itemName={item.name}
+            currentQty={item.stockQty}
+            lowStockThreshold={office.lowStockThreshold}
+          />
+        ))}
+      </div>
 
       <Suspense fallback={<StockPredictionFallback />}>
         <StockPredictionSection
@@ -56,11 +66,7 @@ export default async function StockPage({ params, searchParams }: Props) {
       </Suspense>
 
       <Suspense fallback={<StockChartFallback />}>
-        <StockChartSection
-          officeId={officeId}
-          officeName={office.name}
-          currentQty={currentQty}
-        />
+        <StockChartSection officeId={officeId} officeName={office.name} />
       </Suspense>
 
       <Suspense fallback={<AuditLogFallback />}>

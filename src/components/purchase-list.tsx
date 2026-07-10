@@ -25,12 +25,18 @@ interface Invoice {
   filename: string;
 }
 
+interface PurchaseLine {
+  itemName: string;
+  qty: number;
+  unitPrice: number;
+}
+
 interface PurchaseBatch {
   id: string;
   status: "ORDERED" | "DELIVERED";
   purchasedAt: string;
-  qty: number;
-  unitPrice: number;
+  totalQty: number;
+  lines: PurchaseLine[];
   totalPrice: number;
   paidByName: string;
   paidByImage?: string;
@@ -85,8 +91,8 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
           <TableRow>
             <TableHead>{t('purchases.status')}</TableHead>
             <TableHead>{t('purchases.date')}</TableHead>
+            <TableHead>{t('purchases.items')}</TableHead>
             <TableHead className="text-center">{t('purchases.qty')}</TableHead>
-            <TableHead className="text-right">{t('purchases.perCanHeader')}</TableHead>
             <TableHead className="text-right">{t('purchases.total')}</TableHead>
             <TableHead>{t('purchases.paidBy')}</TableHead>
             <TableHead>{t('purchases.notes')}</TableHead>
@@ -108,10 +114,21 @@ export function PurchaseList({ officeId, batches }: PurchaseListProps) {
               <TableCell>
                 {new Date(batch.purchasedAt).toLocaleDateString(locale)}
               </TableCell>
-              <TableCell className="text-center">{batch.qty}</TableCell>
-              <TableCell className="text-right">
-                {batch.unitPrice.toFixed(2)}
+              <TableCell>
+                <div className="flex flex-col gap-0.5">
+                  {batch.lines.map((line, i) => (
+                    <span key={i} className="text-sm">
+                      <span className="font-medium">{line.qty}×</span>{" "}
+                      {line.itemName}
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {line.unitPrice.toFixed(2)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
               </TableCell>
+              <TableCell className="text-center">{batch.totalQty}</TableCell>
               <TableCell className="text-right font-medium">
                 CHF {batch.totalPrice.toFixed(2)}
               </TableCell>

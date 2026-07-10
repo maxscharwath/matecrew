@@ -34,6 +34,7 @@ import {
   type HeatmapCell,
 } from "@/components/mate-activity-heatmap";
 import { getTodayDate } from "@/lib/date";
+import { getActiveItems } from "@/lib/items";
 import { cn } from "@/lib/utils";
 
 interface SectionProps {
@@ -149,18 +150,21 @@ export async function HeroSection({ officeId }: { officeId: string }) {
   const { membership } = await requireMembership(officeId);
   const t = await getTranslations();
 
-  const stock = await prisma.stock.findUnique({
-    where: { officeId },
-    select: { currentQty: true },
-  });
+  const [stockAgg, items] = await Promise.all([
+    prisma.stock.aggregate({
+      where: { officeId },
+      _sum: { currentQty: true },
+    }),
+    getActiveItems(officeId),
+  ]);
 
-  const stockQty = stock?.currentQty ?? 0;
+  const stockQty = stockAgg._sum.currentQty ?? 0;
   const lowStockThreshold = membership.office.lowStockThreshold;
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <Card className="flex flex-col items-center justify-center p-6">
-        <TakeCanButton officeId={officeId} />
+        <TakeCanButton officeId={officeId} items={items} />
       </Card>
       <Card>
         <CardHeader className="pb-2">
@@ -195,6 +199,7 @@ export async function TodaySection({ officeId, userId }: SectionProps) {
       qty: true,
       cancelledAt: true,
       createdAt: true,
+      item: { select: { name: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -203,7 +208,10 @@ export async function TodaySection({ officeId, userId }: SectionProps) {
     <TodayConsumptionsCard
       officeId={officeId}
       consumptions={todayConsumptions.map((c) => ({
-        ...c,
+        id: c.id,
+        source: c.source,
+        qty: c.qty,
+        itemName: c.item.name,
         cancelledAt: c.cancelledAt?.toISOString() ?? null,
         createdAt: c.createdAt.toISOString(),
       }))}

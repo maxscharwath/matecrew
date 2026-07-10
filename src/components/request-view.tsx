@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ItemThumb } from "@/components/item-thumb";
 import {
   submitDailyRequest,
   cancelDailyRequest,
@@ -39,13 +40,24 @@ interface DailyRequest {
   id: string;
   officeId: string;
   status: "REQUESTED" | "SERVED";
+  itemId: string;
 }
 
 interface Requester {
   name: string;
   image?: string;
   status: "REQUESTED" | "SERVED";
+  itemName: string;
   isMe: boolean;
+}
+
+interface Item {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  isDefault: boolean;
+  sortOrder: number;
+  stockQty: number;
 }
 
 interface SessionInfo {
@@ -60,6 +72,7 @@ interface RequestViewProps {
   readonly officeName: string;
   readonly date: Date;
   readonly existingRequest: DailyRequest | null;
+  readonly items: Item[];
   readonly requesters: Requester[];
   readonly cutoffTime: string | null;
   readonly cutoffPassed: boolean;
@@ -109,6 +122,8 @@ function RequesterAvatars({
               <TooltipContent>
                 <p>
                   {r.isMe ? t('request.youLabel') : r.name}
+                  {" · "}
+                  {r.itemName}
                   {r.status === "SERVED" ? t('request.servedTooltip') : ""}
                 </p>
               </TooltipContent>
@@ -168,9 +183,11 @@ function ServedState() {
 function RequestedState({
   isPending,
   onCancel,
+  itemName,
 }: {
   readonly isPending: boolean;
   readonly onCancel: () => void;
+  readonly itemName: string | null;
 }) {
   const t = useTranslations();
   return (
@@ -179,6 +196,12 @@ function RequestedState({
         <p className="text-lg font-medium text-amber-700 dark:text-amber-400">
           {t('request.mateRequested')}
         </p>
+        {itemName && (
+          <Badge variant="secondary" className="gap-1">
+            <CupSoda className="h-3 w-3" />
+            {itemName}
+          </Badge>
+        )}
         <p className="text-sm text-muted-foreground">
           {t('request.mateRequestedDescription')}
         </p>
@@ -191,14 +214,94 @@ function RequestedState({
   );
 }
 
+/**
+ * Item chooser: a single big button when the office manages one item, or one
+ * button per item when several are available.
+ */
+function ItemChoice({
+  items,
+  isPending,
+  disabled,
+  singleLabel,
+  onPick,
+}: {
+  readonly items: Item[];
+  readonly isPending: boolean;
+  readonly disabled: boolean;
+  readonly singleLabel: string;
+  readonly onPick: (itemId: string) => void;
+}) {
+  const t = useTranslations();
+
+  if (items.length <= 1) {
+    const only = items[0];
+    const soldOut = !!only && only.stockQty <= 0;
+    return (
+      <Button
+        size="lg"
+        className="h-16 w-full text-lg"
+        disabled={isPending || disabled || !only || soldOut}
+        onClick={() => only && onPick(only.id)}
+      >
+        <CupSoda className="mr-2 h-5 w-5" />
+        {soldOut
+          ? t('request.outOfStock')
+          : isPending
+            ? t('request.inProgress')
+            : singleLabel}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {items.map((item) => {
+        const soldOut = item.stockQty <= 0;
+        return (
+          <Button
+            key={item.id}
+            size="lg"
+            variant="outline"
+            className="h-auto items-center justify-start gap-3 py-3 text-left disabled:opacity-100"
+            disabled={isPending || disabled || soldOut}
+            onClick={() => onPick(item.id)}
+          >
+            <ItemThumb
+              imageUrl={item.imageUrl}
+              name={item.name}
+              className={soldOut ? "opacity-60" : ""}
+            />
+            <span className="flex min-w-0 flex-col">
+              <span
+                className={`truncate text-base font-medium ${
+                  soldOut ? "text-muted-foreground" : ""
+                }`}
+              >
+                {item.name}
+              </span>
+              {soldOut && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {t('request.outOfStock')}
+                </span>
+              )}
+            </span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
 function EmptyState({
+  items,
   isPending,
   cutoffPassed,
   onRequest,
 }: {
+  readonly items: Item[];
   readonly isPending: boolean;
   readonly cutoffPassed: boolean;
-  readonly onRequest: () => void;
+  readonly onRequest: (itemId: string) => void;
 }) {
   const t = useTranslations();
   return (
@@ -206,17 +309,17 @@ function EmptyState({
       <p className="text-muted-foreground">
         {cutoffPassed
           ? t('request.ordersClosed')
-          : t('request.wantMateToday')}
+          : items.length > 1
+            ? t('request.pickYourMate')
+            : t('request.wantMateToday')}
       </p>
-      <Button
-        size="lg"
-        className="h-16 w-full text-lg"
-        disabled={isPending || cutoffPassed}
-        onClick={onRequest}
-      >
-        <CupSoda className="mr-2 h-5 w-5" />
-        {isPending ? t('request.inProgress') : t('request.iWantMate')}
-      </Button>
+      <ItemChoice
+        items={items}
+        isPending={isPending}
+        disabled={cutoffPassed}
+        singleLabel={t('request.iWantMate')}
+        onPick={onRequest}
+      />
     </div>
   );
 }
@@ -299,6 +402,7 @@ export function RequestView({
   officeName,
   date,
   existingRequest,
+  items,
   requesters,
   cutoffTime,
   cutoffPassed,
@@ -309,11 +413,15 @@ export function RequestView({
 }: RequestViewProps) {
   const [isPending, startTransition] = useTransition();
   const [takeCanOpen, setTakeCanOpen] = useState(false);
+  const [takeCanItemId, setTakeCanItemId] = useState<string | null>(null);
   const t = useTranslations();
 
-  function handleRequest() {
+  const requestedItemName =
+    items.find((i) => i.id === existingRequest?.itemId)?.name ?? null;
+
+  function handleRequest(itemId: string) {
     startTransition(async () => {
-      const result = await submitDailyRequest(officeId, date, activeSession?.id ?? null);
+      const result = await submitDailyRequest(officeId, date, activeSession?.id ?? null, itemId);
       if (result.success) {
         toast.success(t('request.mateRequestedToast'));
       } else {
@@ -322,9 +430,19 @@ export function RequestView({
     });
   }
 
-  function handleTakeCanConfirm() {
+  function handleTakeCan(itemId: string) {
+    // With a single item, take it immediately; otherwise confirm the pick.
+    if (items.length <= 1) {
+      handleTakeCanConfirm(itemId);
+    } else {
+      setTakeCanItemId(itemId);
+      setTakeCanOpen(true);
+    }
+  }
+
+  function handleTakeCanConfirm(itemId: string | null) {
     startTransition(async () => {
-      const result = await takeACan(officeId);
+      const result = await takeACan(officeId, itemId);
       setTakeCanOpen(false);
       if (result.success) {
         toast.success(t('dashboard.canTaken'));
@@ -364,49 +482,36 @@ export function RequestView({
 
           {status === "SERVED" && <ServedState />}
           {status === "REQUESTED" && (
-            <RequestedState isPending={isPending} onCancel={handleCancel} />
+            <RequestedState
+              isPending={isPending}
+              onCancel={handleCancel}
+              itemName={requestedItemName}
+            />
           )}
-          {status === null && !activeSession && nextSessionLabel && (
+          {status === null && !activeSession && (
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-muted-foreground">
                   {t('request.noActiveSession')}
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  {t('request.nextSession', { label: nextSessionLabel })}
-                </p>
+                {nextSessionLabel && (
+                  <p className="text-sm text-muted-foreground">
+                    {t('request.nextSession', { label: nextSessionLabel })}
+                  </p>
+                )}
               </div>
-              <Button
-                size="lg"
-                variant="outline"
-                className="gap-2"
-                disabled={isPending}
-                onClick={() => setTakeCanOpen(true)}
-              >
-                <CupSoda className="h-5 w-5" />
-                {isPending ? t('common.processing') : t('dashboard.takeCan')}
-              </Button>
-            </div>
-          )}
-          {status === null && !activeSession && !nextSessionLabel && (
-            <div className="space-y-4">
-              <p className="text-muted-foreground">
-                {t('request.noActiveSession')}
-              </p>
-              <Button
-                size="lg"
-                variant="outline"
-                className="gap-2"
-                disabled={isPending}
-                onClick={() => setTakeCanOpen(true)}
-              >
-                <CupSoda className="h-5 w-5" />
-                {isPending ? t('common.processing') : t('dashboard.takeCan')}
-              </Button>
+              <ItemChoice
+                items={items}
+                isPending={isPending}
+                disabled={false}
+                singleLabel={t('dashboard.takeCan')}
+                onPick={handleTakeCan}
+              />
             </div>
           )}
           {status === null && activeSession && (
             <EmptyState
+              items={items}
               isPending={isPending}
               cutoffPassed={cutoffPassed}
               onRequest={handleRequest}
@@ -442,9 +547,15 @@ export function RequestView({
       <ConfirmDialog
         open={takeCanOpen}
         onOpenChange={setTakeCanOpen}
-        onConfirm={handleTakeCanConfirm}
+        onConfirm={() => handleTakeCanConfirm(takeCanItemId)}
         title={t('dashboard.takeCanConfirmTitle')}
-        description={t('dashboard.takeCanConfirmDescription')}
+        description={
+          items.find((i) => i.id === takeCanItemId)
+            ? t('dashboard.takeCanConfirmItem', {
+                item: items.find((i) => i.id === takeCanItemId)!.name,
+              })
+            : t('dashboard.takeCanConfirmDescription')
+        }
         confirmLabel={t('dashboard.takeCan')}
         confirmVariant="default"
         isPending={isPending}

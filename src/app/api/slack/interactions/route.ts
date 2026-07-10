@@ -16,6 +16,7 @@ import { aliasedEmails } from "@/lib/email-identity";
 import {
   cancelMateRequest,
   createMateRequest,
+  listRequestersByItem,
   type CancelResult,
   type RequestResult,
 } from "@/lib/mate-request";
@@ -78,13 +79,14 @@ const ERROR_KINDS = new Set([
   "session_not_found",
   "served",
   "not_member",
+  "item_not_found",
 ]);
 
 function mapErrorReason(
   kind: string,
 ): "closed" | "session_not_found" | "served" | "unknown" | null {
   if (!ERROR_KINDS.has(kind)) return null;
-  if (kind === "not_member") return "unknown";
+  if (kind === "not_member" || kind === "item_not_found") return "unknown";
   return kind as "closed" | "session_not_found" | "served";
 }
 
@@ -151,15 +153,11 @@ async function handleMarkServed(
       })
     : null;
 
-  const servedRequests = await prisma.dailyRequest.findMany({
-    where: {
-      officeId: ctx.officeId,
-      mateSessionId: ctx.mateSessionId,
-      date: dateObj,
-      status: "SERVED",
-    },
-    include: { user: { select: { name: true } } },
-    orderBy: { createdAt: "asc" },
+  const requesterGroups = await listRequestersByItem({
+    officeId: ctx.officeId,
+    mateSessionId: ctx.mateSessionId,
+    date: dateObj,
+    status: "SERVED",
   });
 
   const userName = user
@@ -176,8 +174,7 @@ async function handleMarkServed(
     sessionLabel: sessionRow?.label ?? null,
     date: ctx.date,
     locale,
-    count: servedRequests.length,
-    requesters: servedRequests.map((r) => r.user.name),
+    requesterGroups,
     servedBy: {
       name: userName,
       time: getCurrentTimeInTimezone(office.timezone),
@@ -264,6 +261,7 @@ export async function POST(request: Request) {
       slackUsername: payload.user.name ?? "",
       officeId: ctx.officeId,
       mateSessionId: ctx.mateSessionId,
+      itemId: ctx.itemId,
       date: ctx.date,
       responseUrl: payload.response_url,
     });
@@ -278,6 +276,7 @@ export async function POST(request: Request) {
         officeId: ctx.officeId,
         mateSessionId: ctx.mateSessionId,
         date: dateObj,
+        itemId: ctx.itemId,
       })
     : await cancelMateRequest({
         userId: user.id,

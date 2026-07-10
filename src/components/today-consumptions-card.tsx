@@ -19,6 +19,7 @@ interface ConsumptionItem {
   id: string;
   source: "DAILY_REQUEST" | "MANUAL";
   qty: number;
+  itemName: string;
   cancelledAt: string | null;
   createdAt: string;
 }
@@ -81,6 +82,9 @@ export function TodayConsumptionsCard({
                       minute: "2-digit",
                     })}
                   </span>
+                  <Badge variant="outline" className="text-xs">
+                    {c.itemName}
+                  </Badge>
                   <Badge variant="secondary" className="text-xs">
                     {c.source === "MANUAL"
                       ? t("dashboard.selfServe")

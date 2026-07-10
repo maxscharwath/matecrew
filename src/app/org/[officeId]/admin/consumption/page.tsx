@@ -3,6 +3,7 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
 import { getTranslations } from "next-intl/server";
 import { BulkConsumptionForm } from "@/components/bulk-consumption-form";
+import { getActiveItems } from "@/lib/items";
 import {
   ConsumptionListSection,
   ConsumptionListFallback,
@@ -31,6 +32,8 @@ export default async function ConsumptionPage({ params, searchParams }: Props) {
     name: m.user.name,
   }));
 
+  const items = await getActiveItems(officeId);
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -40,7 +43,7 @@ export default async function ConsumptionPage({ params, searchParams }: Props) {
         </p>
       </div>
 
-      <BulkConsumptionForm officeId={officeId} members={members} />
+      <BulkConsumptionForm officeId={officeId} members={members} items={items} />
 
       <Suspense fallback={<ConsumptionListFallback />}>
         <ConsumptionListSection officeId={officeId} page={page} />

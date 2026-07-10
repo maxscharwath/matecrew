@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { stockDeltaOps } from "@/lib/stock";
 
 export type ServeSessionResult =
   | { kind: "ok"; servedCount: number }
@@ -32,12 +33,16 @@ export async function serveSession(opts: {
 
   if (pending.length === 0) return { kind: "empty" };
 
-  const stock = await prisma.stock.findUnique({
-    where: { officeId: opts.officeId },
-  });
-  const newQty = (stock?.currentQty ?? 0) - pending.length;
+  // Group the pending requests by item so each item's stock pool is
+  // decremented independently.
+  const byItem = new Map<string, typeof pending>();
+  for (const r of pending) {
+    const list = byItem.get(r.itemId);
+    if (list) list.push(r);
+    else byItem.set(r.itemId, [r]);
+  }
 
-  await prisma.$transaction([
+  const ops = [
     prisma.dailyRequest.updateMany({
       where: { id: { in: pending.map((r) => r.id) } },
       data: { status: "SERVED" },
@@ -47,28 +52,30 @@ export async function serveSession(opts: {
         data: {
           officeId: opts.officeId,
           userId: r.userId,
+          itemId: r.itemId,
           date: r.date,
           qty: 1,
           source: "DAILY_REQUEST",
         },
       }),
     ),
-    prisma.stockMovement.create({
-      data: {
+    ...[...byItem.entries()].flatMap(([itemId, reqs]) =>
+      stockDeltaOps({
         officeId: opts.officeId,
-        delta: -pending.length,
+        itemId,
+        delta: -reqs.length,
         reason: "SERVED",
-        note: opts.movementNote ?? `Batch serve (${pending.length})`,
+        note: opts.movementNote ?? `Batch serve (${reqs.length})`,
         userId: opts.actingUserId,
-      },
-    }),
-    prisma.stock.update({
-      where: { officeId: opts.officeId },
-      data: { currentQty: newQty },
-    }),
-  ]);
+      }),
+    ),
+  ];
 
-  checkAndAlertLowStock(opts.officeId).catch(() => {});
+  await prisma.$transaction(ops);
+
+  for (const itemId of byItem.keys()) {
+    checkAndAlertLowStock(opts.officeId, itemId).catch(() => {});
+  }
 
   return { kind: "ok", servedCount: pending.length };
 }

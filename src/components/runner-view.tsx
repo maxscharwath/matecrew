@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ForgottenOrdersSection, type ForgottenOrder } from "@/components/forgotten-orders-section";
+import { ItemThumb } from "@/components/item-thumb";
 import {
   markAllServed,
   markServed,
@@ -30,6 +31,11 @@ interface DailyRequest {
   id: string;
   status: "REQUESTED" | "SERVED" | "CANCELLED";
   mateSessionId: string | null;
+  item: {
+    id: string;
+    name: string;
+    imageUrl?: string;
+  };
   user: {
     id: string;
     name: string;
@@ -165,7 +171,7 @@ function RequestRow({
       </Avatar>
       <span
         className={cn(
-          "flex-1 text-sm",
+          "min-w-0 flex-1 truncate text-sm",
           isServed ? "text-muted-foreground line-through" : "font-medium",
         )}
       >
@@ -235,6 +241,26 @@ export function RunnerView({
   const total = merged.length;
   const pendingCount = total - served;
   const pct = total === 0 ? 0 : Math.round((served / total) * 100);
+
+  // Group requests by item type so the runner sees, per item, how many are
+  // needed and exactly who wants them.
+  const groupMap = new Map<
+    string,
+    { itemName: string; itemImageUrl?: string; requests: DailyRequest[] }
+  >();
+  for (const r of merged) {
+    const group = groupMap.get(r.item.id);
+    if (group) group.requests.push(r);
+    else
+      groupMap.set(r.item.id, {
+        itemName: r.item.name,
+        itemImageUrl: r.item.imageUrl,
+        requests: [r],
+      });
+  }
+  const itemGroups = [...groupMap.values()].sort((a, b) =>
+    a.itemName.localeCompare(b.itemName),
+  );
 
   function toggleRow(id: string, markServedNow: boolean) {
     const previous =
@@ -351,17 +377,46 @@ export function RunnerView({
               </div>
             </div>
 
-            {/* Tap-to-toggle list */}
-            <div className="divide-y">
-              {merged.map((r) => (
-                <RequestRow
-                  key={r.id}
-                  request={r}
-                  officeId={officeId}
-                  disabled={isPending}
-                  onToggle={toggleRow}
-                />
-              ))}
+            {/* One section per item type: header with counts + who wants it */}
+            <div className="space-y-5">
+              {itemGroups.map((group) => {
+                const groupPending = group.requests.filter(
+                  (r) => r.status === "REQUESTED",
+                ).length;
+                return (
+                  <div key={group.itemName} className="space-y-1">
+                    <div className="flex items-center justify-between border-b pb-1.5">
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        <ItemThumb
+                          imageUrl={group.itemImageUrl}
+                          name={group.itemName}
+                          className="size-6 rounded-md"
+                        />
+                        {group.itemName}
+                      </span>
+                      <Badge
+                        variant={groupPending > 0 ? "default" : "secondary"}
+                        className="text-[10px] tabular-nums"
+                      >
+                        {groupPending > 0
+                          ? t("runner.toFetch", { count: groupPending })
+                          : t("runner.allDone")}
+                      </Badge>
+                    </div>
+                    <div className="divide-y">
+                      {group.requests.map((r) => (
+                        <RequestRow
+                          key={r.id}
+                          request={r}
+                          officeId={officeId}
+                          disabled={isPending}
+                          onToggle={toggleRow}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Bulk action */}

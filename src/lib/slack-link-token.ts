@@ -5,6 +5,7 @@ export interface SlackLinkPayload {
   slackUsername: string;
   officeId: string;
   mateSessionId: string | null;
+  itemId: string | null;
   date: string;
   responseUrl: string;
   exp: number;

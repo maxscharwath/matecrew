@@ -13,6 +13,7 @@ export async function submitDailyRequest(
   officeId: string,
   date: Date,
   mateSessionId: string | null,
+  itemId?: string | null,
 ): Promise<ActionResult> {
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
@@ -22,11 +23,14 @@ export async function submitDailyRequest(
     officeId,
     mateSessionId,
     date,
+    itemId,
   });
 
   switch (result.kind) {
     case "not_member":
       return { success: false, error: t('errors.notYourRequest') };
+    case "item_not_found":
+      return { success: false, error: t('errors.itemNotFound') };
     case "session_not_found":
       return { success: false, error: t('errors.sessionNotFound') };
     case "closed":

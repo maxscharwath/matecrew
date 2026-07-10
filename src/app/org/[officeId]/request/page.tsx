@@ -4,6 +4,7 @@ import { requireMembership } from "@/lib/auth-utils";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { getTodayDate } from "@/lib/date";
 import { getActiveSession, getNextSession, isSessionOpen } from "@/lib/session-utils";
+import { getActiveItems } from "@/lib/items";
 import { RequestView } from "@/components/request-view";
 
 interface Props {
@@ -24,7 +25,7 @@ export default async function RequestPage({ params }: Props) {
   const activeSession = await getActiveSession(officeId, office.timezone);
   const mateSessionId = activeSession?.id ?? null;
 
-  const [existingRequest, todayRequests] = await Promise.all([
+  const [existingRequest, todayRequests, items] = await Promise.all([
     prisma.dailyRequest.findFirst({
       where: {
         date,
@@ -33,7 +34,7 @@ export default async function RequestPage({ params }: Props) {
         mateSessionId,
         status: { in: ["REQUESTED", "SERVED"] },
       },
-      select: { id: true, officeId: true, status: true },
+      select: { id: true, officeId: true, status: true, itemId: true },
     }),
     prisma.dailyRequest.findMany({
       where: {
@@ -46,9 +47,11 @@ export default async function RequestPage({ params }: Props) {
         id: true,
         status: true,
         user: { select: { id: true, name: true, image: true } },
+        item: { select: { name: true } },
       },
       orderBy: { createdAt: "asc" },
     }),
+    getActiveItems(officeId),
   ]);
 
   const requesters = await Promise.all(
@@ -56,6 +59,7 @@ export default async function RequestPage({ params }: Props) {
       name: r.user.name,
       image: resolveAvatarUrl(r.user.image),
       status: r.status as "REQUESTED" | "SERVED",
+      itemName: r.item.name,
       isMe: r.user.id === session.user.id,
     })),
   );
@@ -81,7 +85,8 @@ export default async function RequestPage({ params }: Props) {
         officeId={officeId}
         officeName={membership.office.name}
         date={date}
-        existingRequest={existingRequest as { id: string; officeId: string; status: "REQUESTED" | "SERVED" } | null}
+        existingRequest={existingRequest as { id: string; officeId: string; status: "REQUESTED" | "SERVED"; itemId: string } | null}
+        items={items}
         requesters={requesters}
         cutoffTime={activeSession?.cutoffTime ?? null}
         cutoffPassed={cutoffPassed}

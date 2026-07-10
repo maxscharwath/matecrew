@@ -15,6 +15,7 @@ import {
 import { toISODateString } from "@/lib/date";
 import { getTranslations, getLocale } from "next-intl/server";
 import { predictReorder, type PredictionConfidence } from "@/lib/stock-prediction";
+import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
 import { CalendarClock, TrendingDown, AlertTriangle, Info } from "lucide-react";
 
 const PAGE_SIZE = 20;
@@ -174,48 +175,106 @@ export async function StockPredictionSection({ officeId, currentQty, lowStockThr
 interface ChartProps {
   readonly officeId: string;
   readonly officeName: string;
-  readonly currentQty: number;
 }
 
-export async function StockChartSection({ officeId, officeName, currentQty }: ChartProps) {
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
+
+export async function StockChartSection({ officeId, officeName }: ChartProps) {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const movements = await prisma.stockMovement.findMany({
-    where: {
-      officeId,
-      createdAt: { gte: thirtyDaysAgo },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  // Items (with their current stock) + the movements needed to reconstruct the
+  // 30-day trend of each item's pool.
+  const [items, movements] = await Promise.all([
+    prisma.item.findMany({
+      where: { officeId },
+      orderBy: ITEM_DISPLAY_ORDER,
+      select: {
+        id: true,
+        name: true,
+        stock: { select: { currentQty: true } },
+      },
+    }),
+    prisma.stockMovement.findMany({
+      where: { officeId, createdAt: { gte: thirtyDaysAgo } },
+      orderBy: { createdAt: "asc" },
+      select: { itemId: true, delta: true, createdAt: true },
+    }),
+  ]);
 
-  const totalDelta = movements.reduce((sum, m) => sum + m.delta, 0);
-  const startQty = currentQty - totalDelta;
+  // Only chart items that currently have stock or moved in the window — keeps
+  // long-archived items out of the legend.
+  const movedItemIds = new Set(movements.map((m) => m.itemId));
+  const shownItems = items.filter(
+    (i) => i.stock.length > 0 || movedItemIds.has(i.id),
+  );
 
-  const dailyMap = new Map<string, number>();
-  let runningQty = startQty;
+  if (shownItems.length === 0) return null;
 
+  const series = shownItems.map((item, idx) => ({
+    key: `item${idx}`,
+    itemId: item.id,
+    name: item.name,
+    color: CHART_COLORS[idx % CHART_COLORS.length],
+  }));
+  // Back-solve each item's starting quantity from its current qty minus the
+  // deltas inside the window, then walk forward day by day.
+  const currentByItem = new Map(
+    shownItems.map((i) => [i.id, sumStockQty(i.stock)]),
+  );
+  const windowDeltaByItem = new Map<string, number>();
+  for (const m of movements) {
+    windowDeltaByItem.set(
+      m.itemId,
+      (windowDeltaByItem.get(m.itemId) ?? 0) + m.delta,
+    );
+  }
+  const runningByItem = new Map(
+    shownItems.map((i) => [
+      i.id,
+      (currentByItem.get(i.id) ?? 0) - (windowDeltaByItem.get(i.id) ?? 0),
+    ]),
+  );
+
+  // Movements bucketed by day so we can apply them as the cursor advances.
+  const movementsByDay = new Map<string, { itemId: string; delta: number }[]>();
   for (const m of movements) {
     const day = toISODateString(m.createdAt);
-    runningQty += m.delta;
-    dailyMap.set(day, runningQty);
+    const list = movementsByDay.get(day) ?? [];
+    list.push({ itemId: m.itemId, delta: m.delta });
+    movementsByDay.set(day, list);
   }
 
-  const chartData: { date: string; qty: number }[] = [];
+  const chartData: Record<string, string | number>[] = [];
   const cursor = new Date(thirtyDaysAgo);
   const today = new Date();
-  let lastQty = startQty;
 
   while (cursor <= today) {
     const day = toISODateString(cursor);
-    if (dailyMap.has(day)) {
-      lastQty = dailyMap.get(day)!;
+    for (const m of movementsByDay.get(day) ?? []) {
+      runningByItem.set(m.itemId, (runningByItem.get(m.itemId) ?? 0) + m.delta);
     }
-    chartData.push({ date: day, qty: lastQty });
+    const row: Record<string, string | number> = { date: day };
+    for (const s of series) {
+      row[s.key] = runningByItem.get(s.itemId) ?? 0;
+    }
+    chartData.push(row);
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  return <StockChart data={chartData} officeName={officeName} />;
+  return (
+    <StockChart
+      data={chartData}
+      series={series.map((s) => ({ key: s.key, name: s.name, color: s.color }))}
+      officeName={officeName}
+    />
+  );
 }
 
 interface AuditLogProps {
@@ -235,6 +294,7 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { name: true } },
+        item: { select: { name: true } },
       },
     }),
     prisma.stockMovement.count({ where: { officeId } }),
@@ -250,6 +310,7 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
           <TableHeader>
             <TableRow>
               <TableHead>{t('stock.date')}</TableHead>
+              <TableHead>{t('stock.item')}</TableHead>
               <TableHead>{t('stock.reason')}</TableHead>
               <TableHead className="text-center">{t('stock.delta')}</TableHead>
               <TableHead>{t('stock.user')}</TableHead>
@@ -268,6 +329,7 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
                     timeZone: "Europe/Zurich",
                   })}
                 </TableCell>
+                <TableCell className="text-muted-foreground">{m.item.name}</TableCell>
                 <TableCell>
                   <Badge variant="outline">
                     {t(`stock.reasonLabels.${m.reason}` as never)}

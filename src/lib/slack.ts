@@ -24,25 +24,39 @@ export const SLACK_CANCEL_ACTION_ID = "cancel_mate";
 export const SLACK_MARK_SERVED_ACTION_ID = "mark_session_served";
 
 /**
- * Encodes the (office, session, date) context into the button's `value`.
+ * Encodes the (office, session, date, item) context into the button's `value`.
  * Slack returns this verbatim on click so the handler can rebuild the message.
+ * `itemId` is only meaningful for the per-item request buttons; cancel and
+ * mark-served leave it empty.
  */
 export function encodeActionValue(opts: {
   officeId: string;
   mateSessionId: string | null;
   date: string;
+  itemId?: string | null;
 }): string {
-  return `${opts.officeId}|${opts.mateSessionId ?? ""}|${opts.date}`;
+  return `${opts.officeId}|${opts.mateSessionId ?? ""}|${opts.date}|${opts.itemId ?? ""}`;
 }
 
 export function decodeActionValue(
   value: string,
-): { officeId: string; mateSessionId: string | null; date: string } | null {
+): {
+  officeId: string;
+  mateSessionId: string | null;
+  date: string;
+  itemId: string | null;
+} | null {
   const parts = value.split("|");
-  if (parts.length !== 3) return null;
-  const [officeId, mateSessionId, date] = parts;
+  // Accept 3 parts (legacy messages without an item) and 4 parts (with item).
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const [officeId, mateSessionId, date, itemId] = parts;
   if (!officeId || !date) return null;
-  return { officeId, mateSessionId: mateSessionId || null, date };
+  return {
+    officeId,
+    mateSessionId: mateSessionId || null,
+    date,
+    itemId: itemId || null,
+  };
 }
 
 /**
@@ -193,6 +207,33 @@ export async function postToResponseUrl(
   }
 }
 
+export interface ItemRequesterGroupInput {
+  itemId: string;
+  itemName: string;
+  names: string[];
+}
+
+/**
+ * Renders the per-item requester breakdown as mrkdwn, e.g.
+ *   *Maté Classic* (2): Alice, Bob
+ *   *Ginger* (1): Claire
+ */
+function requesterBreakdown(
+  t: Awaited<ReturnType<typeof getTranslator>>,
+  groups: ItemRequesterGroupInput[],
+): string {
+  if (groups.length === 0) return t("slack.noRequestsYet");
+  return groups
+    .map((g) =>
+      t("slack.requestersListItem", {
+        item: g.itemName,
+        count: g.names.length,
+        names: g.names.join(", "),
+      }),
+    )
+    .join("\n");
+}
+
 export async function buildSessionRequestMessage(opts: {
   officeId: string;
   officeName: string;
@@ -201,23 +242,11 @@ export async function buildSessionRequestMessage(opts: {
   cutoffTime: string;
   date: string;
   locale: string;
-  requesters?: string[];
+  items: { id: string; name: string }[];
+  requesterGroups?: ItemRequesterGroupInput[];
 }) {
   const t = await getTranslator(opts.locale);
   const label = opts.sessionLabel ? ` — ${opts.sessionLabel}` : "";
-  const actionValue = encodeActionValue({
-    officeId: opts.officeId,
-    mateSessionId: opts.mateSessionId,
-    date: opts.date,
-  });
-
-  let requestersText: string | null = null;
-  if (opts.requesters !== undefined) {
-    requestersText =
-      opts.requesters.length === 0
-        ? t("slack.noRequestsYet")
-        : t("slack.requestersList", { names: opts.requesters.join(", ") });
-  }
 
   const blocks: SlackBlock[] = [
     {
@@ -233,31 +262,55 @@ export async function buildSessionRequestMessage(opts: {
     },
   ];
 
-  if (requestersText !== null) {
+  if (opts.requesterGroups !== undefined) {
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: requestersText },
+      text: {
+        type: "mrkdwn",
+        text: requesterBreakdown(t, opts.requesterGroups),
+      },
     });
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const openUrl = `${appUrl}/org/${opts.officeId}/request`;
 
+  // One "I want <item>" button per active item. A single item keeps the
+  // familiar single-button layout; several items surface a button each.
+  const singleItem = opts.items.length === 1;
+  const itemButtons = opts.items.map((item) => ({
+    type: "button",
+    text: {
+      type: "plain_text",
+      text: singleItem
+        ? t("slack.iWantMate")
+        : t("slack.iWantItem", { item: item.name }),
+    },
+    action_id: SLACK_REQUEST_ACTION_ID,
+    value: encodeActionValue({
+      officeId: opts.officeId,
+      mateSessionId: opts.mateSessionId,
+      date: opts.date,
+      itemId: item.id,
+    }),
+    style: "primary" as const,
+  }));
+
+  const cancelValue = encodeActionValue({
+    officeId: opts.officeId,
+    mateSessionId: opts.mateSessionId,
+    date: opts.date,
+  });
+
   blocks.push({
     type: "actions",
     elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: t("slack.iWantMate") },
-        action_id: SLACK_REQUEST_ACTION_ID,
-        value: actionValue,
-        style: "primary",
-      },
+      ...itemButtons,
       {
         type: "button",
         text: { type: "plain_text", text: t("slack.cancelMate") },
         action_id: SLACK_CANCEL_ACTION_ID,
-        value: actionValue,
+        value: cancelValue,
       },
       {
         type: "button",
@@ -282,8 +335,7 @@ export async function buildSessionCutoffMessage(opts: {
   sessionLabel: string | null;
   date: string;
   locale: string;
-  count: number;
-  requesters: string[];
+  requesterGroups: ItemRequesterGroupInput[];
   servedBy?: { name: string; time: string } | null;
 }) {
   const t = await getTranslator(opts.locale);
@@ -294,6 +346,12 @@ export async function buildSessionCutoffMessage(opts: {
     date: opts.date,
   });
 
+  const count = opts.requesterGroups.reduce((sum, g) => sum + g.names.length, 0);
+  // "2× Maté Classic, 1× Ginger" — what the runner needs to fetch.
+  const itemSummary = opts.requesterGroups
+    .map((g) => t("slack.cutoffItemCount", { count: g.names.length, item: g.itemName }))
+    .join(", ");
+
   const blocks: SlackBlock[] = [
     {
       type: "section",
@@ -302,18 +360,18 @@ export async function buildSessionCutoffMessage(opts: {
         text: t("slack.cutoffAlert", {
           label,
           office: opts.officeName,
-          count: opts.count,
+          count,
         }),
       },
     },
   ];
 
-  if (opts.requesters.length > 0) {
+  if (opts.requesterGroups.length > 0) {
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
-        text: t("slack.requestersList", { names: opts.requesters.join(", ") }),
+        text: `${itemSummary}\n${requesterBreakdown(t, opts.requesterGroups)}`,
       },
     });
   }
@@ -348,7 +406,7 @@ export async function buildSessionCutoffMessage(opts: {
     blocks,
     fallback: t("slack.cutoffFallback", {
       office: opts.officeName,
-      count: opts.count,
+      count,
     }),
   };
 }
@@ -402,6 +460,7 @@ export async function buildLowStockMessage(
   currentQty: number,
   threshold: number,
   locale: string,
+  itemName: string,
 ) {
   const t = await getTranslator(locale);
 
@@ -411,11 +470,20 @@ export async function buildLowStockMessage(
         type: "section",
         text: {
           type: "mrkdwn",
-          text: t("slack.lowStock", { office: officeName, qty: currentQty, threshold }),
+          text: t("slack.lowStock", {
+            office: officeName,
+            item: itemName,
+            qty: currentQty,
+            threshold,
+          }),
         },
       },
     ],
-    fallback: t("slack.lowStockFallback", { qty: currentQty, office: officeName }),
+    fallback: t("slack.lowStockFallback", {
+      qty: currentQty,
+      office: officeName,
+      item: itemName,
+    }),
   };
 }
 

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { serveSession } from "@/lib/serve-session";
+import { stockDeltaOps } from "@/lib/stock";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -28,12 +29,6 @@ export async function markServed(
     return { success: false, error: t('errors.alreadyServed') };
   }
 
-  const stock = await prisma.stock.findUnique({
-    where: { officeId },
-  });
-
-  const newQty = (stock?.currentQty ?? 0) - 1;
-
   await prisma.$transaction([
     prisma.dailyRequest.update({
       where: { id: requestId },
@@ -43,26 +38,22 @@ export async function markServed(
       data: {
         officeId,
         userId: request.userId,
+        itemId: request.itemId,
         date: request.date,
         qty: 1,
         source: "DAILY_REQUEST",
       },
     }),
-    prisma.stockMovement.create({
-      data: {
-        officeId,
-        delta: -1,
-        reason: "SERVED",
-        userId: membership.userId,
-      },
-    }),
-    prisma.stock.update({
-      where: { officeId },
-      data: { currentQty: newQty },
+    ...stockDeltaOps({
+      officeId,
+      itemId: request.itemId,
+      delta: -1,
+      reason: "SERVED",
+      userId: membership.userId,
     }),
   ]);
 
-  checkAndAlertLowStock(officeId).catch(() => {});
+  checkAndAlertLowStock(officeId, request.itemId).catch(() => {});
 
   revalidatePath(`/org/${officeId}/runner`);
   revalidatePath(`/org/${officeId}/request`);
@@ -113,12 +104,6 @@ export async function markUnserved(
     return { success: false, error: t('errors.notYetServed') };
   }
 
-  const stock = await prisma.stock.findUnique({
-    where: { officeId },
-  });
-
-  const newQty = (stock?.currentQty ?? 0) + 1;
-
   await prisma.$transaction([
     prisma.dailyRequest.update({
       where: { id: requestId },
@@ -128,21 +113,17 @@ export async function markUnserved(
       where: {
         officeId,
         userId: request.userId,
+        itemId: request.itemId,
         date: request.date,
         source: "DAILY_REQUEST",
       },
     }),
-    prisma.stockMovement.create({
-      data: {
-        officeId,
-        delta: 1,
-        reason: "UNSERVED",
-        userId: membership.userId,
-      },
-    }),
-    prisma.stock.update({
-      where: { officeId },
-      data: { currentQty: newQty },
+    ...stockDeltaOps({
+      officeId,
+      itemId: request.itemId,
+      delta: 1,
+      reason: "UNSERVED",
+      userId: membership.userId,
     }),
   ]);
 

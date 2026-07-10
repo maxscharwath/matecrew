@@ -4,6 +4,8 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useTranslations, useLocale } from "next-intl";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -16,21 +18,28 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+interface StockSeries {
+  key: string;
+  name: string;
+  color: string;
+}
+
 interface StockChartProps {
-  data: { date: string; qty: number }[];
+  // One row per day; each row carries `date` plus a numeric value per series key.
+  data: Record<string, string | number>[];
+  series: StockSeries[];
   officeName: string;
 }
 
-export function StockChart({ data, officeName }: StockChartProps) {
+export function StockChart({ data, series, officeName }: StockChartProps) {
   const t = useTranslations();
   const locale = useLocale();
 
-  const chartConfig = {
-    qty: {
-      label: t('stock.chartLabel'),
-      color: "hsl(var(--chart-1))",
-    },
-  } satisfies ChartConfig;
+  const chartConfig = Object.fromEntries(
+    series.map((s) => [s.key, { label: s.name, color: s.color }]),
+  ) satisfies ChartConfig;
+
+  const multi = series.length > 1;
 
   return (
     <Card>
@@ -41,6 +50,29 @@ export function StockChart({ data, officeName }: StockChartProps) {
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-[3/1] w-full">
           <AreaChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
+            <defs>
+              {series.map((s) => (
+                <linearGradient
+                  key={s.key}
+                  id={`fill-${s.key}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="5%"
+                    stopColor={`var(--color-${s.key})`}
+                    stopOpacity={multi ? 0.3 : 0.4}
+                  />
+                  <stop
+                    offset="95%"
+                    stopColor={`var(--color-${s.key})`}
+                    stopOpacity={0.02}
+                  />
+                </linearGradient>
+              ))}
+            </defs>
             <CartesianGrid vertical={false} />
             <XAxis
               dataKey="date"
@@ -62,15 +94,25 @@ export function StockChart({ data, officeName }: StockChartProps) {
               tickMargin={8}
               allowDecimals={false}
             />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            <Area
-              dataKey="qty"
-              type="monotone"
-              fill="var(--color-qty)"
-              fillOpacity={0.2}
-              stroke="var(--color-qty)"
-              strokeWidth={2}
+            <ChartTooltip
+              cursor={{ strokeDasharray: "4 4" }}
+              content={<ChartTooltipContent indicator="line" />}
             />
+            {multi && <ChartLegend content={<ChartLegendContent />} />}
+            {series.map((s) => (
+              <Area
+                key={s.key}
+                dataKey={s.key}
+                name={s.name}
+                type="monotone"
+                fill={`url(#fill-${s.key})`}
+                stroke={`var(--color-${s.key})`}
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 3 }}
+                stackId={undefined}
+              />
+            ))}
           </AreaChart>
         </ChartContainer>
       </CardContent>

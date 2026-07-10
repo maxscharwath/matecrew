@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { isSessionOpen } from "@/lib/session-utils";
+import { resolveItemId } from "@/lib/items";
 
 export type RequestResult =
   | { kind: "created" }
   | { kind: "already_registered" }
   | { kind: "closed"; cutoffTime: string }
   | { kind: "session_not_found" }
+  | { kind: "item_not_found" }
   | { kind: "not_member" };
 
 export type CancelResult =
@@ -22,7 +24,13 @@ async function validateContext(opts: {
   mateSessionId: string | null;
 }): Promise<
   | { ok: true; session: { cutoffTime: string; timezone: string } | null }
-  | { ok: false; reason: Exclude<RequestResult, { kind: "created" } | { kind: "already_registered" }> }
+  | {
+      ok: false;
+      reason: Exclude<
+        RequestResult,
+        { kind: "created" } | { kind: "already_registered" } | { kind: "item_not_found" }
+      >;
+    }
 > {
   const membership = await prisma.membership.findUnique({
     where: { userId_officeId: { userId: opts.userId, officeId: opts.officeId } },
@@ -63,9 +71,13 @@ export async function createMateRequest(opts: {
   officeId: string;
   mateSessionId: string | null;
   date: Date;
+  itemId?: string | null;
 }): Promise<RequestResult> {
   const validation = await validateContext(opts);
   if (!validation.ok) return validation.reason;
+
+  const itemId = await resolveItemId(opts.officeId, opts.itemId);
+  if (!itemId) return { kind: "item_not_found" };
 
   const existing = await prisma.dailyRequest.findFirst({
     where: {
@@ -74,15 +86,27 @@ export async function createMateRequest(opts: {
       userId: opts.userId,
       mateSessionId: opts.mateSessionId,
     },
-    select: { id: true },
+    select: { id: true, itemId: true, status: true },
   });
-  if (existing) return { kind: "already_registered" };
+  if (existing) {
+    // Already registered for this session. Allow switching the chosen item
+    // while it's still pending; otherwise it's a no-op.
+    if (existing.status === "REQUESTED" && existing.itemId !== itemId) {
+      await prisma.dailyRequest.update({
+        where: { id: existing.id },
+        data: { itemId },
+      });
+      return { kind: "created" };
+    }
+    return { kind: "already_registered" };
+  }
 
   await prisma.dailyRequest.create({
     data: {
       date: opts.date,
       officeId: opts.officeId,
       userId: opts.userId,
+      itemId,
       mateSessionId: opts.mateSessionId,
       status: "REQUESTED",
     },
@@ -136,4 +160,59 @@ export async function listRequesterNames(opts: {
     orderBy: { createdAt: "asc" },
   });
   return rows.map((r) => r.user.name);
+}
+
+export interface ItemRequesterGroup {
+  itemId: string;
+  itemName: string;
+  names: string[];
+}
+
+/**
+ * Requesters for a session/date grouped by the item they chose, ordered the
+ * same way items are displayed (default first). Only groups with at least one
+ * requester are returned. When `status` is given, filters to that status.
+ */
+export async function listRequestersByItem(opts: {
+  officeId: string;
+  mateSessionId: string | null;
+  date: Date;
+  status?: "REQUESTED" | "SERVED";
+}): Promise<ItemRequesterGroup[]> {
+  const rows = await prisma.dailyRequest.findMany({
+    where: {
+      date: opts.date,
+      officeId: opts.officeId,
+      mateSessionId: opts.mateSessionId,
+      ...(opts.status ? { status: opts.status } : {}),
+    },
+    include: {
+      user: { select: { name: true } },
+      item: { select: { id: true, name: true, isDefault: true, sortOrder: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const groups = new Map<string, ItemRequesterGroup & { order: [boolean, number, string] }>();
+  for (const r of rows) {
+    let group = groups.get(r.itemId);
+    if (!group) {
+      group = {
+        itemId: r.item.id,
+        itemName: r.item.name,
+        names: [],
+        order: [!r.item.isDefault, r.item.sortOrder, r.item.name],
+      };
+      groups.set(r.itemId, group);
+    }
+    group.names.push(r.user.name);
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => {
+      if (a.order[0] !== b.order[0]) return a.order[0] ? 1 : -1;
+      if (a.order[1] !== b.order[1]) return a.order[1] - b.order[1];
+      return a.order[2].localeCompare(b.order[2]);
+    })
+    .map(({ itemId, itemName, names }) => ({ itemId, itemName, names }));
 }

@@ -134,11 +134,36 @@ model Office {
   joinRequests         JoinRequest[]
   defaultForUsers      User[]               @relation("DefaultOffice")
   dailyRequests        DailyRequest[]
-  stock                Stock?
+  items                Item[]
+  stock                Stock[]
   purchaseBatches      PurchaseBatch[]
   consumptionEntries   ConsumptionEntry[]
   reimbursementPeriods ReimbursementPeriod[]
   mateSessions         MateSession[]
+}
+
+/// A consumable managed per office (e.g. "Maté Classic", "Maté Zero", "Ginger").
+/// Stock, requests, consumption and purchases are all scoped to an item.
+model Item {
+  id        String   @id @default(cuid())
+  officeId  String
+  office    Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  name      String
+  imageKey  String?
+  active    Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stock              Stock[]
+  stockMovements     StockMovement[]
+  dailyRequests      DailyRequest[]
+  consumptionEntries ConsumptionEntry[]
+  purchaseLines      PurchaseLine[]
+
+  @@unique([officeId, name])
+  @@index([officeId])
 }
 
 model Membership {
@@ -195,36 +220,50 @@ model DailyRequest {
   office        Office        @relation(fields: [officeId], references: [id], onDelete: Cascade)
   userId        String
   user          User          @relation(fields: [userId], references: [id])
+  itemId        String
+  item          Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
   mateSessionId String?
   mateSession   MateSession?  @relation(fields: [mateSessionId], references: [id], onDelete: SetNull)
   status        RequestStatus @default(REQUESTED)
   createdAt     DateTime      @default(now())
 
   @@unique([date, officeId, userId, mateSessionId])
+  @@index([itemId])
 }
 
 model Stock {
-  officeId            String    @id
+  officeId            String
   office              Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  itemId              String
+  item                Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
   currentQty          Int       @default(0)
   updatedAt           DateTime  @updatedAt
   lowStockAlertSentAt DateTime?
 
   movements StockMovement[]
+
+  @@id([officeId, itemId])
+  @@index([itemId])
 }
 
 model StockMovement {
   id        String               @id @default(cuid())
   officeId  String
-  stock     Stock                @relation(fields: [officeId], references: [officeId], onDelete: Cascade)
+  itemId    String
+  item      Item                 @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  stock     Stock                @relation(fields: [officeId, itemId], references: [officeId, itemId], onDelete: Cascade)
   delta     Int                  // +N or -N
   reason    StockMovementReason
   note      String?
   userId    String?
   user      User?                @relation(fields: [userId], references: [id])
   createdAt DateTime             @default(now())
+
+  @@index([officeId, itemId])
 }
 
+/// A purchase order. Can span several item types via its `lines`; `totalPrice`
+/// is the order total (sum of the line totals).
 model PurchaseBatch {
   id             String         @id @default(cuid())
   officeId       String
@@ -236,14 +275,28 @@ model PurchaseBatch {
   orderedBy      User           @relation("OrderedBy", fields: [orderedByUserId], references: [id])
   paidByUserId   String
   paidBy         User           @relation("PaidBy", fields: [paidByUserId], references: [id])
-  qty            Int
-  unitPrice      Decimal        @db.Decimal(10, 2)
   totalPrice     Decimal        @db.Decimal(10, 2)
   notes          String?
   createdAt      DateTime       @default(now())
 
+  lines              PurchaseLine[]
   invoices           InvoiceFile[]
   consumptionEntries ConsumptionEntry[]
+}
+
+/// A single item line within a purchase order.
+model PurchaseLine {
+  id        String        @id @default(cuid())
+  batchId   String
+  batch     PurchaseBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  qty       Int
+  unitPrice Decimal       @db.Decimal(10, 2)
+  lineTotal Decimal       @db.Decimal(10, 2)
+
+  @@index([batchId])
+  @@index([itemId])
 }
 
 model InvoiceFile {
@@ -262,6 +315,8 @@ model ConsumptionEntry {
   office          Office            @relation(fields: [officeId], references: [id], onDelete: Cascade)
   userId          String
   user            User              @relation(fields: [userId], references: [id])
+  itemId          String
+  item            Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
   date            DateTime          @db.Date
   qty             Int               @default(1)
   source          ConsumptionSource @default(DAILY_REQUEST)
@@ -269,6 +324,8 @@ model ConsumptionEntry {
   purchaseBatch   PurchaseBatch?    @relation(fields: [purchaseBatchId], references: [id])
   cancelledAt     DateTime?
   createdAt       DateTime          @default(now())
+
+  @@index([officeId, itemId])
 }
 
 model ReimbursementPeriod {

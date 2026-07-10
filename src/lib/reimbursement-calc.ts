@@ -30,34 +30,31 @@ export interface ReimbursementResult {
  *
  * Model:
  *   Purchases are bulk orders (e.g. 300 cans every few months) — NOT monthly.
- *   All purchased cans go into a shared pool.
+ *   Items are just labels for what's in stock; every consumption is billed at a
+ *   single blended price, so all products cost the same per unit.
  *
- *   Unit price = weighted average across ALL purchases for the office.
- *   Must be global (not capped at endDate) — proof that this guarantees
- *   no money is lost:
+ *   Unit price = weighted average across ALL purchase lines for the office
+ *   (total spend / total qty purchased), global (not capped at endDate) — proof
+ *   that this guarantees no money is lost:
  *
  *     Let S = total spend, Q = total purchased qty, u = S/Q.
  *     Payer k spent spend_k. Their credit % = spend_k / S.
- *     In period j with C_j cans consumed:
- *       payer k credit = (spend_k / S) × C_j × u
- *                      = (spend_k / S) × C_j × (S / Q)
- *                      = spend_k × C_j / Q
- *     After ALL Q cans consumed (C = Q):
- *       payer k total credit = spend_k × Q / Q = spend_k ✓
+ *     In period j with C_j units consumed:
+ *       payer k credit = (spend_k / S) × C_j × u = spend_k × C_j / Q
+ *     After ALL Q units consumed (C = Q): payer k total credit = spend_k ✓
  *
  *   Every payer gets back exactly what they spent. Zero money lost.
  *
  *   Note: payment line amounts are frozen in the DB when a period is
  *   generated. The live calculation here is used for display and for
- *   generating new periods. If a new purchase shifts the unit price,
- *   existing frozen lines are unaffected.
+ *   generating new periods.
  */
 export async function calculateReimbursements(
   officeId: string,
   startDate: Date,
   endDate: Date,
 ): Promise<ReimbursementResult> {
-  // 1. Active consumption in this period, grouped by user
+  // 1. Active consumption in this period, grouped by user (item-agnostic).
   const consumptionByUser = await prisma.consumptionEntry.groupBy({
     by: ["userId"],
     where: {
@@ -81,13 +78,12 @@ export async function calculateReimbursements(
     _sum: { qty: true },
   });
 
-  // Merge consumption and credits into a single map
+  // Net qty per user: consumption minus cancel credits.
   const qtyMap = new Map<string, number>();
   for (const c of consumptionByUser) {
     qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) + (c._sum.qty ?? 0));
   }
   for (const c of cancelCredits) {
-    // Subtract: these were already billed in a past frozen period
     qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) - (c._sum.qty ?? 0));
   }
 
@@ -106,22 +102,26 @@ export async function calculateReimbursements(
     0,
   );
 
-  // 2. ALL purchases for this office (global, not date-scoped).
-  //    See docstring above for proof that this guarantees zero money loss.
-  const purchases = await prisma.purchaseBatch.findMany({
-    where: { officeId },
+  // 2. ALL purchase lines for this office (global, not date-scoped). Each line
+  //    carries its payer via the parent order.
+  const purchaseLines = await prisma.purchaseLine.findMany({
+    where: { batch: { officeId } },
     select: {
-      paidByUserId: true,
       qty: true,
-      totalPrice: true,
-      paidBy: { select: { id: true, name: true } },
+      lineTotal: true,
+      batch: {
+        select: {
+          paidByUserId: true,
+          paidBy: { select: { id: true, name: true } },
+        },
+      },
     },
   });
 
-  // 3. Weighted average unit price = total spend / total qty purchased
-  const totalPurchasedQty = purchases.reduce((sum, p) => sum + p.qty, 0);
-  const totalPurchaseSpend = purchases.reduce(
-    (sum, p) => sum + p.totalPrice.toNumber(),
+  // 3. Single weighted-average unit price = total spend / total qty purchased.
+  const totalPurchasedQty = purchaseLines.reduce((sum, l) => sum + l.qty, 0);
+  const totalPurchaseSpend = purchaseLines.reduce(
+    (sum, l) => sum + l.lineTotal.toNumber(),
     0,
   );
   const unitPrice =
@@ -129,23 +129,20 @@ export async function calculateReimbursements(
       ? Math.round((totalPurchaseSpend / totalPurchasedQty) * 100) / 100
       : 0;
 
-  // 4. Period cost = cans consumed × unit price
+  // 4. Period cost = units consumed × unit price
   const totalCost = Math.round(totalConsumption * unitPrice * 100) / 100;
 
-  // 5. Credit each payer proportionally for this period's cost.
-  //    payer credit = (their total spend / all spend) × period cost.
-  //    This correctly handles multiple payers and multiple purchases.
+  // 5. Credit each payer proportionally to their total spend.
   const paidMap = new Map<string, number>();
   if (totalPurchaseSpend > 0) {
-    // Aggregate spend per payer first (a user may have multiple purchases)
     const spendByPayer = new Map<string, number>();
-    for (const p of purchases) {
+    for (const l of purchaseLines) {
       spendByPayer.set(
-        p.paidByUserId,
-        (spendByPayer.get(p.paidByUserId) ?? 0) + p.totalPrice.toNumber(),
+        l.batch.paidByUserId,
+        (spendByPayer.get(l.batch.paidByUserId) ?? 0) + l.lineTotal.toNumber(),
       );
-      if (!userMap.has(p.paidByUserId)) {
-        userMap.set(p.paidByUserId, p.paidBy.name);
+      if (!userMap.has(l.batch.paidByUserId)) {
+        userMap.set(l.batch.paidByUserId, l.batch.paidBy.name);
       }
     }
 

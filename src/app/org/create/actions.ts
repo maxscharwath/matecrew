@@ -32,8 +32,16 @@ export async function createOffice(formData: FormData): Promise<CreateResult> {
       data: {
         name: parsed.data.name,
         timezone: parsed.data.timezone,
+        // Every office starts with one default item so the request/stock flows
+        // have something to attach to.
+        items: {
+          create: { name: t("items.defaultItemName"), isDefault: true },
+        },
       },
+      include: { items: true },
     });
+
+    const defaultItemId = office.items[0].id;
 
     await prisma.$transaction([
       prisma.membership.create({
@@ -44,7 +52,7 @@ export async function createOffice(formData: FormData): Promise<CreateResult> {
         },
       }),
       prisma.stock.create({
-        data: { officeId: office.id, currentQty: 0 },
+        data: { officeId: office.id, itemId: defaultItemId, currentQty: 0 },
       }),
       prisma.user.updateMany({
         where: { id: session.user.id, defaultOfficeId: null },

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
-import { resolveAvatarUrl } from "@/lib/storage";
+import { resolveAvatarUrl, resolveItemImageUrl } from "@/lib/storage";
 import { getTodayDate, getDayOfWeek, toISODateString } from "@/lib/date";
 import { getActiveSession, getMostRecentSession, isSessionOpen } from "@/lib/session-utils";
 import { getForgottenOrders } from "@/lib/forgotten-orders";
@@ -119,9 +119,9 @@ export default async function RunnerPage({ params, searchParams }: Props) {
     select: { timezone: true, lowStockThreshold: true },
   });
 
-  const stock = await prisma.stock.findUnique({
+  const stockAgg = await prisma.stock.aggregate({
     where: { officeId },
-    select: { currentQty: true },
+    _sum: { currentQty: true },
   });
 
   const today = getTodayDate();
@@ -159,6 +159,7 @@ export default async function RunnerPage({ params, searchParams }: Props) {
     },
     include: {
       user: { select: { id: true, name: true, email: true, image: true } },
+      item: { select: { id: true, name: true, imageKey: true } },
     },
     orderBy: [{ status: "asc" }, { createdAt: "asc" }],
   });
@@ -169,6 +170,11 @@ export default async function RunnerPage({ params, searchParams }: Props) {
       user: {
         ...r.user,
         image: resolveAvatarUrl(r.user.image),
+      },
+      item: {
+        id: r.item.id,
+        name: r.item.name,
+        imageUrl: resolveItemImageUrl(r.item.imageKey),
       },
     })),
   );
@@ -206,7 +212,7 @@ export default async function RunnerPage({ params, searchParams }: Props) {
         prevHref={nav.prev ? `?date=${nav.prev.date}&session=${nav.prev.session}` : null}
         nextHref={nav.next ? `?date=${nav.next.date}&session=${nav.next.session}` : null}
         currentSessionHref={currentSessionHref}
-        stockQty={stock?.currentQty ?? 0}
+        stockQty={stockAgg._sum.currentQty ?? 0}
         lowStockThreshold={office.lowStockThreshold}
         forgottenOrders={forgottenOrders}
       />

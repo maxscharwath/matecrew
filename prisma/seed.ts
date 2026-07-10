@@ -64,16 +64,47 @@ async function main() {
     console.log(`  ${result.name} (${result.id})`);
   }
 
+  // ─── Items ─────────────────────────────────────────────
+  console.log("\nItems:");
+
+  const defaultItemByOffice: Record<string, string> = {};
+  const itemCatalog = [
+    { name: "Maté Classic", isDefault: true, sortOrder: 0 },
+    { name: "Maté Zero", isDefault: false, sortOrder: 1 },
+    { name: "Ginger", isDefault: false, sortOrder: 2 },
+  ];
+
+  for (const office of Object.values(createdOffices)) {
+    for (const item of itemCatalog) {
+      const created = await prisma.item.upsert({
+        where: { officeId_name: { officeId: office.id, name: item.name } },
+        update: {},
+        create: { officeId: office.id, ...item },
+      });
+      if (item.isDefault) defaultItemByOffice[office.id] = created.id;
+    }
+    console.log(`  ${office.name}: ${itemCatalog.map((i) => i.name).join(", ")}`);
+  }
+
   // ─── Stock ─────────────────────────────────────────────
   console.log("\nStock:");
 
   for (const office of Object.values(createdOffices)) {
     await prisma.stock.upsert({
-      where: { officeId: office.id },
+      where: {
+        officeId_itemId: {
+          officeId: office.id,
+          itemId: defaultItemByOffice[office.id],
+        },
+      },
       update: {},
-      create: { officeId: office.id, currentQty: 24 },
+      create: {
+        officeId: office.id,
+        itemId: defaultItemByOffice[office.id],
+        currentQty: 24,
+      },
     });
-    console.log(`  ${office.name}: 24 cans`);
+    console.log(`  ${office.name}: 24 cans (Maté Classic)`);
   }
 
   // ─── Users + Memberships ──────────────────────────────
@@ -174,6 +205,7 @@ async function main() {
             date,
             officeId: lausanneId,
             userId: user.id,
+            itemId: defaultItemByOffice[lausanneId],
             mateSessionId: daySession?.id ?? null,
             status,
           },
@@ -202,6 +234,7 @@ async function main() {
         data: {
           officeId: req.officeId,
           userId: req.userId,
+          itemId: req.itemId,
           date: req.date,
           qty: 1,
           source: "DAILY_REQUEST",
@@ -220,6 +253,7 @@ async function main() {
     await prisma.stockMovement.create({
       data: {
         officeId: req.officeId,
+        itemId: req.itemId,
         delta: -1,
         reason: "SERVED",
         userId: req.userId,
@@ -243,11 +277,19 @@ async function main() {
         deliveredAt: new Date(today.getFullYear(), today.getMonth() - 1, 16),
         orderedByUserId: admin.id,
         paidByUserId: admin.id,
-        qty: 48,
-        unitPrice: 2.5,
         totalPrice: 120,
         notes: "Initial batch — Migros order",
         purchasedAt: new Date(today.getFullYear(), today.getMonth() - 1, 15),
+        lines: {
+          create: [
+            {
+              itemId: defaultItemByOffice[lausanneId],
+              qty: 48,
+              unitPrice: 2.5,
+              lineTotal: 120,
+            },
+          ],
+        },
       },
     });
 
@@ -255,6 +297,7 @@ async function main() {
     await prisma.stockMovement.create({
       data: {
         officeId: createdOffices["Lausanne"].id,
+        itemId: defaultItemByOffice[lausanneId],
         delta: 48,
         reason: "PURCHASE",
         note: "Initial batch — Migros order",
@@ -274,7 +317,12 @@ async function main() {
   });
 
   await prisma.stock.update({
-    where: { officeId: createdOffices["Lausanne"].id },
+    where: {
+      officeId_itemId: {
+        officeId: createdOffices["Lausanne"].id,
+        itemId: defaultItemByOffice[lausanneId],
+      },
+    },
     data: { currentQty: 48 - (totalConsumedLausanne._sum.qty ?? 0) },
   });
 

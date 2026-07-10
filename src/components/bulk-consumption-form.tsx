@@ -37,14 +37,21 @@ interface Member {
   name: string;
 }
 
+interface Item {
+  id: string;
+  name: string;
+}
+
 interface BulkConsumptionFormProps {
   readonly officeId: string;
   readonly members: Member[];
+  readonly items: Item[];
 }
 
 interface Row {
   id: number;
   userId: string;
+  itemId: string;
   date: string;
   qty: number;
   deductStock: boolean;
@@ -52,27 +59,30 @@ interface Row {
 
 let nextId = 1;
 
-function makeRow(date: string, deductStock = false): Row {
-  return { id: nextId++, userId: "", date, qty: 1, deductStock };
+function makeRow(date: string, itemId: string, deductStock = false): Row {
+  return { id: nextId++, userId: "", itemId, date, qty: 1, deductStock };
 }
 
 export function BulkConsumptionForm({
   officeId,
   members,
+  items,
 }: BulkConsumptionFormProps) {
   const [isPending, startTransition] = useTransition();
   const t = useTranslations();
   const today = new Date().toISOString().split("T")[0];
+  const defaultItemId = items[0]?.id ?? "";
 
-  const [rows, setRows] = useState<Row[]>(() => [makeRow(today)]);
+  const [rows, setRows] = useState<Row[]>(() => [makeRow(today, defaultItemId)]);
   const [defaultDeductStock, setDefaultDeductStock] = useState(false);
 
   const addRow = useCallback(() => {
     setRows((prev) => {
       const lastDate = prev.length > 0 ? prev[prev.length - 1].date : today;
-      return [...prev, makeRow(lastDate, defaultDeductStock)];
+      const lastItem = prev.length > 0 ? prev[prev.length - 1].itemId : defaultItemId;
+      return [...prev, makeRow(lastDate, lastItem, defaultDeductStock)];
     });
-  }, [today, defaultDeductStock]);
+  }, [today, defaultItemId, defaultDeductStock]);
 
   const removeRow = useCallback((id: number) => {
     setRows((prev) => prev.filter((r) => r.id !== id));
@@ -90,17 +100,19 @@ export function BulkConsumptionForm({
   const fillAllMembers = useCallback(() => {
     setRows((prev) => {
       const lastDate = prev.length > 0 ? prev[prev.length - 1].date : today;
+      const lastItem = prev.length > 0 ? prev[prev.length - 1].itemId : defaultItemId;
       return members.map((m) => ({
         id: nextId++,
         userId: m.userId,
+        itemId: lastItem,
         date: lastDate,
         qty: 1,
         deductStock: defaultDeductStock,
       }));
     });
-  }, [members, today, defaultDeductStock]);
+  }, [members, today, defaultItemId, defaultDeductStock]);
 
-  const validRows = rows.filter((r) => r.userId && r.qty > 0 && r.date);
+  const validRows = rows.filter((r) => r.userId && r.itemId && r.qty > 0 && r.date);
   const totalQty = validRows.reduce((sum, r) => sum + r.qty, 0);
 
   function handleSubmit() {
@@ -114,6 +126,7 @@ export function BulkConsumptionForm({
         officeId,
         validRows.map((r) => ({
           userId: r.userId,
+          itemId: r.itemId,
           date: r.date,
           qty: r.qty,
           deductStock: r.deductStock,
@@ -121,7 +134,7 @@ export function BulkConsumptionForm({
       );
       if (result.success) {
         toast.success(t("bulkConsumption.created", { count: result.count }));
-        setRows([makeRow(today)]);
+        setRows([makeRow(today, defaultItemId)]);
       } else {
         toast.error(result.error);
       }
@@ -158,10 +171,13 @@ export function BulkConsumptionForm({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[250px]">
+                  <TableHead className="w-[220px]">
                     {t("bulkConsumption.member")}
                   </TableHead>
-                  <TableHead className="w-[170px]">
+                  <TableHead className="w-[180px]">
+                    {t("bulkConsumption.item")}
+                  </TableHead>
+                  <TableHead className="w-[160px]">
                     {t("bulkConsumption.date")}
                   </TableHead>
                   <TableHead className="w-[100px]">
@@ -190,6 +206,23 @@ export function BulkConsumptionForm({
                           {members.map((m) => (
                             <SelectItem key={m.userId} value={m.userId}>
                               {m.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={row.itemId}
+                        onValueChange={(v) => updateRow(row.id, "itemId", v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={t("purchases.selectItem")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {items.map((item) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name}
                             </SelectItem>
                           ))}
                         </SelectContent>

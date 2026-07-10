@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { stockDeltaOps } from "@/lib/stock";
 import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -17,11 +18,13 @@ export async function adjustStock(
   const t = await getTranslations();
 
   const AdjustStockSchema = z.object({
+    itemId: z.string().min(1, t('errors.itemNotFound')),
     adjustment: z.coerce.number().int().refine((n) => n !== 0, t('errors.cannotBeZero')),
     note: z.string().max(200).optional().or(z.literal("")),
   });
 
   const parsed = AdjustStockSchema.safeParse({
+    itemId: formData.get("itemId"),
     adjustment: formData.get("adjustment"),
     note: formData.get("note"),
   });
@@ -30,39 +33,41 @@ export async function adjustStock(
     return { success: false, error: parsed.error.issues[0].message };
   }
 
-  const { adjustment, note } = parsed.data;
+  const { itemId, adjustment, note } = parsed.data;
 
-  const stock = await prisma.stock.findUnique({ where: { officeId } });
-
-  if (!stock) {
-    return { success: false, error: t('errors.stockNotFound') };
+  const item = await prisma.item.findFirst({
+    where: { id: itemId, officeId },
+    select: { id: true },
+  });
+  if (!item) {
+    return { success: false, error: t('errors.itemNotFound') };
   }
 
-  const newQty = stock.currentQty + adjustment;
+  const stock = await prisma.stock.findUnique({
+    where: { officeId_itemId: { officeId, itemId } },
+  });
+
+  const currentQty = stock?.currentQty ?? 0;
+  const newQty = currentQty + adjustment;
   if (newQty < 0) {
     return {
       success: false,
-      error: t('errors.cannotReduceBelowZero', { current: stock.currentQty, adjustment }),
+      error: t('errors.cannotReduceBelowZero', { current: currentQty, adjustment }),
     };
   }
 
-  await prisma.$transaction([
-    prisma.stockMovement.create({
-      data: {
-        officeId,
-        delta: adjustment,
-        reason: "ADJUSTMENT",
-        note: note || null,
-        userId: membership.userId,
-      },
+  await prisma.$transaction(
+    stockDeltaOps({
+      officeId,
+      itemId,
+      delta: adjustment,
+      reason: "ADJUSTMENT",
+      note: note || null,
+      userId: membership.userId,
     }),
-    prisma.stock.update({
-      where: { officeId },
-      data: { currentQty: newQty },
-    }),
-  ]);
+  );
 
-  checkAndAlertLowStock(officeId).catch(() => {});
+  checkAndAlertLowStock(officeId, itemId).catch(() => {});
 
   revalidatePath(`/org/${officeId}/admin/stock`);
   return { success: true };

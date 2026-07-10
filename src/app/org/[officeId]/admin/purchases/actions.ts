@@ -11,6 +11,7 @@ import {
   deleteFile,
 } from "@/lib/storage";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { stockDeltaOps } from "@/lib/stock";
 import { getTranslations } from "next-intl/server";
 
 const ALLOWED_MIME_TYPES = [
@@ -30,28 +31,60 @@ export async function createPurchaseBatch(
   const { membership } = await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
+  const LineSchema = z.object({
+    itemId: z.string().min(1, t('errors.itemNotFound')),
+    qty: z.coerce.number().int().positive(t('errors.qtyMustBePositive')),
+    total: z.coerce.number().positive(t('errors.totalMustBePositive')),
+  });
+
   const CreatePurchaseSchema = z.object({
     purchasedAt: z.coerce.date(),
     paidByUserId: z.string().min(1, t('errors.paidByRequired')),
-    qty: z.coerce.number().int().positive(t('errors.qtyMustBePositive')),
-    totalPrice: z.coerce.number().positive(t('errors.totalMustBePositive')),
     notes: z.string().max(500).optional().or(z.literal("")),
+    lines: z.array(LineSchema).min(1, t('errors.qtyMustBePositive')),
   });
+
+  let parsedLines: unknown;
+  try {
+    parsedLines = JSON.parse(String(formData.get("lines") ?? "[]"));
+  } catch {
+    parsedLines = [];
+  }
 
   const parsed = CreatePurchaseSchema.safeParse({
     purchasedAt: formData.get("purchasedAt"),
     paidByUserId: formData.get("paidByUserId"),
-    qty: formData.get("qty"),
-    totalPrice: formData.get("totalPrice"),
     notes: formData.get("notes"),
+    lines: parsedLines,
   });
 
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0].message };
   }
 
-  const { purchasedAt, paidByUserId, qty, totalPrice, notes } = parsed.data;
-  const unitPrice = Math.round((totalPrice / qty) * 100) / 100;
+  const { purchasedAt, paidByUserId, notes, lines } = parsed.data;
+
+  // Every line's item must belong to this office.
+  const officeItemIds = new Set(
+    (
+      await prisma.item.findMany({
+        where: { officeId, id: { in: lines.map((l) => l.itemId) } },
+        select: { id: true },
+      })
+    ).map((i) => i.id),
+  );
+  if (lines.some((l) => !officeItemIds.has(l.itemId))) {
+    return { success: false, error: t('errors.itemNotFound') };
+  }
+
+  const lineData = lines.map((l) => ({
+    itemId: l.itemId,
+    qty: l.qty,
+    unitPrice: Math.round((l.total / l.qty) * 100) / 100,
+    lineTotal: Math.round(l.total * 100) / 100,
+  }));
+  const totalPrice =
+    Math.round(lineData.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;
 
   // Extract and validate files
   const files = formData.getAll("invoices") as File[];
@@ -104,10 +137,9 @@ export async function createPurchaseBatch(
         purchasedAt,
         orderedByUserId: membership.userId,
         paidByUserId,
-        qty,
-        unitPrice,
         totalPrice,
         notes: notes || null,
+        lines: { create: lineData },
         invoices: {
           create: invoiceRecords,
         },
@@ -133,6 +165,7 @@ export async function markDelivered(
 
   const batch = await prisma.purchaseBatch.findUnique({
     where: { id: batchId },
+    include: { lines: true },
   });
 
   if (!batch || batch.officeId !== officeId) {
@@ -143,32 +176,33 @@ export async function markDelivered(
     return { success: false, error: t('errors.alreadyDelivered') };
   }
 
-  const stock = await prisma.stock.findUnique({ where: { officeId } });
-  const newQty = (stock?.currentQty ?? 0) + batch.qty;
+  // Aggregate per item in case an order lists the same item on several lines.
+  const qtyByItem = new Map<string, number>();
+  for (const line of batch.lines) {
+    qtyByItem.set(line.itemId, (qtyByItem.get(line.itemId) ?? 0) + line.qty);
+  }
 
   await prisma.$transaction([
     prisma.purchaseBatch.update({
       where: { id: batchId },
       data: { status: "DELIVERED", deliveredAt: new Date() },
     }),
-    prisma.stockMovement.create({
-      data: {
+    ...[...qtyByItem.entries()].flatMap(([itemId, qty]) =>
+      stockDeltaOps({
         officeId,
-        delta: batch.qty,
+        itemId,
+        delta: qty,
         reason: "PURCHASE",
-        note: `Delivery received: ${batch.qty} units`,
+        note: `Delivery received: ${qty} units`,
         userId: membership.userId,
-      },
-    }),
-    prisma.stock.upsert({
-      where: { officeId },
-      create: { officeId, currentQty: batch.qty },
-      update: { currentQty: newQty },
-    }),
+      }),
+    ),
   ]);
 
-  // Stock increased — reset low stock alert if applicable
-  checkAndAlertLowStock(officeId).catch(() => {});
+  // Stock increased — reset low stock alerts if applicable
+  for (const itemId of qtyByItem.keys()) {
+    checkAndAlertLowStock(officeId, itemId).catch(() => {});
+  }
 
   revalidatePath(`/org/${officeId}/admin/purchases`);
   revalidatePath(`/org/${officeId}/admin/stock`);

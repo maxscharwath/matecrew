@@ -3,6 +3,7 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
 import { PurchaseForm } from "@/components/purchase-form";
 import { getTranslations } from "next-intl/server";
+import { getActiveItems } from "@/lib/items";
 import { PurchaseListSection, PurchaseListFallback } from "./_sections";
 
 interface Props {
@@ -28,6 +29,8 @@ export default async function PurchasesPage({ params, searchParams }: Props) {
     name: m.user.name,
   }));
 
+  const items = await getActiveItems(officeId);
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -37,7 +40,7 @@ export default async function PurchasesPage({ params, searchParams }: Props) {
         </p>
       </div>
 
-      <PurchaseForm officeId={officeId} members={members} />
+      <PurchaseForm officeId={officeId} members={members} items={items} />
 
       <Suspense fallback={<PurchaseListFallback />}>
         <PurchaseListSection officeId={officeId} page={page} />

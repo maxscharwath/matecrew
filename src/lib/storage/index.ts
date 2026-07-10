@@ -46,17 +46,25 @@ export async function fileExists(key: string): Promise<boolean> {
 
 // --- Key builders ---
 
+/** `<prefix>/<id>/<uuid>-<sanitized filename>` — a unique, path-safe key. */
+function buildScopedKey(prefix: string, id: string, filename: string): string {
+  const sanitized = filename.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
+  return `${prefix}/${id}/${crypto.randomUUID()}-${sanitized}`;
+}
+
 export function buildInvoiceKey(
   purchaseBatchId: string,
   filename: string
 ): string {
-  const sanitized = filename.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
-  const uuid = crypto.randomUUID();
-  return `invoices/${purchaseBatchId}/${uuid}-${sanitized}`;
+  return buildScopedKey("invoices", purchaseBatchId, filename);
 }
 
 export function buildAvatarKey(userId: string): string {
   return `avatars/${userId}/${crypto.randomUUID()}.jpg`;
+}
+
+export function buildItemImageKey(itemId: string, filename: string): string {
+  return buildScopedKey("items", itemId, filename);
 }
 
 const PDF_VERSION = "v2";
@@ -84,4 +92,13 @@ export function resolveAvatarUrl(
   if (!image) return undefined;
   if (image.startsWith("avatars/")) return internalFileUrl(image);
   return image;
+}
+
+/** Resolve an item `imageKey` to a displayable URL. */
+export function resolveItemImageUrl(
+  imageKey: string | null | undefined
+): string | undefined {
+  if (!imageKey) return undefined;
+  if (imageKey.startsWith("items/")) return internalFileUrl(imageKey);
+  return imageKey;
 }

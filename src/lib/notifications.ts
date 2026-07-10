@@ -5,7 +5,8 @@ import {
   buildSessionCutoffMessage,
   updateSlackMessage,
 } from "@/lib/slack";
-import { listRequesterNames } from "@/lib/mate-request";
+import { listRequestersByItem } from "@/lib/mate-request";
+import { getActiveItems } from "@/lib/items";
 import {
   getDayOfWeek,
   getCurrentTimeInTimezone,
@@ -88,11 +89,14 @@ export async function sendSessionNotifications(options?: {
       }
 
       try {
-        const requesters = await listRequesterNames({
-          officeId: office.id,
-          mateSessionId: session.id,
-          date: today,
-        });
+        const [items, requesterGroups] = await Promise.all([
+          getActiveItems(office.id),
+          listRequestersByItem({
+            officeId: office.id,
+            mateSessionId: session.id,
+            date: today,
+          }),
+        ]);
         const { blocks, fallback } = await buildSessionRequestMessage({
           officeId: office.id,
           officeName: office.name,
@@ -101,7 +105,8 @@ export async function sendSessionNotifications(options?: {
           cutoffTime: session.cutoffTime,
           date: todayIso,
           locale: office.locale,
-          requesters,
+          items,
+          requesterGroups,
         });
         const posted = await sendSlackMessage(
           office.slackChannelId!,
@@ -195,18 +200,14 @@ export async function sendCutoffNotifications(options?: {
       }
 
       try {
-        const requesters = await prisma.dailyRequest.findMany({
-          where: {
-            officeId: office.id,
-            mateSessionId: session.id,
-            date: today,
-            status: "REQUESTED",
-          },
-          include: { user: { select: { name: true } } },
-          orderBy: { createdAt: "asc" },
+        const requesterGroups = await listRequestersByItem({
+          officeId: office.id,
+          mateSessionId: session.id,
+          date: today,
+          status: "REQUESTED",
         });
 
-        if (requesters.length === 0) {
+        if (requesterGroups.length === 0) {
           // Still mark notified so we don't reprocess this slot all day.
           await prisma.mateSession.update({
             where: { id: session.id },
@@ -222,8 +223,7 @@ export async function sendCutoffNotifications(options?: {
           sessionLabel: session.label,
           date: todayIso,
           locale: office.locale,
-          count: requesters.length,
-          requesters: requesters.map((r) => r.user.name),
+          requesterGroups,
         });
         const posted = await sendSlackMessage(
           office.slackChannelId!,
@@ -291,11 +291,14 @@ export async function refreshSlackSessionMessage(opts: {
   }
   if (!office) return;
 
-  const requesters = await listRequesterNames({
-    officeId: opts.officeId,
-    mateSessionId: opts.mateSessionId,
-    date: opts.date,
-  });
+  const [items, requesterGroups] = await Promise.all([
+    getActiveItems(opts.officeId),
+    listRequestersByItem({
+      officeId: opts.officeId,
+      mateSessionId: opts.mateSessionId,
+      date: opts.date,
+    }),
+  ]);
   const { blocks, fallback } = await buildSessionRequestMessage({
     officeId: opts.officeId,
     officeName: office.name,
@@ -304,7 +307,8 @@ export async function refreshSlackSessionMessage(opts: {
     cutoffTime: session.cutoffTime,
     date: toISODateString(opts.date),
     locale: office.locale,
-    requesters,
+    items,
+    requesterGroups,
   });
 
   try {
