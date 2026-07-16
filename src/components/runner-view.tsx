@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Package,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ForgottenOrdersSection, type ForgottenOrder } from "@/components/forgotten-orders-section";
 import { ItemThumb } from "@/components/item-thumb";
 import {
+  deleteRequest,
   markAllServed,
   markServed,
   markUnserved,
@@ -143,50 +145,66 @@ function RequestRow({
   officeId,
   disabled,
   onToggle,
+  onDelete,
 }: {
   readonly request: DailyRequest;
   readonly officeId: string;
   readonly disabled: boolean;
   readonly onToggle: (id: string, served: boolean) => void;
+  readonly onDelete: (id: string) => void;
 }) {
   const t = useTranslations("runner");
   const isServed = request.status === "SERVED";
 
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onToggle(request.id, !isServed)}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-md py-2.5 px-2 -mx-2 text-left transition-colors",
-        "hover:bg-muted/60 active:bg-muted disabled:opacity-60 disabled:cursor-not-allowed",
-        "min-h-12",
-      )}
-      aria-pressed={isServed}
-      data-office-id={officeId}
-    >
-      <Avatar size="sm">
-        <AvatarImage src={request.user.image} alt={request.user.name} />
-        <AvatarFallback>{getInitials(request.user.name)}</AvatarFallback>
-      </Avatar>
-      <span
+    <div className="-mx-2 flex w-full items-center gap-1">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onToggle(request.id, !isServed)}
         className={cn(
-          "min-w-0 flex-1 truncate text-sm",
-          isServed ? "text-muted-foreground line-through" : "font-medium",
+          "flex min-w-0 flex-1 items-center gap-3 rounded-md py-2.5 px-2 text-left transition-colors",
+          "hover:bg-muted/60 active:bg-muted disabled:opacity-60 disabled:cursor-not-allowed",
+          "min-h-12",
         )}
+        aria-pressed={isServed}
+        data-office-id={officeId}
       >
-        {request.user.name}
-      </span>
-      {isServed ? (
-        <span className="flex size-7 items-center justify-center rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
-          <Check className="size-4" />
+        <Avatar size="sm">
+          <AvatarImage src={request.user.image} alt={request.user.name} />
+          <AvatarFallback>{getInitials(request.user.name)}</AvatarFallback>
+        </Avatar>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm",
+            isServed ? "text-muted-foreground line-through" : "font-medium",
+          )}
+        >
+          {request.user.name}
         </span>
-      ) : (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          {t("waiting")}
-        </Badge>
+        {isServed ? (
+          <span className="flex size-7 items-center justify-center rounded-full bg-green-500/15 text-green-600 dark:text-green-400">
+            <Check className="size-4" />
+          </span>
+        ) : (
+          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+            {t("waiting")}
+          </Badge>
+        )}
+      </button>
+      {!isServed && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+          disabled={disabled}
+          onClick={() => onDelete(request.id)}
+          aria-label={t("deleteRequest")}
+        >
+          <Trash2 className="size-4" />
+        </Button>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -227,15 +245,18 @@ export function RunnerView({
   const [optimisticStatus, setOptimisticStatus] = useState<
     Record<string, "REQUESTED" | "SERVED">
   >({});
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(new Set());
   const t = useTranslations();
 
-  const merged: DailyRequest[] = requests.map((r) => {
-    const override = optimisticStatus[r.id];
-    if (override && r.status !== "CANCELLED") {
-      return { ...r, status: override };
-    }
-    return r;
-  });
+  const merged: DailyRequest[] = requests
+    .filter((r) => !deletedIds.has(r.id))
+    .map((r) => {
+      const override = optimisticStatus[r.id];
+      if (override && r.status !== "CANCELLED") {
+        return { ...r, status: override };
+      }
+      return r;
+    });
 
   const served = merged.filter((r) => r.status === "SERVED").length;
   const total = merged.length;
@@ -290,6 +311,24 @@ export function RunnerView({
           },
         });
       }
+    });
+  }
+
+  function handleDelete(id: string) {
+    setDeletedIds((prev) => new Set(prev).add(id));
+
+    startTransition(async () => {
+      const result = await deleteRequest(officeId, id);
+      if (!result.success) {
+        setDeletedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        toast.error(result.error);
+        return;
+      }
+      toast.success(t("runner.requestDeletedToast"));
     });
   }
 
@@ -411,6 +450,7 @@ export function RunnerView({
                           officeId={officeId}
                           disabled={isPending}
                           onToggle={toggleRow}
+                          onDelete={handleDelete}
                         />
                       ))}
                     </div>

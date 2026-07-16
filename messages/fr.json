@@ -219,7 +219,9 @@
     "forgottenServedToast": "Marqué comme servi.",
     "forgottenCancelledToast": "Demande annulée.",
     "toFetch": "{count} à chercher",
-    "allDone": "Tous servis"
+    "allDone": "Tous servis",
+    "deleteRequest": "Supprimer la demande",
+    "requestDeletedToast": "Demande supprimée."
   },
   "schedule": {
     "title": "Horaires",

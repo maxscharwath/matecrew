@@ -7,6 +7,7 @@ import { requireMembership } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { serveSession } from "@/lib/serve-session";
 import { stockDeltaOps } from "@/lib/stock";
+import { refreshSlackSessionMessage } from "@/lib/notifications";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -78,6 +79,36 @@ export async function markCancelled(
   await prisma.dailyRequest.update({
     where: { id: requestId },
     data: { status: "CANCELLED" },
+  });
+
+  revalidatePath(`/org/${officeId}/runner`);
+  revalidatePath(`/org/${officeId}/request`);
+  return { success: true };
+}
+
+// Unlike cancelDailyRequest (self-service, blocked once the session closes),
+// this lets whoever runs the prep screen drop a request even after the cutoff.
+export async function deleteRequest(
+  officeId: string,
+  requestId: string,
+): Promise<ActionResult> {
+  await requireMembership(officeId);
+  const t = await getTranslations();
+
+  const request = await prisma.dailyRequest.findUnique({ where: { id: requestId } });
+  if (request?.officeId !== officeId) {
+    return { success: false, error: t('errors.requestNotFound') };
+  }
+  if (request.status === "SERVED") {
+    return { success: false, error: t('errors.cannotCancelServed') };
+  }
+
+  await prisma.dailyRequest.delete({ where: { id: requestId } });
+
+  await refreshSlackSessionMessage({
+    officeId,
+    mateSessionId: request.mateSessionId,
+    date: request.date,
   });
 
   revalidatePath(`/org/${officeId}/runner`);

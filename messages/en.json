@@ -219,7 +219,9 @@
     "forgottenServedToast": "Marked as served.",
     "forgottenCancelledToast": "Request cancelled.",
     "toFetch": "{count} to fetch",
-    "allDone": "All served"
+    "allDone": "All served",
+    "deleteRequest": "Delete request",
+    "requestDeletedToast": "Request deleted."
   },
   "schedule": {
     "title": "Schedule",
