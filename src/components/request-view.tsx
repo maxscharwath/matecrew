@@ -233,8 +233,14 @@ function ItemChoice({
 }) {
   const t = useTranslations();
 
-  if (items.length <= 1) {
-    const only = items[0];
+  // Sold-out items are hidden as long as something is orderable; when nothing
+  // is (or the office manages a single item), keep the informative disabled
+  // sold-out button instead of an empty picker.
+  const inStock = items.filter((i) => i.stockQty > 0);
+  const choices = inStock.length > 0 ? inStock : items.slice(0, 1);
+
+  if (choices.length <= 1) {
+    const only = choices[0];
     const soldOut = !!only && only.stockQty <= 0;
     return (
       <Button
@@ -255,7 +261,7 @@ function ItemChoice({
 
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      {items.map((item) => {
+      {choices.map((item) => {
         const soldOut = item.stockQty <= 0;
         return (
           <Button
@@ -309,7 +315,7 @@ function EmptyState({
       <p className="text-muted-foreground">
         {cutoffPassed
           ? t('request.ordersClosed')
-          : items.length > 1
+          : items.filter((i) => i.stockQty > 0).length > 1
             ? t('request.pickYourMate')
             : t('request.wantMateToday')}
       </p>
