@@ -223,7 +223,9 @@ export async function POST(request: Request) {
 
   const action = payload.actions?.[0];
   if (!action) return Response.json({});
-  const isRequest = action.action_id === SLACK_REQUEST_ACTION_ID;
+  const isRequest =
+    action.action_id === SLACK_REQUEST_ACTION_ID ||
+    action.action_id.startsWith(`${SLACK_REQUEST_ACTION_ID}:`);
   const isCancel = action.action_id === SLACK_CANCEL_ACTION_ID;
   const isMarkServed = action.action_id === SLACK_MARK_SERVED_ACTION_ID;
   if (!isRequest && !isCancel && !isMarkServed) return Response.json({});

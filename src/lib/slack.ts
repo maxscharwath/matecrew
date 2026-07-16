@@ -286,7 +286,9 @@ export async function buildSessionRequestMessage(opts: {
         ? t("slack.iWantMate")
         : t("slack.iWantItem", { item: item.name }),
     },
-    action_id: SLACK_REQUEST_ACTION_ID,
+    // Slack requires action_ids to be unique within a block, so each item
+    // button gets an item-suffixed id; the handler matches on the prefix.
+    action_id: `${SLACK_REQUEST_ACTION_ID}:${item.id}`,
     value: encodeActionValue({
       officeId: opts.officeId,
       mateSessionId: opts.mateSessionId,

@@ -129,6 +129,10 @@ export async function sendSessionNotifications(options?: {
           ok: true,
         });
       } catch (e) {
+        console.error(
+          `[notifications] daily-request failed for ${office.name} / ${session.label ?? session.startTime}:`,
+          e,
+        );
         results.push({
           office: office.name,
           session: session.label ?? session.startTime,
@@ -246,6 +250,10 @@ export async function sendCutoffNotifications(options?: {
           ok: true,
         });
       } catch (e) {
+        console.error(
+          `[notifications] cutoff failed for ${office.name} / ${session.label ?? session.cutoffTime}:`,
+          e,
+        );
         results.push({
           office: office.name,
           session: session.label ?? session.cutoffTime,
