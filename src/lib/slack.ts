@@ -13,7 +13,7 @@ interface SlackBlock {
   accessory?: { type: "image"; image_url: string; alt_text: string };
   elements?: Array<{
     type: string;
-    text?: { type: string; text: string };
+    text?: { type: string; text: string } | string;
     url?: string;
     action_id?: string;
     value?: string;
@@ -21,6 +21,8 @@ interface SlackBlock {
     placeholder?: { type: "plain_text"; text: string };
     options?: SlackSelectOption[];
     initial_option?: SlackSelectOption;
+    image_url?: string;
+    alt_text?: string;
   }>;
 }
 
@@ -436,10 +438,20 @@ export async function buildOrderManageMessage(opts: {
   const t = await getTranslator(opts.locale);
   const items = inStockItems(opts.items);
 
+  const currentStock = opts.current
+    ? items.find((i) => i.id === opts.current!.itemId)?.stockQty
+    : undefined;
   const headerText = opts.current
-    ? t("slack.yourOrder", { item: opts.current.itemName })
+    ? [
+        t("slack.yourOrder", { item: opts.current.itemName }),
+        ...(currentStock !== undefined
+          ? [t("slack.stockCount", { count: currentStock })]
+          : []),
+      ].join("\n")
     : t("slack.noOrderYet");
   const imageUrl = publicImageUrl(opts.current?.imageUrl);
+  // Slack renders section accessory images as a fixed-size (~88px) thumbnail;
+  // the two-line text keeps the block visually balanced next to it.
   const blocks: SlackBlock[] = [
     {
       type: "section",
