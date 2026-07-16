@@ -6,6 +6,7 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { uploadFile, deleteFile, buildItemImageKey } from "@/lib/storage";
+import { optimizeImage } from "@/lib/image";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -151,9 +152,14 @@ export async function setItemImage(
     return { success: false, error: t("errors.fileTooLarge", { name: file.name }) };
   }
 
-  const key = buildItemImageKey(itemId, file.name);
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await uploadFile({ key, body: buffer, contentType: file.type });
+  let buffer: Buffer;
+  try {
+    buffer = await optimizeImage(Buffer.from(await file.arrayBuffer()));
+  } catch {
+    return { success: false, error: t("errors.invalidFileType", { name: file.name }) };
+  }
+  const key = buildItemImageKey(itemId, "image.webp");
+  await uploadFile({ key, body: buffer, contentType: "image/webp" });
 
   await prisma.item.update({ where: { id: itemId }, data: { imageKey: key } });
 
