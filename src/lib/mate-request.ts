@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isSessionOpen } from "@/lib/session-utils";
 import { resolveItemId } from "@/lib/items";
+import { resolveAvatarUrl, resolveItemImageUrl } from "@/lib/storage";
 
 export type RequestResult =
   | { kind: "created" }
@@ -193,7 +194,9 @@ export async function listRequesterNames(opts: {
 export interface ItemRequesterGroup {
   itemId: string;
   itemName: string;
+  itemImageUrl?: string;
   names: string[];
+  members: { name: string; avatarUrl?: string }[];
 }
 
 /**
@@ -215,8 +218,10 @@ export async function listRequestersByItem(opts: {
       ...(opts.status ? { status: opts.status } : {}),
     },
     include: {
-      user: { select: { name: true } },
-      item: { select: { id: true, name: true, isDefault: true, sortOrder: true } },
+      user: { select: { name: true, image: true } },
+      item: {
+        select: { id: true, name: true, imageKey: true, isDefault: true, sortOrder: true },
+      },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -228,12 +233,18 @@ export async function listRequestersByItem(opts: {
       group = {
         itemId: r.item.id,
         itemName: r.item.name,
+        itemImageUrl: resolveItemImageUrl(r.item.imageKey),
         names: [],
+        members: [],
         order: [!r.item.isDefault, r.item.sortOrder, r.item.name],
       };
       groups.set(r.itemId, group);
     }
     group.names.push(r.user.name);
+    group.members.push({
+      name: r.user.name,
+      avatarUrl: resolveAvatarUrl(r.user.image),
+    });
   }
 
   return [...groups.values()]
@@ -242,5 +253,11 @@ export async function listRequestersByItem(opts: {
       if (a.order[1] !== b.order[1]) return a.order[1] - b.order[1];
       return a.order[2].localeCompare(b.order[2]);
     })
-    .map(({ itemId, itemName, names }) => ({ itemId, itemName, names }));
+    .map(({ itemId, itemName, itemImageUrl, names, members }) => ({
+      itemId,
+      itemName,
+      itemImageUrl,
+      names,
+      members,
+    }));
 }

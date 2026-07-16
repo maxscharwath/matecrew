@@ -275,28 +275,52 @@ export async function postToResponseUrl(
 export interface ItemRequesterGroupInput {
   itemId: string;
   itemName: string;
+  itemImageUrl?: string;
   names: string[];
+  members?: { name: string; avatarUrl?: string }[];
 }
 
+// A context block accepts at most 10 elements; item thumb + label + names
+// leave room for this many avatars.
+const MAX_AVATARS_PER_GROUP = 7;
+
 /**
- * Renders the per-item requester breakdown as mrkdwn, e.g.
- *   *Maté Classic* (2): Alice, Bob
- *   *Ginger* (1): Claire
+ * One context row per item: item thumbnail, "*Item* ×N", the requesters'
+ * avatars, and their names. Context images render as small inline icons,
+ * which is exactly the right size for avatars.
  */
-function requesterBreakdown(
+function requesterGroupBlocks(
   t: Awaited<ReturnType<typeof getTranslator>>,
   groups: ItemRequesterGroupInput[],
-): string {
-  if (groups.length === 0) return t("slack.noRequestsYet");
-  return groups
-    .map((g) =>
-      t("slack.requestersListItem", {
-        item: g.itemName,
-        count: g.names.length,
-        names: g.names.join(", "),
-      }),
-    )
-    .join("\n");
+): SlackBlock[] {
+  if (groups.length === 0) {
+    return [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: t("slack.noRequestsYet") },
+      },
+    ];
+  }
+  return groups.map((g) => {
+    const members = g.members ?? g.names.map((name) => ({ name, avatarUrl: undefined }));
+    const elements: NonNullable<SlackBlock["elements"]> = [];
+    const itemImg = publicImageUrl(g.itemImageUrl);
+    if (itemImg) {
+      elements.push({ type: "image", image_url: itemImg, alt_text: g.itemName });
+    }
+    elements.push({
+      type: "mrkdwn",
+      text: t("slack.requesterGroupItem", { item: g.itemName, count: members.length }),
+    });
+    for (const m of members.slice(0, MAX_AVATARS_PER_GROUP)) {
+      const avatar = publicImageUrl(m.avatarUrl);
+      if (avatar) {
+        elements.push({ type: "image", image_url: avatar, alt_text: m.name });
+      }
+    }
+    elements.push({ type: "mrkdwn", text: members.map((m) => m.name).join(", ") });
+    return { type: "context", elements: elements.slice(0, 10) };
+  });
 }
 
 export interface SlackItemInput {
@@ -366,13 +390,7 @@ export async function buildSessionRequestMessage(opts: {
   ];
 
   if (opts.requesterGroups !== undefined) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: requesterBreakdown(t, opts.requesterGroups),
-      },
-    });
+    blocks.push(...requesterGroupBlocks(t, opts.requesterGroups));
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -531,10 +549,6 @@ export async function buildSessionCutoffMessage(opts: {
   });
 
   const count = opts.requesterGroups.reduce((sum, g) => sum + g.names.length, 0);
-  // "2× Maté Classic, 1× Ginger" — what the runner needs to fetch.
-  const itemSummary = opts.requesterGroups
-    .map((g) => t("slack.cutoffItemCount", { count: g.names.length, item: g.itemName }))
-    .join(", ");
 
   const blocks: SlackBlock[] = [
     {
@@ -550,14 +564,10 @@ export async function buildSessionCutoffMessage(opts: {
     },
   ];
 
+  // Per-item context rows already carry the ×N counts, so no separate
+  // "2× Classic, 1× Ginger" summary line is needed.
   if (opts.requesterGroups.length > 0) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `${itemSummary}\n${requesterBreakdown(t, opts.requesterGroups)}`,
-      },
-    });
+    blocks.push(...requesterGroupBlocks(t, opts.requesterGroups));
   }
 
   if (opts.servedBy) {
