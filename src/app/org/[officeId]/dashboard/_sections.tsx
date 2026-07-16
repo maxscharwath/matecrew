@@ -34,6 +34,7 @@ import {
   type HeatmapCell,
 } from "@/components/mate-activity-heatmap";
 import { getTodayDate } from "@/lib/date";
+import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { getActiveItems } from "@/lib/items";
 import { cn } from "@/lib/utils";
 
@@ -224,16 +225,9 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
 
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
-  const monthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
+  const monthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0));
 
-  const [
-    totalConsumed,
-    thisMonthConsumed,
-    totalOfficeConsumption,
-    totalPurchaseCost,
-    userPaidTotal,
-    monthBatches,
-  ] = await Promise.all([
+  const [totalConsumed, thisMonthConsumed, preview] = await Promise.all([
     prisma.consumptionEntry.aggregate({
       where: { userId, officeId, cancelledAt: null },
       _sum: { qty: true },
@@ -242,76 +236,35 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
       where: {
         userId,
         officeId,
-        date: { gte: monthStart, lt: monthEnd },
+        date: { gte: monthStart, lte: monthEnd },
         cancelledAt: null,
       },
       _sum: { qty: true },
     }),
-    prisma.consumptionEntry.aggregate({
-      where: { officeId, date: { gte: monthStart, lt: monthEnd }, cancelledAt: null },
-      _sum: { qty: true },
-    }),
-    prisma.purchaseBatch.aggregate({
-      where: { officeId, purchasedAt: { gte: monthStart, lt: monthEnd } },
-      _sum: { totalPrice: true },
-    }),
-    prisma.purchaseBatch.aggregate({
-      where: {
-        officeId,
-        paidByUserId: userId,
-        purchasedAt: { gte: monthStart, lt: monthEnd },
-      },
-      _sum: { totalPrice: true },
-    }),
-    prisma.purchaseBatch.findMany({
-      where: { officeId, purchasedAt: { gte: monthStart, lt: monthEnd } },
-      select: {
-        paidByUserId: true,
-        totalPrice: true,
-        paidBy: { select: { id: true, name: true, image: true } },
-      },
-    }),
+    calculateReimbursements(officeId, monthStart, monthEnd),
   ]);
 
   const userMonthQty = thisMonthConsumed._sum.qty ?? 0;
-  const totalQty = totalOfficeConsumption._sum.qty ?? 0;
-  const totalCost = Number(totalPurchaseCost._sum.totalPrice ?? 0);
-  const userPaid = Number(userPaidTotal._sum.totalPrice ?? 0);
-  const userShare =
-    totalQty > 0
-      ? Math.round(((userMonthQty / totalQty) * totalCost) * 100) / 100
-      : 0;
-  const netOwed = Math.round((userShare - userPaid) * 100) / 100;
-  const hasPurchaseData = totalCost > 0;
+  const share = preview.shares.find((s) => s.userId === userId);
+  const userShare = share?.costShare ?? 0;
+  const netOwed = share?.netOwed ?? 0;
+  const hasPurchaseData = preview.unitPrice > 0;
 
-  const payerTotals = new Map<string, { name: string; image: string | null; total: number }>();
-  for (const b of monthBatches) {
-    if (b.paidByUserId === userId) continue;
-    const existing = payerTotals.get(b.paidByUserId);
-    const batchTotal = b.totalPrice.toNumber();
-    const userShareOfBatch =
-      totalQty > 0 ? (userMonthQty / totalQty) * batchTotal : 0;
-    if (existing) {
-      existing.total += userShareOfBatch;
-    } else {
-      payerTotals.set(b.paidByUserId, {
-        name: b.paidBy.name,
-        image: b.paidBy.image,
-        total: userShareOfBatch,
-      });
-    }
-  }
-
-  const owesTo = await Promise.all(
-    [...payerTotals.values()]
-      .filter((p) => p.total > 0.01)
-      .sort((a, b) => b.total - a.total)
-      .map(async (p) => ({
-        name: p.name,
-        image: resolveAvatarUrl(p.image),
-        amount: Math.round(p.total * 100) / 100,
-      })),
-  );
+  const owedLines = preview.lines
+    .filter((l) => l.fromUserId === userId)
+    .sort((a, b) => b.amount - a.amount);
+  const creditors = owedLines.length
+    ? await prisma.user.findMany({
+        where: { id: { in: owedLines.map((l) => l.toUserId) } },
+        select: { id: true, image: true },
+      })
+    : [];
+  const creditorImages = new Map(creditors.map((u) => [u.id, u.image]));
+  const owesTo = owedLines.map((l) => ({
+    name: l.toUserName,
+    image: resolveAvatarUrl(creditorImages.get(l.toUserId)),
+    amount: l.amount,
+  }));
 
   return (
     <>
@@ -356,7 +309,10 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">
-                  {t('dashboard.currentMonthBasedOnConsumption')}
+                  {t('dashboard.shareFormula', {
+                    qty: share?.qty ?? 0,
+                    price: preview.unitPrice.toFixed(2),
+                  })}
                 </p>
               </CardContent>
             </Card>

@@ -93,6 +93,7 @@
     "youPaidEstimate": "Vous avez payé (estimation)",
     "purchasesCoveredThisMonth": "achats couverts ce mois",
     "currentMonthBasedOnConsumption": "mois en cours, basé sur la consommation",
+    "shareFormula": "{qty} consommés × CHF {price} le maté",
     "netBalanceEstimate": "Solde net (estimation)",
     "youOwe": "vous devez",
     "youAreOwed": "on vous doit",

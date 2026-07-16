@@ -93,6 +93,7 @@
     "youPaidEstimate": "You paid (estimate)",
     "purchasesCoveredThisMonth": "purchases you covered this month",
     "currentMonthBasedOnConsumption": "current month, based on consumption",
+    "shareFormula": "{qty} consumed × CHF {price} per maté",
     "netBalanceEstimate": "Net balance (estimate)",
     "youOwe": "you owe",
     "youAreOwed": "you are owed",
