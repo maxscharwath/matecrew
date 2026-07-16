@@ -309,6 +309,31 @@ export function inStockItems<T extends SlackItemInput>(items: T[]): T[] {
   return items.filter((i) => i.stockQty === undefined || i.stockQty > 0);
 }
 
+/** One select option per item, with the stock count as its description. */
+function itemSelectOptions(
+  t: Awaited<ReturnType<typeof getTranslator>>,
+  items: SlackItemInput[],
+  ctx: { officeId: string; mateSessionId: string | null; date: string },
+): SlackSelectOption[] {
+  return items.map((item) => ({
+    text: { type: "plain_text" as const, text: item.name.slice(0, 75) },
+    ...(item.stockQty !== undefined
+      ? {
+          description: {
+            type: "plain_text" as const,
+            text: t("slack.stockCount", { count: item.stockQty }),
+          },
+        }
+      : {}),
+    value: encodeActionValue({
+      officeId: ctx.officeId,
+      mateSessionId: ctx.mateSessionId,
+      date: ctx.date,
+      itemId: item.id,
+    }),
+  }));
+}
+
 export async function buildSessionRequestMessage(opts: {
   officeId: string;
   officeName: string;
@@ -351,52 +376,45 @@ export async function buildSessionRequestMessage(opts: {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const openUrl = `${appUrl}/org/${opts.officeId}/request`;
 
-  // One "I want <item>" button per in-stock item. A single item keeps the
-  // familiar single-button layout; several items surface a button each.
-  const singleItem = items.length === 1;
-  const itemButtons = items.map((item) => ({
-    type: "button",
-    text: {
-      type: "plain_text",
-      text: singleItem
-        ? t("slack.iWantMate")
-        : t("slack.iWantItem", { item: item.name }),
-    },
-    // Slack requires action_ids to be unique within a block, so each item
-    // button gets an item-suffixed id; the handler matches on the prefix.
-    action_id: `${SLACK_REQUEST_ACTION_ID}:${item.id}`,
-    value: encodeActionValue({
-      officeId: opts.officeId,
-      mateSessionId: opts.mateSessionId,
-      date: opts.date,
-      itemId: item.id,
-    }),
-    style: "primary" as const,
-  }));
-
-  const sessionValue = encodeActionValue({
+  const ctx = {
     officeId: opts.officeId,
     mateSessionId: opts.mateSessionId,
     date: opts.date,
-  });
+  };
 
-  blocks.push({
-    type: "actions",
-    elements: [
-      ...itemButtons,
-      {
-        type: "button",
-        text: { type: "plain_text", text: t("slack.manageOrder") },
-        action_id: SLACK_MANAGE_ACTION_ID,
-        value: sessionValue,
-      },
-      {
-        type: "button",
-        text: { type: "plain_text", text: t("slack.openInApp") },
-        url: openUrl,
-      },
-    ],
-  });
+  // A single in-stock item keeps the familiar one-click button; several items
+  // offer a dropdown so the row stays compact however many items exist.
+  const elements: NonNullable<SlackBlock["elements"]> = [];
+  if (items.length === 1) {
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: t("slack.iWantMate") },
+      action_id: `${SLACK_REQUEST_ACTION_ID}:${items[0].id}`,
+      value: encodeActionValue({ ...ctx, itemId: items[0].id }),
+      style: "primary" as const,
+    });
+  } else if (items.length > 1) {
+    elements.push({
+      type: "static_select",
+      action_id: SLACK_PICK_ACTION_ID,
+      placeholder: { type: "plain_text", text: t("slack.pickItem") },
+      options: itemSelectOptions(t, items, ctx),
+    });
+  }
+  elements.push(
+    {
+      type: "button",
+      text: { type: "plain_text", text: t("slack.manageOrder") },
+      action_id: SLACK_MANAGE_ACTION_ID,
+      value: encodeActionValue(ctx),
+    },
+    {
+      type: "button",
+      text: { type: "plain_text", text: t("slack.openInApp") },
+      url: openUrl,
+    },
+  );
+  blocks.push({ type: "actions", elements });
 
   return { blocks, fallback: t("slack.newMessage") };
 }
@@ -438,25 +456,11 @@ export async function buildOrderManageMessage(opts: {
     },
   ];
 
-  const toOption = (item: SlackItemInput): SlackSelectOption => ({
-    text: { type: "plain_text", text: item.name.slice(0, 75) },
-    ...(item.stockQty !== undefined
-      ? {
-          description: {
-            type: "plain_text" as const,
-            text: t("slack.stockCount", { count: item.stockQty }),
-          },
-        }
-      : {}),
-    value: encodeActionValue({
-      officeId: opts.officeId,
-      mateSessionId: opts.mateSessionId,
-      date: opts.date,
-      itemId: item.id,
-    }),
+  const options = itemSelectOptions(t, items, {
+    officeId: opts.officeId,
+    mateSessionId: opts.mateSessionId,
+    date: opts.date,
   });
-
-  const options = items.map(toOption);
   const currentOption = options.find(
     (o) => decodeActionValue(o.value)?.itemId === opts.current?.itemId,
   );

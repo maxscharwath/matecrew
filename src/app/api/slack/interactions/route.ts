@@ -416,8 +416,8 @@ export async function POST(request: Request) {
   if (fromEphemeral) {
     // The pick/cancel came from the manage view — refresh it in place.
     await refreshManageView(payload, user.id, ctx, dateObj, locale);
-  } else if (isRequest) {
-    // A channel item button click: confirm privately with the manage view.
+  } else if (isRequest || isPick) {
+    // Ordered from the channel message: confirm privately with the manage view.
     const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
     return ephemeral(payload, blocks, fallback);
   }
