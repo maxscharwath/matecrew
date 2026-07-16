@@ -1,21 +1,29 @@
 import { prisma } from "@/lib/prisma";
 import {
   SLACK_CANCEL_ACTION_ID,
+  SLACK_MANAGE_ACTION_ID,
   SLACK_MARK_SERVED_ACTION_ID,
+  SLACK_PICK_ACTION_ID,
   SLACK_REQUEST_ACTION_ID,
   buildConnectErrorMessage,
   buildConnectSlackMessage,
+  buildOrderManageMessage,
   buildSessionCutoffMessage,
   decodeActionValue,
   fetchSlackUserEmail,
+  postEphemeralMessage,
+  postToResponseUrl,
   updateSlackMessage,
   verifySlackSignature,
 } from "@/lib/slack";
+import { resolveItemImageUrl } from "@/lib/storage";
 import { createSlackLinkToken } from "@/lib/slack-link-token";
 import { aliasedEmails } from "@/lib/email-identity";
+import { getActiveItems } from "@/lib/items";
 import {
   cancelMateRequest,
   createMateRequest,
+  getUserSessionRequest,
   listRequestersByItem,
   type CancelResult,
   type RequestResult,
@@ -29,17 +37,102 @@ interface InteractionPayload {
   type: string;
   response_url: string;
   user: { id: string; name?: string };
-  actions: Array<{ action_id: string; value: string }>;
+  actions: Array<{
+    action_id: string;
+    value?: string;
+    selected_option?: { value: string };
+  }>;
   channel?: { id: string };
   message?: { ts: string };
+  container?: { is_ephemeral?: boolean };
 }
 
 function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
 }
 
-function ephemeral(blocks: unknown, text: string) {
-  return Response.json({ response_type: "ephemeral", text, blocks });
+/**
+ * Shows blocks only to the acting user via chat.postEphemeral. A direct HTTP
+ * response body is not rendered for block_actions, and response_url ephemerals
+ * can clobber the original channel message, so this is the reliable path.
+ */
+async function ephemeral(
+  payload: InteractionPayload,
+  blocks: unknown,
+  text: string,
+): Promise<Response> {
+  if (payload.channel?.id) {
+    try {
+      await postEphemeralMessage({
+        channel: payload.channel.id,
+        user: payload.user.id,
+        blocks: blocks as never,
+        text,
+      });
+    } catch (e) {
+      console.error("[slack] postEphemeral failed:", e);
+    }
+  }
+  return new Response(null, { status: 200 });
+}
+
+/**
+ * Builds the "manage my order" view for a linked user from current DB state.
+ */
+async function buildManageView(
+  userId: string,
+  ctx: { officeId: string; mateSessionId: string | null; date: string },
+  dateObj: Date,
+  locale: string,
+) {
+  const [items, current] = await Promise.all([
+    getActiveItems(ctx.officeId),
+    getUserSessionRequest({
+      userId,
+      officeId: ctx.officeId,
+      mateSessionId: ctx.mateSessionId,
+      date: dateObj,
+    }),
+  ]);
+  return buildOrderManageMessage({
+    officeId: ctx.officeId,
+    mateSessionId: ctx.mateSessionId,
+    date: ctx.date,
+    locale,
+    items,
+    current: current
+      ? {
+          itemId: current.itemId,
+          itemName: current.itemName,
+          imageUrl: resolveItemImageUrl(current.imageKey),
+        }
+      : null,
+  });
+}
+
+/**
+ * After an action taken from the ephemeral manage view, refresh that view in
+ * place; response_url on an ephemeral-sourced interaction targets the
+ * ephemeral itself, never the channel message.
+ */
+async function refreshManageView(
+  payload: InteractionPayload,
+  userId: string,
+  ctx: { officeId: string; mateSessionId: string | null; date: string },
+  dateObj: Date,
+  locale: string,
+): Promise<void> {
+  try {
+    const { blocks, fallback } = await buildManageView(userId, ctx, dateObj, locale);
+    await postToResponseUrl(payload.response_url, {
+      response_type: "ephemeral",
+      replace_original: true,
+      text: fallback,
+      blocks,
+    });
+  } catch (e) {
+    console.error("[slack] manage view refresh failed:", e);
+  }
 }
 
 async function resolveUser(
@@ -136,7 +229,7 @@ async function handleMarkServed(
       locale,
       reason: "served",
     });
-    return ephemeral(blocks, "Nothing to serve");
+    return ephemeral(payload, blocks, "Nothing to serve");
   }
 
   revalidatePath(`/org/${ctx.officeId}/runner`);
@@ -226,11 +319,18 @@ export async function POST(request: Request) {
   const isRequest =
     action.action_id === SLACK_REQUEST_ACTION_ID ||
     action.action_id.startsWith(`${SLACK_REQUEST_ACTION_ID}:`);
+  const isPick = action.action_id === SLACK_PICK_ACTION_ID;
+  const isManage = action.action_id === SLACK_MANAGE_ACTION_ID;
   const isCancel = action.action_id === SLACK_CANCEL_ACTION_ID;
   const isMarkServed = action.action_id === SLACK_MARK_SERVED_ACTION_ID;
-  if (!isRequest && !isCancel && !isMarkServed) return Response.json({});
+  if (!isRequest && !isPick && !isManage && !isCancel && !isMarkServed) {
+    return Response.json({});
+  }
 
-  const ctx = decodeActionValue(action.value);
+  // Buttons carry the context in `value`; a select carries it per option.
+  const rawValue = action.selected_option?.value ?? action.value;
+  if (!rawValue) return badRequest("Missing action value");
+  const ctx = decodeActionValue(rawValue);
   if (!ctx) return badRequest("Invalid action value");
 
   const dateObj = new Date(`${ctx.date}T00:00:00.000Z`);
@@ -254,7 +354,7 @@ export async function POST(request: Request) {
         locale,
         reason: "unknown",
       });
-      return ephemeral(blocks, "Unknown error");
+      return ephemeral(payload, blocks, "Unknown error");
     }
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -269,23 +369,32 @@ export async function POST(request: Request) {
     });
     const connectUrl = `${appUrl}/slack/link?token=${encodeURIComponent(token)}`;
     const { blocks } = await buildConnectSlackMessage({ connectUrl, locale });
-    return ephemeral(blocks, "Connect your Slack to MateCrew");
+    return ephemeral(payload, blocks, "Connect your Slack to MateCrew");
   }
 
-  const result: RequestResult | CancelResult = isRequest
-    ? await createMateRequest({
-        userId: user.id,
-        officeId: ctx.officeId,
-        mateSessionId: ctx.mateSessionId,
-        date: dateObj,
-        itemId: ctx.itemId,
-      })
-    : await cancelMateRequest({
-        userId: user.id,
-        officeId: ctx.officeId,
-        mateSessionId: ctx.mateSessionId,
-        date: dateObj,
-      });
+  // "Manage my order": no write, just show the private view.
+  if (isManage) {
+    const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
+    return ephemeral(payload, blocks, fallback);
+  }
+
+  const result: RequestResult | CancelResult =
+    isRequest || isPick
+      ? await createMateRequest({
+          userId: user.id,
+          officeId: ctx.officeId,
+          mateSessionId: ctx.mateSessionId,
+          date: dateObj,
+          itemId: ctx.itemId,
+        })
+      : await cancelMateRequest({
+          userId: user.id,
+          officeId: ctx.officeId,
+          mateSessionId: ctx.mateSessionId,
+          date: dateObj,
+        });
+
+  const fromEphemeral = payload.container?.is_ephemeral === true;
 
   const errReason = mapErrorReason(result.kind);
   if (errReason) {
@@ -293,7 +402,7 @@ export async function POST(request: Request) {
       locale,
       reason: errReason,
     });
-    return ephemeral(blocks, "Request not processed");
+    return ephemeral(payload, blocks, "Request not processed");
   }
 
   await backfillSessionMessageRef(ctx.mateSessionId, payload);
@@ -303,6 +412,15 @@ export async function POST(request: Request) {
     mateSessionId: ctx.mateSessionId,
     date: dateObj,
   });
+
+  if (fromEphemeral) {
+    // The pick/cancel came from the manage view — refresh it in place.
+    await refreshManageView(payload, user.id, ctx, dateObj, locale);
+  } else if (isRequest) {
+    // A channel item button click: confirm privately with the manage view.
+    const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
+    return ephemeral(payload, blocks, fallback);
+  }
 
   return new Response(null, { status: 200 });
 }

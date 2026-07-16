@@ -1,9 +1,16 @@
 import crypto from "node:crypto";
 import { createTranslator } from "next-intl";
 
+interface SlackSelectOption {
+  text: { type: "plain_text"; text: string };
+  description?: { type: "plain_text"; text: string };
+  value: string;
+}
+
 interface SlackBlock {
   type: string;
   text?: { type: string; text: string };
+  accessory?: { type: "image"; image_url: string; alt_text: string };
   elements?: Array<{
     type: string;
     text?: { type: string; text: string };
@@ -11,6 +18,9 @@ interface SlackBlock {
     action_id?: string;
     value?: string;
     style?: string;
+    placeholder?: { type: "plain_text"; text: string };
+    options?: SlackSelectOption[];
+    initial_option?: SlackSelectOption;
   }>;
 }
 
@@ -22,6 +32,22 @@ export async function getTranslator(locale: string) {
 export const SLACK_REQUEST_ACTION_ID = "request_mate";
 export const SLACK_CANCEL_ACTION_ID = "cancel_mate";
 export const SLACK_MARK_SERVED_ACTION_ID = "mark_session_served";
+export const SLACK_MANAGE_ACTION_ID = "manage_order";
+export const SLACK_PICK_ACTION_ID = "pick_item";
+
+/**
+ * Slack only renders images from absolute https URLs, so relative
+ * `/api/files/...` paths are resolved against the public app URL. Returns
+ * undefined in non-https environments (local dev) where Slack couldn't
+ * fetch the image anyway.
+ */
+export function publicImageUrl(relativeUrl: string | undefined): string | undefined {
+  if (!relativeUrl) return undefined;
+  if (relativeUrl.startsWith("https://")) return relativeUrl;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl?.startsWith("https://")) return undefined;
+  return `${appUrl}${relativeUrl}`;
+}
 
 /**
  * Encodes the (office, session, date, item) context into the button's `value`.
@@ -185,6 +211,43 @@ export async function updateSlackMessage(opts: {
 }
 
 /**
+ * Posts a message visible only to `user` in `channel` ("Only visible to you").
+ * Unlike a `response_url` ephemeral, this can never replace the original
+ * channel message, and unlike a direct interaction HTTP response it is
+ * reliably rendered for block_actions.
+ */
+export async function postEphemeralMessage(opts: {
+  channel: string;
+  user: string;
+  blocks: SlackBlock[];
+  text: string;
+}): Promise<void> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) throw new Error("SLACK_BOT_TOKEN is not configured");
+
+  const response = await fetch("https://slack.com/api/chat.postEphemeral", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      channel: opts.channel,
+      user: opts.user,
+      text: opts.text,
+      blocks: opts.blocks,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Slack chat.postEphemeral request failed: ${response.status}`);
+  }
+  const data = (await response.json()) as { ok: boolean; error?: string };
+  if (!data.ok) {
+    throw new Error(`Slack chat.postEphemeral error: ${data.error}`);
+  }
+}
+
+/**
  * Posts a response to a Slack interaction `response_url`.
  * Used to update the original message (or send an ephemeral follow-up) after ack.
  */
@@ -234,6 +297,18 @@ function requesterBreakdown(
     .join("\n");
 }
 
+export interface SlackItemInput {
+  id: string;
+  name: string;
+  stockQty?: number;
+  imageUrl?: string;
+}
+
+/** Items worth offering in Slack: out-of-stock ones are hidden entirely. */
+export function inStockItems<T extends SlackItemInput>(items: T[]): T[] {
+  return items.filter((i) => i.stockQty === undefined || i.stockQty > 0);
+}
+
 export async function buildSessionRequestMessage(opts: {
   officeId: string;
   officeName: string;
@@ -242,11 +317,12 @@ export async function buildSessionRequestMessage(opts: {
   cutoffTime: string;
   date: string;
   locale: string;
-  items: { id: string; name: string }[];
+  items: SlackItemInput[];
   requesterGroups?: ItemRequesterGroupInput[];
 }) {
   const t = await getTranslator(opts.locale);
   const label = opts.sessionLabel ? ` — ${opts.sessionLabel}` : "";
+  const items = inStockItems(opts.items);
 
   const blocks: SlackBlock[] = [
     {
@@ -275,10 +351,10 @@ export async function buildSessionRequestMessage(opts: {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const openUrl = `${appUrl}/org/${opts.officeId}/request`;
 
-  // One "I want <item>" button per active item. A single item keeps the
+  // One "I want <item>" button per in-stock item. A single item keeps the
   // familiar single-button layout; several items surface a button each.
-  const singleItem = opts.items.length === 1;
-  const itemButtons = opts.items.map((item) => ({
+  const singleItem = items.length === 1;
+  const itemButtons = items.map((item) => ({
     type: "button",
     text: {
       type: "plain_text",
@@ -298,7 +374,7 @@ export async function buildSessionRequestMessage(opts: {
     style: "primary" as const,
   }));
 
-  const cancelValue = encodeActionValue({
+  const sessionValue = encodeActionValue({
     officeId: opts.officeId,
     mateSessionId: opts.mateSessionId,
     date: opts.date,
@@ -310,9 +386,9 @@ export async function buildSessionRequestMessage(opts: {
       ...itemButtons,
       {
         type: "button",
-        text: { type: "plain_text", text: t("slack.cancelMate") },
-        action_id: SLACK_CANCEL_ACTION_ID,
-        value: cancelValue,
+        text: { type: "plain_text", text: t("slack.manageOrder") },
+        action_id: SLACK_MANAGE_ACTION_ID,
+        value: sessionValue,
       },
       {
         type: "button",
@@ -323,6 +399,96 @@ export async function buildSessionRequestMessage(opts: {
   });
 
   return { blocks, fallback: t("slack.newMessage") };
+}
+
+/**
+ * Private ("Only visible to you") order-management view: shows the user's
+ * current order with the item's image, a select of in-stock items to order or
+ * switch, and a cancel button. Sent via chat.postEphemeral on "manage" clicks
+ * and refreshed in place via response_url after each action.
+ */
+export async function buildOrderManageMessage(opts: {
+  officeId: string;
+  mateSessionId: string | null;
+  date: string;
+  locale: string;
+  items: SlackItemInput[];
+  current: { itemId: string; itemName: string; imageUrl?: string } | null;
+}) {
+  const t = await getTranslator(opts.locale);
+  const items = inStockItems(opts.items);
+
+  const headerText = opts.current
+    ? t("slack.yourOrder", { item: opts.current.itemName })
+    : t("slack.noOrderYet");
+  const imageUrl = publicImageUrl(opts.current?.imageUrl);
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: headerText },
+      ...(imageUrl && opts.current
+        ? {
+            accessory: {
+              type: "image" as const,
+              image_url: imageUrl,
+              alt_text: opts.current.itemName,
+            },
+          }
+        : {}),
+    },
+  ];
+
+  const toOption = (item: SlackItemInput): SlackSelectOption => ({
+    text: { type: "plain_text", text: item.name.slice(0, 75) },
+    ...(item.stockQty !== undefined
+      ? {
+          description: {
+            type: "plain_text" as const,
+            text: t("slack.stockCount", { count: item.stockQty }),
+          },
+        }
+      : {}),
+    value: encodeActionValue({
+      officeId: opts.officeId,
+      mateSessionId: opts.mateSessionId,
+      date: opts.date,
+      itemId: item.id,
+    }),
+  });
+
+  const options = items.map(toOption);
+  const currentOption = options.find(
+    (o) => decodeActionValue(o.value)?.itemId === opts.current?.itemId,
+  );
+
+  const elements: NonNullable<SlackBlock["elements"]> = [];
+  if (options.length > 0) {
+    elements.push({
+      type: "static_select",
+      action_id: SLACK_PICK_ACTION_ID,
+      placeholder: { type: "plain_text", text: t("slack.pickItem") },
+      options,
+      ...(currentOption ? { initial_option: currentOption } : {}),
+    });
+  }
+  if (opts.current) {
+    elements.push({
+      type: "button",
+      text: { type: "plain_text", text: t("slack.cancelOrder") },
+      action_id: SLACK_CANCEL_ACTION_ID,
+      value: encodeActionValue({
+        officeId: opts.officeId,
+        mateSessionId: opts.mateSessionId,
+        date: opts.date,
+      }),
+      style: "danger",
+    });
+  }
+  if (elements.length > 0) {
+    blocks.push({ type: "actions", elements });
+  }
+
+  return { blocks, fallback: headerText };
 }
 
 /**

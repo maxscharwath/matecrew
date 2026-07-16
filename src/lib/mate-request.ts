@@ -143,6 +143,34 @@ export async function cancelMateRequest(opts: {
 }
 
 /**
+ * The user's own request for a session/date, with its item — the state shown
+ * in the Slack "manage my order" ephemeral. Null when nothing is registered.
+ */
+export async function getUserSessionRequest(opts: {
+  userId: string;
+  officeId: string;
+  mateSessionId: string | null;
+  date: Date;
+}): Promise<{ itemId: string; itemName: string; imageKey: string | null; status: string } | null> {
+  const row = await prisma.dailyRequest.findFirst({
+    where: {
+      date: opts.date,
+      officeId: opts.officeId,
+      userId: opts.userId,
+      mateSessionId: opts.mateSessionId,
+    },
+    include: { item: { select: { id: true, name: true, imageKey: true } } },
+  });
+  if (!row) return null;
+  return {
+    itemId: row.item.id,
+    itemName: row.item.name,
+    imageKey: row.item.imageKey,
+    status: row.status,
+  };
+}
+
+/**
  * Names of users who requested a maté for a given session/date, creation order.
  */
 export async function listRequesterNames(opts: {
