@@ -153,6 +153,10 @@ model Item {
   active    Boolean  @default(true)
   isDefault Boolean  @default(false)
   sortOrder Int      @default(0)
+  // Per-unit nutrition facts, used by the stats screen (defaults ≈ a 50cl maté).
+  volumeMl   Int   @default(500)
+  sugarGrams Float @default(25)
+  caffeineMg Float @default(100)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

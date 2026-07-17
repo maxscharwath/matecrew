@@ -190,6 +190,45 @@ export async function removeItemImage(
   return { success: true };
 }
 
+export async function setItemNutrition(
+  officeId: string,
+  itemId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const parsed = z
+    .object({
+      volumeMl: z.coerce.number().int().min(0).max(5000),
+      sugarGrams: z.coerce.number().min(0).max(500),
+      caffeineMg: z.coerce.number().min(0).max(2000),
+    })
+    .safeParse({
+      volumeMl: formData.get("volumeMl"),
+      sugarGrams: formData.get("sugarGrams"),
+      caffeineMg: formData.get("caffeineMg"),
+    });
+  if (!parsed.success) {
+    return { success: false, error: t("items.nutritionInvalid") };
+  }
+
+  const item = await prisma.item.findFirst({
+    where: { id: itemId, officeId },
+    select: { id: true },
+  });
+  if (!item) return { success: false, error: t("errors.itemNotFound") };
+
+  await prisma.item.update({
+    where: { id: itemId },
+    data: parsed.data,
+  });
+
+  revalidateItemPages(officeId);
+  revalidatePath(`/org/${officeId}/stats`);
+  return { success: true };
+}
+
 export async function setDefaultItem(
   officeId: string,
   itemId: string,

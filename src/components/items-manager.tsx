@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Boxes, Check, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff } from "lucide-react";
+import { Boxes, Candy, Check, Droplets, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import {
   setDefaultItem,
   setItemActive,
   setItemImage,
+  setItemNutrition,
 } from "@/app/org/[officeId]/admin/items/actions";
 
 interface ItemRow {
@@ -30,6 +31,9 @@ interface ItemRow {
   imageUrl?: string;
   active: boolean;
   isDefault: boolean;
+  volumeMl: number;
+  sugarGrams: number;
+  caffeineMg: number;
   stockQty: number;
   consumptionCount: number;
 }
@@ -45,6 +49,9 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editVolume, setEditVolume] = useState("");
+  const [editSugar, setEditSugar] = useState("");
+  const [editCaffeine, setEditCaffeine] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageTargetId = useRef<string | null>(null);
 
@@ -91,15 +98,34 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
     });
   }
 
-  function handleRename(itemId: string) {
+  function startEdit(item: ItemRow) {
+    setEditingId(item.id);
+    setEditName(item.name);
+    setEditVolume(String(item.volumeMl));
+    setEditSugar(String(item.sugarGrams));
+    setEditCaffeine(String(item.caffeineMg));
+  }
+
+  function handleSaveEdit(item: ItemRow) {
     const name = editName.trim();
     if (!name) return;
-    const formData = new FormData();
-    formData.set("name", name);
     startTransition(async () => {
-      const result = await renameItem(officeId, itemId, formData);
+      if (name !== item.name) {
+        const nameData = new FormData();
+        nameData.set("name", name);
+        const renamed = await renameItem(officeId, item.id, nameData);
+        if (!renamed.success) {
+          toast.error(renamed.error);
+          return;
+        }
+      }
+      const nutritionData = new FormData();
+      nutritionData.set("volumeMl", editVolume);
+      nutritionData.set("sugarGrams", editSugar);
+      nutritionData.set("caffeineMg", editCaffeine);
+      const result = await setItemNutrition(officeId, item.id, nutritionData);
       if (result.success) {
-        toast.success(t("items.renamed"));
+        toast.success(t("items.updated"));
         setEditingId(null);
       } else {
         toast.error(result.error);
@@ -193,33 +219,75 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
 
               <div className="min-w-0 flex-1">
                 {editingId === item.id ? (
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={editName}
-                      autoFocus
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleRename(item.id);
-                        if (e.key === "Escape") setEditingId(null);
-                      }}
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="size-8"
-                      disabled={isPending}
-                      onClick={() => handleRename(item.id)}
-                    >
-                      <Check className="size-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="size-8"
-                      onClick={() => setEditingId(null)}
-                    >
-                      <X className="size-4" />
-                    </Button>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={editName}
+                        autoFocus
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveEdit(item);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-8"
+                        disabled={isPending}
+                        onClick={() => handleSaveEdit(item)}
+                      >
+                        <Check className="size-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-8"
+                        onClick={() => setEditingId(null)}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <Droplets className="size-3" />
+                          {t("items.volumeMl")}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={editVolume}
+                          onChange={(e) => setEditVolume(e.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <Candy className="size-3" />
+                          {t("items.sugarGrams")}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={editSugar}
+                          onChange={(e) => setEditSugar(e.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <Zap className="size-3" />
+                          {t("items.caffeineMg")}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={editCaffeine}
+                          onChange={(e) => setEditCaffeine(e.target.value)}
+                        />
+                      </label>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -246,6 +314,18 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
                         <CupSoda className="size-3" />
                         {t("items.consumedLabel", { count: item.consumptionCount })}
                       </span>
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <Droplets className="size-3" />
+                        {item.volumeMl} ml
+                      </span>
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <Candy className="size-3" />
+                        {item.sugarGrams} g
+                      </span>
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <Zap className="size-3" />
+                        {item.caffeineMg} mg
+                      </span>
                     </div>
                   </div>
                 )}
@@ -258,10 +338,7 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
                     variant="ghost"
                     className="size-8"
                     aria-label={t("items.rename")}
-                    onClick={() => {
-                      setEditingId(item.id);
-                      setEditName(item.name);
-                    }}
+                    onClick={() => startEdit(item)}
                   >
                     <Pencil className="size-4" />
                   </Button>

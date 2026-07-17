@@ -7,6 +7,7 @@ import {
   BarChart3,
   Building2,
   CalendarDays,
+  ChartLine,
   Check,
   ChevronsUpDown,
   ClipboardList,
@@ -86,6 +87,7 @@ export function AppSidebar({
     { path: "/dashboard", label: t("nav.dashboard"), icon: BarChart3 },
     { path: "/request", label: t("nav.request"), icon: CupSoda },
     { path: "/runner", label: t("nav.runner"), icon: PersonStanding },
+    { path: "/stats", label: t("nav.stats"), icon: ChartLine },
     { path: "/reimbursements", label: t("nav.reimbursements"), icon: Wallet },
   ];
 
