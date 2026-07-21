@@ -160,6 +160,7 @@ export async function exportPeriodCsv(
     endDate: period.endDate,
     totalConsumption: result.totalConsumption,
     totalCost: result.totalCost,
+    itemPrices: result.itemPrices,
     shares: result.shares,
     lines: result.lines,
   });
@@ -204,7 +205,8 @@ export async function exportPeriodPdf(
     endDate: period.endDate,
     totalConsumption: result.totalConsumption,
     totalCost: result.totalCost,
-    unitPrice: result.unitPrice,
+    avgUnitPrice: result.avgUnitPrice,
+    itemPrices: result.itemPrices,
     shares: result.shares,
     lines: result.lines,
     locale: period.office.locale,

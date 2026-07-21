@@ -135,6 +135,12 @@ export async function exportUserPeriodPdf(
 
   const userShare = result.shares.find((s) => s.userId === userId);
 
+  // The user's effective average price across the items they drank.
+  const userAvgPrice =
+    userShare && userShare.qty > 0
+      ? Math.round((userShare.costShare / userShare.qty) * 100) / 100
+      : result.avgUnitPrice;
+
   const userLines = period.lines.map((l) => {
     if (l.fromUserId === userId) {
       return {
@@ -155,7 +161,7 @@ export async function exportUserPeriodPdf(
     userName,
     startDate: period.startDate,
     endDate: period.endDate,
-    unitPrice: result.unitPrice,
+    avgUnitPrice: userAvgPrice,
     qty: userShare?.qty ?? 0,
     costShare: userShare?.costShare ?? 0,
     amountPaid: userShare?.amountPaid ?? 0,

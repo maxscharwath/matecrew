@@ -248,7 +248,10 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
   const share = preview.shares.find((s) => s.userId === userId);
   const userShare = share?.costShare ?? 0;
   const netOwed = share?.netOwed ?? 0;
-  const hasPurchaseData = preview.unitPrice > 0;
+  const hasPurchaseData = preview.avgUnitPrice > 0;
+  // Effective price for the mix of items this user actually drank.
+  const userAvgPrice =
+    share && share.qty > 0 ? share.costShare / share.qty : preview.avgUnitPrice;
 
   const owedLines = preview.lines
     .filter((l) => l.fromUserId === userId)
@@ -311,7 +314,7 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
                 <p className="text-xs text-muted-foreground">
                   {t('dashboard.shareFormula', {
                     qty: share?.qty ?? 0,
-                    price: preview.unitPrice.toFixed(2),
+                    price: userAvgPrice.toFixed(2),
                   })}
                 </p>
               </CardContent>

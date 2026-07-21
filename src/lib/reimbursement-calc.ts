@@ -17,12 +17,26 @@ export interface PaymentLine {
   amount: number;
 }
 
+export interface ItemPrice {
+  itemId: string;
+  itemName: string;
+  /** Weighted-average purchase price for this item (purchases up to endDate). */
+  unitPrice: number;
+  /** Net qty of this item consumed in the period (cancel credits deducted). */
+  qtyConsumed: number;
+  /** qtyConsumed × unitPrice */
+  cost: number;
+}
+
 export interface ReimbursementResult {
   shares: ConsumptionShare[];
   lines: PaymentLine[];
   totalConsumption: number;
   totalCost: number;
-  unitPrice: number;
+  /** Items consumed in the period, each billed at its own price. */
+  itemPrices: ItemPrice[];
+  /** totalCost / totalConsumption — for display only, never used in the math. */
+  avgUnitPrice: number;
 }
 
 /**
@@ -30,20 +44,23 @@ export interface ReimbursementResult {
  *
  * Model:
  *   Purchases are bulk orders (e.g. 300 cans every few months) — NOT monthly.
- *   Items are just labels for what's in stock; every consumption is billed at a
- *   single blended price, so all products cost the same per unit.
+ *   Each item is billed at its OWN weighted-average price:
  *
- *   Unit price = weighted average across ALL purchase lines for the office
- *   (total spend / total qty purchased), global (not capped at endDate) — proof
- *   that this guarantees no money is lost:
+ *     unitPrice(item) = spend on item / qty of item purchased
  *
- *     Let S = total spend, Q = total purchased qty, u = S/Q.
- *     Payer k spent spend_k. Their credit % = spend_k / S.
- *     In period j with C_j units consumed:
- *       payer k credit = (spend_k / S) × C_j × u = spend_k × C_j / Q
- *     After ALL Q units consumed (C = Q): payer k total credit = spend_k ✓
+ *   counting only purchases made up to the period's endDate, so closed
+ *   periods never shift when a later order is recorded.
  *
- *   Every payer gets back exactly what they spent. Zero money lost.
+ *   A user's cost is the sum over items of (qty consumed × item price) — no
+ *   cross-item subsidy between cheap and expensive products.
+ *
+ *   Payers are credited PER ITEM, proportionally to their spend on that item.
+ *   Proof that no money is lost, per item i:
+ *
+ *     Let S_i = spend on i, Q_i = qty purchased, u_i = S_i/Q_i.
+ *     Payer k spent spend_ki on i. In period j with C_ij units of i consumed:
+ *       payer k credit = (spend_ki / S_i) × C_ij × u_i = spend_ki × C_ij / Q_i
+ *     After ALL Q_i units are consumed: payer k total credit = spend_ki ✓
  *
  *   Note: payment line amounts are frozen in the DB when a period is
  *   generated. The live calculation here is used for display and for
@@ -54,9 +71,13 @@ export async function calculateReimbursements(
   startDate: Date,
   endDate: Date,
 ): Promise<ReimbursementResult> {
-  // 1. Active consumption in this period, grouped by user (item-agnostic).
-  const consumptionByUser = await prisma.consumptionEntry.groupBy({
-    by: ["userId"],
+  // Purchases count up to the END of the endDate day (endDate is a date-only
+  // value at UTC midnight; purchasedAt is a full timestamp).
+  const purchaseCutoff = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
+
+  // 1. Active consumption in this period, grouped by user AND item.
+  const consumptionByUserItem = await prisma.consumptionEntry.groupBy({
+    by: ["userId", "itemId"],
     where: {
       officeId,
       date: { gte: startDate, lte: endDate },
@@ -69,7 +90,7 @@ export async function calculateReimbursements(
   //     period. These act as negative consumption (credit notes).
   //     An entry cancelled in its own period is already excluded by (1).
   const cancelCredits = await prisma.consumptionEntry.groupBy({
-    by: ["userId"],
+    by: ["userId", "itemId"],
     where: {
       officeId,
       cancelledAt: { not: null, gte: startDate, lte: endDate },
@@ -78,35 +99,38 @@ export async function calculateReimbursements(
     _sum: { qty: true },
   });
 
-  // Net qty per user: consumption minus cancel credits.
-  const qtyMap = new Map<string, number>();
-  for (const c of consumptionByUser) {
-    qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) + (c._sum.qty ?? 0));
+  // Net qty per user per item: consumption minus cancel credits.
+  const qtyByUserItem = new Map<string, Map<string, number>>();
+  const addQty = (userId: string, itemId: string, qty: number) => {
+    let items = qtyByUserItem.get(userId);
+    if (!items) {
+      items = new Map();
+      qtyByUserItem.set(userId, items);
+    }
+    items.set(itemId, (items.get(itemId) ?? 0) + qty);
+  };
+  for (const c of consumptionByUserItem) {
+    addQty(c.userId, c.itemId, c._sum.qty ?? 0);
   }
   for (const c of cancelCredits) {
-    qtyMap.set(c.userId, (qtyMap.get(c.userId) ?? 0) - (c._sum.qty ?? 0));
+    addQty(c.userId, c.itemId, -(c._sum.qty ?? 0));
   }
 
-  const allUserIds = [...new Set([
-    ...consumptionByUser.map((c) => c.userId),
-    ...cancelCredits.map((c) => c.userId),
-  ])];
+  const allUserIds = [...qtyByUserItem.keys()];
   const users = await prisma.user.findMany({
     where: { id: { in: allUserIds } },
     select: { id: true, name: true },
   });
   const userMap = new Map(users.map((u) => [u.id, u.name]));
 
-  const totalConsumption = [...qtyMap.values()].reduce(
-    (sum, qty) => sum + qty,
-    0,
-  );
-
-  // 2. ALL purchase lines for this office (global, not date-scoped). Each line
-  //    carries its payer via the parent order.
+  // 2. Purchase lines up to the period end. Each line carries its payer via
+  //    the parent order.
   const purchaseLines = await prisma.purchaseLine.findMany({
-    where: { batch: { officeId } },
+    where: {
+      batch: { officeId, purchasedAt: { lt: purchaseCutoff } },
+    },
     select: {
+      itemId: true,
       qty: true,
       lineTotal: true,
       batch: {
@@ -118,45 +142,77 @@ export async function calculateReimbursements(
     },
   });
 
-  // 3. Single weighted-average unit price = total spend / total qty purchased.
-  const totalPurchasedQty = purchaseLines.reduce((sum, l) => sum + l.qty, 0);
-  const totalPurchaseSpend = purchaseLines.reduce(
-    (sum, l) => sum + l.lineTotal.toNumber(),
-    0,
-  );
-  const unitPrice =
-    totalPurchasedQty > 0
-      ? Math.round((totalPurchaseSpend / totalPurchasedQty) * 100) / 100
-      : 0;
+  // 3. Per-item weighted-average unit price = item spend / item qty purchased,
+  //    plus each payer's spend per item (for proportional credits).
+  const itemSpend = new Map<string, number>();
+  const itemQtyPurchased = new Map<string, number>();
+  const spendByPayerItem = new Map<string, Map<string, number>>(); // itemId → payerId → spend
+  for (const l of purchaseLines) {
+    const spend = l.lineTotal.toNumber();
+    itemSpend.set(l.itemId, (itemSpend.get(l.itemId) ?? 0) + spend);
+    itemQtyPurchased.set(l.itemId, (itemQtyPurchased.get(l.itemId) ?? 0) + l.qty);
 
-  // 4. Period cost = units consumed × unit price
-  const totalCost = Math.round(totalConsumption * unitPrice * 100) / 100;
-
-  // 5. Credit each payer proportionally to their total spend.
-  const paidMap = new Map<string, number>();
-  if (totalPurchaseSpend > 0) {
-    const spendByPayer = new Map<string, number>();
-    for (const l of purchaseLines) {
-      spendByPayer.set(
-        l.batch.paidByUserId,
-        (spendByPayer.get(l.batch.paidByUserId) ?? 0) + l.lineTotal.toNumber(),
-      );
-      if (!userMap.has(l.batch.paidByUserId)) {
-        userMap.set(l.batch.paidByUserId, l.batch.paidBy.name);
-      }
+    let payers = spendByPayerItem.get(l.itemId);
+    if (!payers) {
+      payers = new Map();
+      spendByPayerItem.set(l.itemId, payers);
     }
-
-    for (const [payerId, payerSpend] of spendByPayer) {
-      const credit = (payerSpend / totalPurchaseSpend) * totalCost;
-      paidMap.set(payerId, credit);
+    payers.set(
+      l.batch.paidByUserId,
+      (payers.get(l.batch.paidByUserId) ?? 0) + spend,
+    );
+    if (!userMap.has(l.batch.paidByUserId)) {
+      userMap.set(l.batch.paidByUserId, l.batch.paidBy.name);
     }
   }
 
-  // 6. Build shares: each consumer's cost vs their payer credit
+  const unitPriceOf = (itemId: string): number => {
+    const qty = itemQtyPurchased.get(itemId) ?? 0;
+    if (qty <= 0) return 0; // consumed but never purchased — nothing to bill
+    return Math.round(((itemSpend.get(itemId) ?? 0) / qty) * 100) / 100;
+  };
+
+  // 4. Net qty consumed per item in the period, then period cost per item.
+  const itemQtyConsumed = new Map<string, number>();
+  for (const items of qtyByUserItem.values()) {
+    for (const [itemId, qty] of items) {
+      itemQtyConsumed.set(itemId, (itemQtyConsumed.get(itemId) ?? 0) + qty);
+    }
+  }
+
+  let totalConsumption = 0;
+  let totalCost = 0;
+  const itemCost = new Map<string, number>();
+  for (const [itemId, qty] of itemQtyConsumed) {
+    const cost = qty * unitPriceOf(itemId);
+    itemCost.set(itemId, cost);
+    totalConsumption += qty;
+    totalCost += cost;
+  }
+  totalCost = Math.round(totalCost * 100) / 100;
+
+  // 5. Credit each payer per item, proportionally to their spend on that item.
+  const paidMap = new Map<string, number>();
+  for (const [itemId, cost] of itemCost) {
+    const spend = itemSpend.get(itemId) ?? 0;
+    if (spend <= 0 || cost === 0) continue;
+    for (const [payerId, payerSpend] of spendByPayerItem.get(itemId) ?? []) {
+      const credit = (payerSpend / spend) * cost;
+      paidMap.set(payerId, (paidMap.get(payerId) ?? 0) + credit);
+    }
+  }
+
+  // 6. Build shares: each consumer's per-item cost vs their payer credit.
   const shares: ConsumptionShare[] = [];
 
-  for (const [userId, qty] of qtyMap) {
-    const costShare = Math.round(qty * unitPrice * 100) / 100;
+  for (const [userId, items] of qtyByUserItem) {
+    let qty = 0;
+    let cost = 0;
+    for (const [itemId, itemQty] of items) {
+      qty += itemQty;
+      cost += itemQty * unitPriceOf(itemId);
+    }
+    const costShare = Math.round(cost * 100) / 100;
     const amountPaid = Math.round((paidMap.get(userId) ?? 0) * 100) / 100;
 
     shares.push({
@@ -188,7 +244,32 @@ export async function calculateReimbursements(
 
   const lines = generatePaymentLines(shares);
 
-  return { shares, lines, totalConsumption, totalCost, unitPrice };
+  // 7. Per-item price list for display/export.
+  const consumedItemIds = [...itemQtyConsumed.keys()];
+  const items = consumedItemIds.length
+    ? await prisma.item.findMany({
+        where: { id: { in: consumedItemIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const itemNameMap = new Map(items.map((i) => [i.id, i.name]));
+
+  const itemPrices: ItemPrice[] = consumedItemIds
+    .map((itemId) => ({
+      itemId,
+      itemName: itemNameMap.get(itemId) ?? "Unknown",
+      unitPrice: unitPriceOf(itemId),
+      qtyConsumed: itemQtyConsumed.get(itemId) ?? 0,
+      cost: Math.round((itemCost.get(itemId) ?? 0) * 100) / 100,
+    }))
+    .sort((a, b) => a.itemName.localeCompare(b.itemName));
+
+  const avgUnitPrice =
+    totalConsumption > 0
+      ? Math.round((totalCost / totalConsumption) * 100) / 100
+      : 0;
+
+  return { shares, lines, totalConsumption, totalCost, itemPrices, avgUnitPrice };
 }
 
 function generatePaymentLines(shares: ConsumptionShare[]): PaymentLine[] {

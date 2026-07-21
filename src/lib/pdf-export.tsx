@@ -9,7 +9,7 @@ import {
 import type { Style } from "@react-pdf/types";
 import { createTw } from "react-pdf-tailwind";
 import { createTranslator } from "next-intl";
-import type { ConsumptionShare, PaymentLine } from "@/lib/reimbursement-calc";
+import type { ConsumptionShare, ItemPrice, PaymentLine } from "@/lib/reimbursement-calc";
 import { toISODateString } from "@/lib/date";
 
 async function getTranslator(locale: string) {
@@ -185,6 +185,7 @@ function TD({
 // Column widths
 const SW = ["35%", "13%", "17%", "17%", "18%"];
 const PW = ["40%", "40%", "20%"];
+const IW = ["40%", "20%", "20%", "20%"];
 
 // ─── Admin Settlement PDF ───────────────────────────────────────────────────
 
@@ -216,14 +217,37 @@ function SettlementDocument({
               value={t("pdf.units", { count: data.totalConsumption })}
             />
             <InfoBox
-              label={t("pdf.unitPrice")}
-              value={`CHF ${data.unitPrice.toFixed(2)}`}
+              label={t("pdf.avgUnitPrice")}
+              value={`CHF ${data.avgUnitPrice.toFixed(2)}`}
             />
             <InfoBox
               label={t("pdf.totalCost")}
               value={`CHF ${data.totalCost.toFixed(2)}`}
             />
           </View>
+
+          {/* Per-item prices */}
+          {data.itemPrices.length > 0 && (
+            <View style={tw("mb-8")}>
+              <SectionTitle>{t("pdf.itemBreakdown")}</SectionTitle>
+
+              <TableHeader>
+                <TH width={IW[0]}>{t("pdf.item")}</TH>
+                <TH width={IW[1]} align="right">{t("pdf.unitPrice")}</TH>
+                <TH width={IW[2]} align="right">{t("pdf.consumed")}</TH>
+                <TH width={IW[3]} align="right">{t("pdf.costShare")}</TH>
+              </TableHeader>
+
+              {data.itemPrices.map((p, i) => (
+                <TableRow key={p.itemId} alt={i % 2 === 1}>
+                  <TD width={IW[0]}>{truncate(p.itemName, 32)}</TD>
+                  <TD width={IW[1]} align="right">CHF {p.unitPrice.toFixed(2)}</TD>
+                  <TD width={IW[2]} align="right">{String(p.qtyConsumed)}</TD>
+                  <TD width={IW[3]} align="right">CHF {p.cost.toFixed(2)}</TD>
+                </TableRow>
+              ))}
+            </View>
+          )}
 
           {/* Consumption shares */}
           <SectionTitle>{t("pdf.consumptionShares")}</SectionTitle>
@@ -298,7 +322,8 @@ export async function generateSettlementPdf(data: {
   endDate: Date;
   totalConsumption: number;
   totalCost: number;
-  unitPrice: number;
+  avgUnitPrice: number;
+  itemPrices: ItemPrice[];
   shares: ConsumptionShare[];
   lines: PaymentLine[];
   locale: string;
@@ -382,10 +407,10 @@ function UserSettlementDocument({
             <View style={tw("flex-row mb-4")}>
               <View style={tw("flex-1")}>
                 <Text style={tw("text-[7px] text-subtle uppercase mb-1")}>
-                  {t("pdf.unitPrice")}
+                  {t("pdf.avgUnitPrice")}
                 </Text>
                 <Text style={tw("font-bold text-[11px] text-ink")}>
-                  CHF {data.unitPrice.toFixed(2)}
+                  CHF {data.avgUnitPrice.toFixed(2)}
                 </Text>
               </View>
               <View style={tw("flex-1")}>
@@ -474,7 +499,8 @@ export async function generateUserSettlementPdf(data: {
   userName: string;
   startDate: Date;
   endDate: Date;
-  unitPrice: number;
+  /** The user's effective average price (their costShare / qty). */
+  avgUnitPrice: number;
   qty: number;
   costShare: number;
   amountPaid: number;

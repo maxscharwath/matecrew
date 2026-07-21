@@ -1,4 +1,4 @@
-import type { ConsumptionShare, PaymentLine } from "@/lib/reimbursement-calc";
+import type { ConsumptionShare, ItemPrice, PaymentLine } from "@/lib/reimbursement-calc";
 import { toISODateString } from "@/lib/date";
 
 export function generateReimbursementCsv(data: {
@@ -7,6 +7,7 @@ export function generateReimbursementCsv(data: {
   endDate: Date;
   totalConsumption: number;
   totalCost: number;
+  itemPrices: ItemPrice[];
   shares: ConsumptionShare[];
   lines: PaymentLine[];
 }): string {
@@ -18,6 +19,14 @@ export function generateReimbursementCsv(data: {
   );
   rows.push(`Total consumption: ${data.totalConsumption}`);
   rows.push(`Total cost: CHF ${data.totalCost.toFixed(2)}`);
+  rows.push("");
+
+  rows.push("Item,Unit Price (CHF),Consumed Qty,Cost (CHF)");
+  for (const p of data.itemPrices) {
+    rows.push(
+      `"${p.itemName}",${p.unitPrice.toFixed(2)},${p.qtyConsumed},${p.cost.toFixed(2)}`
+    );
+  }
   rows.push("");
 
   rows.push("User,Consumed Qty,Cost Share (CHF),Amount Paid (CHF),Net Owed (CHF)");

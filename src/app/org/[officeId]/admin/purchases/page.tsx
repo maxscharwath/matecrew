@@ -4,7 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { PurchaseForm } from "@/components/purchase-form";
 import { getTranslations } from "next-intl/server";
 import { getActiveItems } from "@/lib/items";
-import { PurchaseListSection, PurchaseListFallback } from "./_sections";
+import {
+  PurchaseListSection,
+  PurchaseListFallback,
+  PriceHistorySection,
+  PriceHistoryFallback,
+} from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
@@ -41,6 +46,10 @@ export default async function PurchasesPage({ params, searchParams }: Props) {
       </div>
 
       <PurchaseForm officeId={officeId} members={members} items={items} />
+
+      <Suspense fallback={<PriceHistoryFallback />}>
+        <PriceHistorySection officeId={officeId} />
+      </Suspense>
 
       <Suspense fallback={<PurchaseListFallback />}>
         <PurchaseListSection officeId={officeId} page={page} />
