@@ -3,6 +3,7 @@ import {
   Candy,
   CupSoda,
   Droplets,
+  Gauge,
   HeartPulse,
   Medal,
   Trophy,
@@ -11,6 +12,7 @@ import {
 import { requireMembership } from "@/lib/auth-utils";
 import {
   getOfficeStats,
+  parseStatsPeriod,
   SUGAR_IDEAL_G_PER_DAY,
   SUGAR_MAX_G_PER_DAY,
   CAFFEINE_MODERATE_MG_PER_DAY,
@@ -35,29 +37,56 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { MonthlyChart } from "@/components/stats/monthly-chart";
+import { TimelineChart } from "@/components/stats/timeline-chart";
 import { ItemsChart } from "@/components/stats/items-chart";
 import { UsersChart } from "@/components/stats/users-chart";
+import { PeriodFilter } from "@/components/stats/period-filter";
+import { PreferencesList } from "@/components/stats/preferences-list";
 import { cn } from "@/lib/utils";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
+  readonly searchParams: Promise<{
+    [key: string]: string | string[] | undefined;
+  }>;
 }
 
-export default async function StatsPage({ params }: Props) {
+export default async function StatsPage({ params, searchParams }: Props) {
   const { officeId } = await params;
+  const sp = await searchParams;
+  const period = parseStatsPeriod(sp.period);
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
   const locale = await getLocale();
 
-  const stats = await getOfficeStats(officeId, session.user.id);
+  const stats = await getOfficeStats(officeId, session.user.id, period);
   const hasData = stats.totals.officeQty > 0;
+
+  const dateFmt = new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const rangeLabel = `${dateFmt.format(new Date(`${stats.range.start}T00:00:00Z`))} – ${dateFmt.format(new Date(`${stats.range.end}T00:00:00Z`))}`;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">{t("stats.title")}</h1>
-        <p className="mt-1 text-muted-foreground">{t("stats.subtitle")}</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">{t("stats.title")}</h1>
+          <p className="mt-1 text-muted-foreground">
+            {hasData
+              ? t("stats.rangeSummary", {
+                  range: rangeLabel,
+                  days: stats.range.days,
+                })
+              : t("stats.subtitle")}
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <PeriodFilter period={period} />
+        </div>
       </div>
 
       {!hasData ? (
@@ -67,9 +96,13 @@ export default async function StatsPage({ params }: Props) {
               <CupSoda className="size-7 text-muted-foreground" />
             </div>
             <div className="space-y-1">
-              <p className="font-medium">{t("stats.empty")}</p>
+              <p className="font-medium">
+                {period === "all" ? t("stats.empty") : t("stats.emptyPeriod")}
+              </p>
               <p className="text-sm text-muted-foreground">
-                {t("stats.emptyDescription")}
+                {period === "all"
+                  ? t("stats.emptyDescription")
+                  : t("stats.emptyPeriodDescription")}
               </p>
             </div>
           </CardContent>
@@ -84,10 +117,12 @@ export default async function StatsPage({ params }: Props) {
               hint={t("stats.cansUnit")}
             />
             <KpiCard
-              icon={<CupSoda className="size-4 text-muted-foreground" />}
-              label={t("stats.thisMonth")}
-              value={stats.totals.monthOfficeQty.toLocaleString(locale)}
-              hint={t("stats.cansUnit")}
+              icon={<Gauge className="size-4 text-muted-foreground" />}
+              label={t("stats.perDay")}
+              value={stats.totals.officeQtyPerDay.toLocaleString(locale, {
+                maximumFractionDigits: 1,
+              })}
+              hint={t("stats.perDayHint")}
             />
             <KpiCard
               icon={<Droplets className="size-4 text-sky-500" />}
@@ -107,12 +142,15 @@ export default async function StatsPage({ params }: Props) {
 
           <Card>
             <CardHeader>
-              <CardTitle>{t("stats.monthlyTitle")}</CardTitle>
-              <CardDescription>{t("stats.monthlyDescription")}</CardDescription>
+              <CardTitle>{t("stats.timelineTitle")}</CardTitle>
+              <CardDescription>
+                {t(`stats.timelineDescription_${stats.granularity}`)}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <MonthlyChart
-                data={stats.monthly}
+              <TimelineChart
+                data={stats.timeline}
+                granularity={stats.granularity}
                 meLabel={t("stats.seriesMe")}
                 othersLabel={t("stats.seriesOthers")}
               />
@@ -143,6 +181,30 @@ export default async function StatsPage({ params }: Props) {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("stats.preferencesTitle")}</CardTitle>
+              <CardDescription>
+                {t("stats.preferencesDescription")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PreferencesList
+                items={stats.byItem}
+                users={stats.users.map((u) => ({
+                  userId: u.userId,
+                  name: u.name,
+                  image: u.image,
+                  qty: u.qty,
+                  qtyByItem: u.qtyByItem,
+                }))}
+                meId={session.user.id}
+                otherLabel={t("stats.other")}
+                cansUnit={t("stats.cansUnit")}
+              />
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

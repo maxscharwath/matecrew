@@ -100,6 +100,58 @@ export function useChartTheme(): ChartTheme {
   return dark ? DARK : LIGHT;
 }
 
+/** Never more slices, never more hues, than this — the rest folds into "Other". */
+export const MAX_ITEM_SLICES = 5;
+
+export interface ItemDatum {
+  itemId: string;
+  name: string;
+  qty: number;
+}
+
+export interface ItemSlot {
+  key: string;
+  name: string;
+  /** Every item folded into this slot ("Other" holds the long tail). */
+  itemIds: string[];
+  isOther: boolean;
+}
+
+/**
+ * Canonical color slots for item-keyed charts. Callers pass the same
+ * office-wide ranking, so a given maté keeps its hue across every chart on
+ * the page — the ring and the per-person bars stay readable together.
+ */
+export function itemSlots(items: ItemDatum[], otherLabel: string): ItemSlot[] {
+  const head = items.slice(0, MAX_ITEM_SLICES).map((i) => ({
+    key: i.itemId,
+    name: i.name,
+    itemIds: [i.itemId],
+    isOther: false,
+  }));
+  const tail = items.slice(MAX_ITEM_SLICES);
+  if (tail.length === 0) return head;
+  return [
+    ...head,
+    {
+      key: "__other",
+      name: otherLabel,
+      itemIds: tail.map((i) => i.itemId),
+      isOther: true,
+    },
+  ];
+}
+
+export function slotColor(
+  theme: ChartTheme,
+  slot: ItemSlot,
+  index: number,
+): string {
+  return slot.isOther
+    ? theme.deemphasis
+    : theme.series[index % theme.series.length];
+}
+
 /** Shared tooltip styling so every chart's hover layer reads the same. */
 export function tooltipOptions(theme: ChartTheme) {
   return {

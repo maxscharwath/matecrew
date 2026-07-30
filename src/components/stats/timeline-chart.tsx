@@ -1,46 +1,60 @@
 "use client";
 
 import { Bar } from "react-chartjs-2";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   legendOptions,
   tooltipOptions,
   useChartTheme,
 } from "@/components/stats/chart-kit";
 
-interface MonthlyPoint {
-  /** "YYYY-MM" */
-  month: string;
+interface TimelinePoint {
+  /** "YYYY-MM-DD" for day/week buckets, "YYYY-MM" for month buckets. */
+  key: string;
   mine: number;
   others: number;
 }
 
-interface MonthlyChartProps {
-  readonly data: MonthlyPoint[];
+interface TimelineChartProps {
+  readonly data: TimelinePoint[];
+  readonly granularity: "day" | "week" | "month";
   readonly meLabel: string;
   readonly othersLabel: string;
 }
 
 /**
- * Office consumption per month as a stacked bar: my cans + the rest of the
- * office (they sum to the office total). Emphasis form — my share carries the
- * accent, the context is gray.
+ * Consumption per bucket as a stacked bar: my cans + the rest of the office
+ * (they sum to the office total). Emphasis form — my share carries the accent,
+ * the context is gray. Bucket width follows the selected period.
  */
-export function MonthlyChart({ data, meLabel, othersLabel }: MonthlyChartProps) {
+export function TimelineChart({
+  data,
+  granularity,
+  meLabel,
+  othersLabel,
+}: TimelineChartProps) {
   const theme = useChartTheme();
   const locale = useLocale();
+  // Parameterized label — can't cross the server/client boundary as a prop.
+  const t = useTranslations("stats");
 
-  const labels = data.map((d) => {
-    const [year, month] = d.month.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, 1));
-    const label = date.toLocaleDateString(locale, {
+  const labels = data.map((d, i) => {
+    if (granularity === "month") {
+      const [year, month] = d.key.split("-").map(Number);
+      const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(
+        locale,
+        { month: "short", timeZone: "UTC" },
+      );
+      // Anchor January (and the very first bar) with the year.
+      return month === 1 || i === 0
+        ? `${label} ${String(year).slice(2)}`
+        : label;
+    }
+    return new Date(`${d.key}T00:00:00Z`).toLocaleDateString(locale, {
+      day: "numeric",
       month: "short",
       timeZone: "UTC",
     });
-    // Anchor January (and the very first bar) with the year.
-    return month === 1 || d === data[0]
-      ? `${label} ${String(year).slice(2)}`
-      : label;
   });
 
   return (
@@ -84,7 +98,11 @@ export function MonthlyChart({ data, meLabel, othersLabel }: MonthlyChartProps) 
               stacked: true,
               grid: { display: false },
               border: { color: theme.grid },
-              ticks: { color: theme.mutedText },
+              ticks: {
+                color: theme.mutedText,
+                maxRotation: 0,
+                autoSkipPadding: 12,
+              },
             },
             y: {
               stacked: true,
@@ -100,7 +118,16 @@ export function MonthlyChart({ data, meLabel, othersLabel }: MonthlyChartProps) 
           },
           plugins: {
             legend: legendOptions(theme),
-            tooltip: tooltipOptions(theme),
+            tooltip: {
+              ...tooltipOptions(theme),
+              callbacks:
+                granularity === "week"
+                  ? {
+                      title: (items) =>
+                        t("weekOf", { date: items[0]?.label ?? "" }),
+                    }
+                  : undefined,
+            },
           },
         }}
       />
