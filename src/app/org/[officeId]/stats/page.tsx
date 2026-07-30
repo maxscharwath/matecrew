@@ -76,7 +76,8 @@ export default async function StatsPage({ params, searchParams }: Props) {
         <div>
           <h1 className="text-2xl font-bold">{t("stats.title")}</h1>
           <p className="mt-1 text-muted-foreground">
-            {hasData
+            {/* "All time" over an empty office has no range to speak of. */}
+            {hasData || period !== "all"
               ? t("stats.rangeSummary", {
                   range: rangeLabel,
                   days: stats.range.days,

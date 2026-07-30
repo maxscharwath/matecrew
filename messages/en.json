@@ -156,6 +156,7 @@
     "title": "Statistics",
     "subtitle": "The office maté consumption, in numbers.",
     "periodLabel": "Period",
+    "period_wtd": "This week",
     "period_30d": "30 d",
     "period_90d": "3 months",
     "period_12m": "12 months",

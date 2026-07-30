@@ -3,7 +3,7 @@
  * which is server-only) and the client period filter.
  */
 
-export const STATS_PERIODS = ["30d", "90d", "12m", "ytd", "all"] as const;
+export const STATS_PERIODS = ["wtd", "30d", "90d", "12m", "ytd", "all"] as const;
 export type StatsPeriod = (typeof STATS_PERIODS)[number];
 
 /**

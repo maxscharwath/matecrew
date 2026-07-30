@@ -54,6 +54,8 @@ export type Granularity = "day" | "week" | "month";
  */
 function periodStart(period: StatsPeriod, today: Date): Date | null {
   switch (period) {
+    case "wtd":
+      return weekStart(today);
     case "30d":
       return addDays(today, -29);
     case "90d":
