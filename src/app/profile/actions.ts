@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth-utils";
 import { setLocaleCookie } from "@/lib/locale";
+import { revokeMcpConnection } from "@/lib/mcp/connections";
 import { type Locale, locales } from "@/i18n/request";
 import { uploadFile, deleteFile, buildAvatarKey } from "@/lib/storage";
 
@@ -85,5 +86,24 @@ export async function updateProfile(
   await setLocaleCookie(locale as Locale);
 
   revalidatePath("/");
+  return { success: true };
+}
+
+/**
+ * Disconnects an MCP client (Claude Desktop, claude.ai, ...) from the caller's
+ * account. Scoped to the caller's own tokens, so it can never revoke someone
+ * else's access to the same client.
+ */
+export async function revokeMcpConnectionAction(
+  clientId: string,
+): Promise<ActionResult> {
+  const session = await requireSession();
+
+  const revoked = await revokeMcpConnection(session.user.id, clientId);
+  if (!revoked) {
+    return { success: false, error: "That connection is no longer active." };
+  }
+
+  revalidatePath("/profile");
   return { success: true };
 }

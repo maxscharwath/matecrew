@@ -832,5 +832,43 @@
     "volumeMl": "Volume (ml)",
     "sugarGrams": "Sucre (g)",
     "caffeineMg": "Caféine (mg)"
+  },
+  "oauthConsent": {
+    "title": "Connecter {client} à MateCrew",
+    "description": "Donner à {client} accès à MateCrew en tant que {email}. Il pourra agir en votre nom.",
+    "unnamedClient": "cette application",
+    "grantOrders": "Passer, modifier et annuler vos commandes de maté, et prendre des canettes au frigo.",
+    "grantHistory": "Consulter votre historique de consommation, les statistiques du bureau et les remboursements.",
+    "grantStock": "Consulter le stock, les produits, le planning hebdomadaire et servir les commandes en attente.",
+    "grantAdmin": "Utiliser vos droits d’administrateur dans {offices} — stock, produits, achats, membres, planning, paramètres et remboursements.",
+    "approve": "Autoriser l’accès",
+    "deny": "Annuler",
+    "expiredTitle": "Demande expirée",
+    "expiredBody": "Cette demande d’autorisation n’est plus valide. Relancez la connexion depuis votre client MCP.",
+    "unknownClientTitle": "Application inconnue",
+    "unknownClientBody": "Cette application n’est pas enregistrée, ou a été désactivée."
+  },
+  "connectClaude": {
+    "title": "Connecter à Claude",
+    "subtitle": "Utilisez MateCrew depuis Claude : commandez un maté, consultez le stock ou calculez les comptes du mois, simplement en le demandant.",
+    "addButton": "Ajouter à Claude",
+    "addHint": "Ouvre claude.ai avec MateCrew pré-rempli. Confirmez le connecteur, puis connectez-vous ici pour l’autoriser.",
+    "scopeMember": "Claude agira en votre nom : vos commandes, votre consommation, ainsi que le stock et les statistiques de votre bureau.",
+    "scopeAdmin": "Claude agira en votre nom — y compris avec vos droits d’administrateur dans {offices}, ce qui lui permet d’y gérer le stock, les achats, les membres et les remboursements.",
+    "connectedTitle": "Applications connectées",
+    "connectedSince": "Connecté le {date}",
+    "revoke": "Déconnecter",
+    "revoked": "{client} n’a plus accès à MateCrew.",
+    "otherWays": "Autres façons de se connecter",
+    "serverUrlLabel": "URL du serveur",
+    "serverUrlHint": "Pour Claude Desktop ou tout autre client MCP : ajoutez un connecteur personnalisé et collez ceci.",
+    "claudeCodeLabel": "Claude Code",
+    "claudeCodeHint": "Lancez cette commande une fois, puis utilisez /mcp dans Claude Code pour vous connecter.",
+    "orgLabel": "Toute l’organisation",
+    "orgHint": "Les propriétaires Claude Team et Enterprise peuvent ajouter MateCrew pour tout le monde d’un coup. Chaque membre clique ensuite sur Connecter pour s’authentifier.",
+    "orgButton": "Ajouter pour l’organisation",
+    "copy": "Copier",
+    "copied": "Copié",
+    "copyFailed": "Copie impossible — sélectionnez le texte et copiez-le manuellement."
   }
 }

@@ -81,7 +81,7 @@ Copy `.env.local` or create your own. All variables:
 | `DATABASE_URL` | Postgres connection string | `postgresql://matecrew:matecrew@localhost:5432/matecrew` |
 | `DIRECT_URL` | Direct Postgres connection (migrations) | Same as DATABASE_URL |
 | `BETTER_AUTH_SECRET` | Auth secret (`openssl rand -base64 32`) | Required |
-| `BETTER_AUTH_URL` | App URL | `http://localhost:3000` |
+| `BETTER_AUTH_URL` | App URL. Also published as the OAuth `issuer` for the [MCP connector](#mcp-server-claude-connector), so it must match the public origin exactly. | `http://localhost:3000` |
 | `NEXT_PUBLIC_APP_URL` | Public app URL | `http://localhost:3000` |
 
 ### Email Domain Restriction
@@ -176,8 +176,11 @@ src/
         purchases/                   # Purchase batches + invoice upload
         reimbursements/              # Period-based reimbursement calc + PDF
         cron/                        # Manual cron trigger (dev)
+    oauth/consent/                   # OAuth consent screen for MCP clients
+    .well-known/                     # OAuth AS + protected-resource metadata
     api/
-      auth/[...all]/                 # Better Auth API handler
+      auth/[...all]/                 # Better Auth API handler (incl. MCP OAuth)
+      mcp/                           # MCP endpoint — the Claude connector URL
       cron/daily-request/            # Daily mate request notification
       cron/monthly-reimbursement/    # Monthly auto-reimbursement generation
   components/
@@ -212,6 +215,12 @@ src/
     auth-client.ts                   # Better Auth client hooks
     auth-utils.ts                    # requireSession, requireRoles helpers
     prisma.ts                        # Prisma client singleton
+    base-url.ts                      # Public origin / OAuth issuer resolution
+    mcp/
+      server.ts                      # Tool registration + model instructions
+      context.ts                     # Actor, office scoping, per-office roles
+      tool.ts                        # defineTool: auth, JSON encoding, errors
+      tools/                         # One module per domain area
     storage/                         # Pluggable storage (Vercel Blob / R2)
     slack.ts                         # Slack Bot API messaging
     stock-alerts.ts                  # Low stock Slack alerts
@@ -348,6 +357,65 @@ Each office can have a Slack channel ID configured. Messages are sent via a shar
 1. **Session request message**: Posted at each session start via QStash/Cron. Users click **I want a maté** or **Cancel** directly in Slack — the handler at `/api/slack/interactions` registers the request (no browser redirect) and updates the message in place with the running list of registered users. First-time clickers whose Slack email matches a MateCrew user are auto-linked; others get an ephemeral "Connect" button that opens a signed one-time URL to `/slack/link` for an authenticated confirmation.
 2. **Low stock alert**: Sent when stock drops below the configured threshold (once per 24h)
 3. **Test message**: Sendable from admin settings to verify integration works
+
+## MCP Server (Claude connector)
+
+MateCrew exposes its whole feature set to Claude Desktop, claude.ai and any other
+MCP client at:
+
+```
+https://YOUR_DOMAIN/api/mcp
+```
+
+Add it as a **custom connector** and paste that URL — nothing to provision by
+hand. The client registers itself (RFC 7591 dynamic client registration), opens
+the MateCrew sign-in page in a browser, and receives a token scoped to that user.
+
+### What Claude can do
+
+Tools act as the signed-in user with exactly their own authority, so a member can
+order and see stats, and an admin can additionally manage their offices. Roles are
+resolved **per office** on every call, from `Membership.roles` — the same source
+the web UI uses. `matecrew_admin_*` tools refuse callers who are not ADMIN of the
+office being acted on.
+
+| Area | Tools |
+|---|---|
+| Identity | `whoami`, `get_office`, `set_default_office`, `set_locale`, `request_office_access` |
+| Ordering | `get_today`, `order_mate`, `cancel_order`, `take_a_can`, `list_items`, `get_schedule` |
+| Serving a round | `list_pending_orders`, `serve_session`, `serve_order`, `unserve_order`, `drop_order` |
+| Personal data | `my_consumption`, `cancel_consumption`, `stats`, `my_reimbursements`, `settle_payment` |
+| Admin — stock | `admin_stock_report` (incl. reorder forecast), `admin_adjust_stock` |
+| Admin — catalogue | `admin_create_item`, `admin_update_item` |
+| Admin — money | `admin_list_purchases`, `admin_create_purchase`, `admin_mark_delivered`, `admin_list_periods`, `admin_preview_reimbursements`, `admin_generate_periods`, `admin_sync_period`, `admin_unsettle_payment`, `admin_delete_period` |
+| Admin — people | `admin_list_members`, `admin_add_member`, `admin_set_member_roles`, `admin_remove_member`, `admin_review_join_request` |
+| Admin — config | `admin_update_office`, `admin_test_slack`, `admin_announce_session`, `admin_add_session`, `admin_update_session`, `admin_remove_session`, `admin_record_consumption`, `admin_cancel_consumption`, `admin_consumption_report` |
+
+Every tool takes an optional `office` (id **or** name) and falls back to the
+user's default office, or their only one. Items and people can be named rather
+than referenced by id.
+
+Not exposed over MCP: uploading invoice files and item images, and creating or
+deleting an office — those stay in the web app.
+
+### How the auth works
+
+MateCrew is its own OAuth 2.1 authorization server, via Better Auth's `mcp`
+plugin. Authorization code + PKCE (S256 only), with refresh tokens.
+
+| Endpoint | Purpose |
+|---|---|
+| `/.well-known/oauth-authorization-server` | AS metadata (RFC 8414); `issuer` is the bare origin |
+| `/.well-known/oauth-protected-resource/api/mcp` | Resource metadata (RFC 9728) |
+| `/api/auth/mcp/register` | Dynamic client registration |
+| `/api/auth/mcp/authorize` · `/token` | Authorization + token exchange |
+| `/oauth/consent` | Consent screen (shown when a client sends `prompt=consent`) |
+
+`BETTER_AUTH_URL` (or `NEXT_PUBLIC_APP_URL`) **must** be set to the public origin
+— it is published verbatim as the OAuth `issuer`, and clients reject a mismatch.
+
+A user can revoke access by deleting the client's rows from `OauthApplication`;
+expired tokens are swept weekly by the `sync-schedules` cron.
 
 ### Cron Setup
 

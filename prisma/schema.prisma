@@ -66,6 +66,11 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
+  // OAuth provider relations (MCP connectors)
+  oauthApplications OauthApplication[]
+  oauthAccessTokens OauthAccessToken[]
+  oauthConsents     OauthConsent[]
+
   // App relations
   memberships        Membership[]
   joinRequests       JoinRequest[]
@@ -114,6 +119,76 @@ model Verification {
   expiresAt  DateTime
   createdAt  DateTime? @default(now())
   updatedAt  DateTime? @updatedAt
+}
+
+// ─── OAuth 2.1 provider (MCP connectors) ────────────────
+//
+// Shape is dictated by Better Auth's `mcp`/`oidc-provider` plugins — field
+// names must stay exactly as they are or the adapter stops finding them.
+// MateCrew is the authorization server for MCP clients (Claude Desktop,
+// claude.ai) which register themselves through RFC 7591 dynamic client
+// registration at /api/auth/mcp/register.
+
+model OauthApplication {
+  id           String   @id @default(cuid())
+  name         String
+  icon         String?
+  /// JSON blob from the registration request (client_uri, software_id, ...).
+  metadata     String?
+  clientId     String   @unique
+  /// Null for public clients (PKCE only), which is what MCP clients use.
+  clientSecret String?
+  /// Comma-separated list — Better Auth splits on ",".
+  redirectUrls String
+  type         String
+  disabled     Boolean  @default(false)
+  /// Null when the client registered anonymously (the usual MCP case).
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accessTokens OauthAccessToken[]
+  consents     OauthConsent[]
+
+  @@index([userId])
+}
+
+model OauthAccessToken {
+  id                    String           @id @default(cuid())
+  accessToken           String           @unique
+  refreshToken          String           @unique
+  accessTokenExpiresAt  DateTime
+  refreshTokenExpiresAt DateTime
+  clientId              String
+  client                OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                String?
+  user                  User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Space-separated granted scopes.
+  scopes                String
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  // A refresh grant inserts a new row rather than rotating in place, so this
+  // table grows with usage — the index backs the housekeeping sweep.
+  @@index([refreshTokenExpiresAt])
+}
+
+model OauthConsent {
+  id           String           @id @default(cuid())
+  clientId     String
+  client       OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes       String
+  consentGiven Boolean
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
 }
 
 // ─── App models ─────────────────────────────────────────
