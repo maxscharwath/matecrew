@@ -8,29 +8,92 @@ There is a new **Statistics** screen for every office. It answers the two
 questions people actually asked in the channel: who drinks the most, and should I
 be worried about how much I drink.
 
-## The office view
-
-<Highlights
+<StatTiles
   items={[
-    "A leaderboard of who drank what over the period",
-    "Which products the office actually prefers, not just what is stocked",
-    "A timeline of consumption, so you can see the Monday-morning spike",
-    "How many people drank at all, a total of 400 cans means something different across 4 people than 40",
+    { label: "Office total", value: "412", hint: "cans over 30 days" },
+    { label: "Per day", value: "13.7", hint: "across the office" },
+    { label: "Drinkers", value: "9", hint: "of 14 members" },
+  ]}
+/>
+
+## Who drinks what
+
+<BarChart
+  title="Cans per person, last 30 days"
+  unit=" cans"
+  caption="Example figures. The real screen shows your office over the window you pick."
+  data={[
+    { label: "Marie", value: 84 },
+    { label: "Bob", value: 71 },
+    { label: "Alice", value: 63 },
+    { label: "Claire", value: 48 },
+    { label: "Admin", value: 31 },
   ]}
 />
 
 Pick the window you care about: this week, 30 or 90 days, the last 12 months,
-year to date, or everything.
+year to date, or everything. The leaderboard, the item mix and the timeline all
+follow the same window, so the numbers stay comparable.
+
+## What the office actually prefers
+
+Stocking a product is not the same as drinking it, and the split is usually a
+surprise to whoever does the ordering.
+
+<SplitBar
+  title="Share of consumption by product"
+  unit=" cans"
+  data={[
+    { label: "Maté Classic", value: 214 },
+    { label: "Maté Zero", value: 141 },
+    { label: "Ginger", value: 57 },
+  ]}
+/>
+
+<TrendChart
+  title="Cans per week"
+  unit=" cans"
+  caption="Mondays carry the week. Fridays are quiet."
+  data={[
+    { label: "W1", value: 71 },
+    { label: "W2", value: 96 },
+    { label: "W3", value: 88 },
+    { label: "W4", value: 112 },
+    { label: "W5", value: 104 },
+    { label: "W6", value: 131 },
+  ]}
+/>
 
 ## Your own figures
 
-Because each product carries its own volume, sugar and caffeine, your totals can
-be turned into something meaningful: litres drunk, grams of sugar, milligrams of
-caffeine, and a per-day average.
+Because each product carries its own volume, sugar and caffeine, your totals turn
+into something meaningful: litres drunk, grams of sugar, milligrams of caffeine,
+and a per-day average.
 
-Those averages are shown against published reference values, the WHO free-sugar
-guidance and the EFSA daily caffeine limit, so a rating of "moderate" or "high"
-means something specific rather than being a number we invented.
+Those averages are shown against published reference values, so a rating of
+"moderate" or "high" means something specific rather than a number we invented.
+
+<Meter
+  label="Sugar, average per day"
+  value={31}
+  unit=" g"
+  ideal={25}
+  max={50}
+  state="above the ideal"
+/>
+
+<Meter
+  label="Caffeine, average per day"
+  value={168}
+  unit=" mg"
+  ideal={200}
+  max={400}
+  state="moderate"
+/>
+
+The marks are the WHO free-sugar guidance and the EFSA daily caffeine limit. They
+count only the maté you drank at the office, so treat them as a rough signal
+rather than a medical opinion.
 
 <Callout>
   Everyone in the office can see everyone's totals. It is a shared fridge, and

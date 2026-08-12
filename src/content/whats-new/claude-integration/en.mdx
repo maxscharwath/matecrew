@@ -31,8 +31,15 @@ admin. Being an admin in Lausanne grants Claude nothing in Genève.
 ## Getting set up
 
 Head to [your profile](/profile#claude) and follow the Claude Code steps. It
-takes about a minute: install the CLI, add MateCrew with one command, then sign
-in through your browser.
+takes about a minute:
+
+<Terminal
+  lines={[
+    { cmd: "claude mcp add --scope user --transport http matecrew https://matecrew.vercel.app/api/mcp", out: "Added HTTP MCP server matecrew" },
+    { cmd: "claude", out: "/mcp → matecrew → Authenticate  (opens your browser)" },
+    { cmd: "claude mcp list", out: "matecrew  ✓ Connected" },
+  ]}
+/>
 
 <Callout>
   Adding MateCrew in the Claude **web or desktop** app is controlled by your

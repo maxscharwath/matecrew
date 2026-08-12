@@ -23,6 +23,30 @@ Whoever paid is credited **per product** too, in proportion to what they spent o
 it. Over the full run of a purchase, a payer is credited back exactly what they
 put in, no money appears or disappears in the split.
 
+<BarChart
+  title="Price per can, by product"
+  unit=" CHF"
+  caption="Weighted average of what was actually paid. Drinking only the cheapest no longer costs the same as drinking the dearest."
+  data={[
+    { label: "Maté Classic", value: 2.1 },
+    { label: "Maté Zero", value: 2.4 },
+    { label: "Ginger", value: 3.2 },
+  ]}
+/>
+
+<TrendChart
+  title="What a can has cost over time"
+  unit=" CHF"
+  caption="Also on the purchases screen, from your own orders."
+  data={[
+    { label: "Mar", value: 2.0 },
+    { label: "Apr", value: 2.05 },
+    { label: "May", value: 2.2 },
+    { label: "Jun", value: 2.15 },
+    { label: "Jul", value: 2.35 },
+  ]}
+/>
+
 ## Periods stay stable
 
 A period's prices are capped at its end date, so recording a bulk order in

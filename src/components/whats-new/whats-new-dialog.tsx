@@ -61,8 +61,10 @@ export function WhatsNewDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4" />
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="brand-gradient flex size-8 shrink-0 items-center justify-center rounded-lg text-primary-foreground">
+              <Sparkles className="size-4" />
+            </span>
             {t("whatsNew.dialogTitle")}
           </DialogTitle>
           <DialogDescription>
@@ -72,8 +74,8 @@ export function WhatsNewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="rounded-md border p-3">
-          <p className="font-medium">{title}</p>
+        <div className="rounded-lg border border-brand/25 bg-brand-soft p-4">
+          <p className="font-medium text-brand-on-soft">{title}</p>
           <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
         </div>
 

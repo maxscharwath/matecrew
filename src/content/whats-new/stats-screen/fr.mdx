@@ -8,6 +8,29 @@ Chaque bureau dispose d’un nouvel écran **Statistiques**. Il répond aux deux
 questions que tout le monde posait dans le canal : qui boit le plus, et est-ce que
 je devrais m’inquiéter de ma consommation.
 
+<StatTiles
+  items={[
+    { label: "Total du bureau", value: "412", hint: "canettes sur 30 jours" },
+    { label: "Par jour", value: "13,7", hint: "pour tout le bureau" },
+    { label: "Buveurs", value: "9", hint: "sur 14 membres" },
+  ]}
+/>
+
+## Qui boit quoi
+
+<BarChart
+  title="Canettes par personne, 30 derniers jours"
+  unit=" canettes"
+  caption="Chiffres d’exemple. L’écran réel affiche votre bureau sur la période choisie."
+  data={[
+    { label: "Marie", value: 84 },
+    { label: "Bob", value: 71 },
+    { label: "Alice", value: 63 },
+    { label: "Claire", value: 48 },
+    { label: "Admin", value: 31 },
+  ]}
+/>
+
 ## La vue du bureau
 
 <Highlights
@@ -22,6 +45,35 @@ je devrais m’inquiéter de ma consommation.
 Choisissez la période qui vous intéresse : cette semaine, 30 ou 90 jours, les 12
 derniers mois, l’année en cours, ou tout.
 
+## Ce que le bureau préfère vraiment
+
+Avoir un produit en stock n’est pas la même chose que le boire, et la répartition
+surprend souvent celui qui passe les commandes.
+
+<SplitBar
+  title="Part de la consommation par produit"
+  unit=" canettes"
+  data={[
+    { label: "Maté Classic", value: 214 },
+    { label: "Maté Zero", value: 141 },
+    { label: "Ginger", value: 57 },
+  ]}
+/>
+
+<TrendChart
+  title="Canettes par semaine"
+  unit=" canettes"
+  caption="Le lundi porte la semaine. Le vendredi est calme."
+  data={[
+    { label: "S1", value: 71 },
+    { label: "S2", value: 96 },
+    { label: "S3", value: 88 },
+    { label: "S4", value: 112 },
+    { label: "S5", value: 104 },
+    { label: "S6", value: 131 },
+  ]}
+/>
+
 ## Vos propres chiffres
 
 Comme chaque produit porte son volume, son sucre et sa caféine, vos totaux
@@ -32,6 +84,24 @@ Ces moyennes sont comparées à des références publiées, les recommandations 
 l’OMS sur les sucres libres et la limite quotidienne de caféine de l’EFSA, pour
 qu’une mention « modéré » ou « élevé » ait un sens précis plutôt qu’être un
 chiffre inventé.
+
+<Meter
+  label="Sucre, moyenne par jour"
+  value={31}
+  unit=" g"
+  ideal={25}
+  max={50}
+  state="au-dessus de l’idéal"
+/>
+
+<Meter
+  label="Caféine, moyenne par jour"
+  value={168}
+  unit=" mg"
+  ideal={200}
+  max={400}
+  state="modéré"
+/>
 
 <Callout>
   Tout le monde dans le bureau voit les totaux de tout le monde. C’est un frigo

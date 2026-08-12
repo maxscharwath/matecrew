@@ -1,5 +1,13 @@
 import { Info, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  BarChart,
+  Meter,
+  SplitBar,
+  StatTiles,
+  Terminal,
+  TrendChart,
+} from "@/components/whats-new/charts";
 
 /**
  * Components articles may use in their MDX body.
@@ -79,4 +87,15 @@ export function Highlights({ items }: { readonly items: readonly string[] }) {
 }
 
 /** Everything an article body may reference, passed in at render time. */
-export const articleComponents = { Callout, TryIt, Compare, Highlights };
+export const articleComponents = {
+  Callout,
+  TryIt,
+  Compare,
+  Highlights,
+  BarChart,
+  TrendChart,
+  SplitBar,
+  StatTiles,
+  Meter,
+  Terminal,
+};

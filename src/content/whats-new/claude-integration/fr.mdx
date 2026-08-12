@@ -34,8 +34,15 @@ bureaux où vous l’êtes déjà. Être administrateur à Lausanne ne donne auc
 ## Mise en place
 
 Rendez-vous sur [votre profil](/profile#claude) et suivez les étapes Claude Code.
-Comptez environ une minute : installer le CLI, ajouter MateCrew avec une seule
-commande, puis se connecter via le navigateur.
+Comptez environ une minute :
+
+<Terminal
+  lines={[
+    { cmd: "claude mcp add --scope user --transport http matecrew https://matecrew.vercel.app/api/mcp", out: "Added HTTP MCP server matecrew" },
+    { cmd: "claude", out: "/mcp → matecrew → Authenticate  (ouvre votre navigateur)" },
+    { cmd: "claude mcp list", out: "matecrew  ✓ Connected" },
+  ]}
+/>
 
 <Callout>
   L’ajout de MateCrew dans l’application Claude **web ou desktop** dépend des

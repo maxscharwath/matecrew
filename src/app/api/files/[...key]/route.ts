@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { downloadFile } from "@/lib/storage";
 import { getOptionalSession } from "@/lib/auth-utils";
+import { audienceForKey, canReadFile } from "@/lib/file-access";
 
 /**
  * Serves a stored file by its storage key.
@@ -18,7 +19,8 @@ import { getOptionalSession } from "@/lib/auth-utils";
  *   server-side by Slack when it renders message images, so they must stay
  *   unauthenticated and are safe to cache publicly.
  * - `invoices/` and `reimbursements/` are financial documents. They stay out of
- *   shared caches and require a session.
+ *   shared caches, require a session, and are checked per document by
+ *   `canReadFile` so one member cannot read another's statement.
  */
 
 const YEAR_SECONDS = 60 * 60 * 24 * 365;
@@ -29,12 +31,6 @@ const HOUR_SECONDS = 60 * 60;
  * render item and avatar thumbnails, so requiring auth here would silently
  * break the daily message.
  */
-const PUBLIC_PREFIXES = ["avatars/", "items/"] as const;
-
-function isPublicKey(key: string): boolean {
-  return PUBLIC_PREFIXES.some((prefix) => key.startsWith(prefix));
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ key: string[] }> },
@@ -42,15 +38,19 @@ export async function GET(
   const { key } = await params;
   const storageKey = key.join("/");
 
-  const isPublic = isPublicKey(storageKey);
+  const isPublic = audienceForKey(storageKey).kind === "public";
 
   if (!isPublic) {
     // Settlement PDF keys are derivable from ids the app shows in its own UI
-    // (`reimbursements/<version>/<periodId>/user-<userId>.pdf`), so an
-    // unauthenticated route would hand them to anyone who worked out the shape.
+    // (`reimbursements/<version>/<periodId>/user-<userId>.pdf`), so a session
+    // alone is not enough: check that this session may read this key.
     const session = await getOptionalSession();
+    // 404 rather than 401/403 throughout: don't confirm a key exists to someone
+    // who may not read it.
     if (!session) {
-      // 404 rather than 401: don't confirm that a given key exists.
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (!(await canReadFile(session.user.id, storageKey))) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
   }

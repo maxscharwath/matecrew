@@ -25,6 +25,30 @@ qu’il a dépensé pour celui-ci. Sur la durée de vie complète d’un achat, 
 récupère exactement ce qu’il a avancé, aucun montant n’apparaît ni ne disparaît
 dans le partage.
 
+<BarChart
+  title="Prix par canette, par produit"
+  unit=" CHF"
+  caption="Moyenne pondérée de ce qui a réellement été payé. Ne boire que le moins cher ne coûte plus autant que boire le plus cher."
+  data={[
+    { label: "Maté Classic", value: 2.1 },
+    { label: "Maté Zero", value: 2.4 },
+    { label: "Ginger", value: 3.2 },
+  ]}
+/>
+
+<TrendChart
+  title="Ce qu’une canette a coûté au fil du temps"
+  unit=" CHF"
+  caption="Également sur l’écran des achats, à partir de vos propres commandes."
+  data={[
+    { label: "mars", value: 2.0 },
+    { label: "avr", value: 2.05 },
+    { label: "mai", value: 2.2 },
+    { label: "juin", value: 2.15 },
+    { label: "juil", value: 2.35 },
+  ]}
+/>
+
 ## Les périodes restent stables
 
 Les prix d’une période sont arrêtés à sa date de fin : enregistrer une grosse
