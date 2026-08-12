@@ -63,8 +63,61 @@ const authenticatedHandler = withMcpAuth(
   },
 );
 
+/**
+ * CORS for browser-based MCP clients.
+ *
+ * `mcp-handler` applies CORS to its metadata handlers but not to the MCP
+ * endpoint itself, which makes this route unreachable from a browser: Claude
+ * Code connects server-side and never notices, while the Claude web app is
+ * blocked before the request is even sent.
+ *
+ * `Access-Control-Expose-Headers` matters as much as the rest — without
+ * `WWW-Authenticate` exposed, browser JavaScript cannot read the 401 challenge
+ * and so cannot discover which authorization server to send the user to. The
+ * connection fails looking like an unreachable server rather than a sign-in.
+ *
+ * `*` is safe here because the endpoint authenticates with a bearer token
+ * rather than cookies: a hostile page gains nothing without a valid token, and
+ * a wildcard origin cannot be combined with credentialed requests anyway.
+ */
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "Content-Type, Authorization, mcp-protocol-version, mcp-session-id, last-event-id",
+  "Access-Control-Expose-Headers":
+    "WWW-Authenticate, mcp-session-id, mcp-protocol-version",
+  "Access-Control-Max-Age": "86400",
+};
+
+function withCors(
+  handler: (req: Request) => Promise<Response>,
+): (req: Request) => Promise<Response> {
+  return async (req) => {
+    const response = await handler(req);
+    // Copy onto a mutable clone: the handler may return an immutable Response,
+    // and a streamed body must be passed through untouched.
+    const headers = new Headers(response.headers);
+    for (const [key, value] of Object.entries(CORS_HEADERS)) {
+      headers.set(key, value);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  };
+}
+
+const handlerWithCors = withCors(authenticatedHandler);
+
+/** Preflight — must succeed before a browser will send the real request. */
+export function OPTIONS(): Response {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export {
-  authenticatedHandler as GET,
-  authenticatedHandler as POST,
-  authenticatedHandler as DELETE,
+  handlerWithCors as GET,
+  handlerWithCors as POST,
+  handlerWithCors as DELETE,
 };

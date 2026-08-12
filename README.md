@@ -398,6 +398,31 @@ than referenced by id.
 Not exposed over MCP: uploading invoice files and item images, and creating or
 deleting an office — those stay in the web app.
 
+### How a user signs in
+
+The flow crosses two sites, which is where people usually get stuck — Claude's
+"Add" dialog is not the end of it:
+
+1. **Profile → Connect to Claude → Add to Claude.** Opens claude.ai with the
+   MateCrew URL prefilled (Claude never lets a link add a connector silently).
+2. **Confirm in Claude.** Claude reads
+   `/.well-known/oauth-protected-resource/api/mcp`, follows it to MateCrew's
+   authorization server metadata, and registers itself as a client.
+3. **Sign in to MateCrew.** Claude sends the user to `/api/auth/mcp/authorize`.
+   With no session they land on `/sign-in`; the pending request is parked in a
+   signed cookie and resumes automatically after sign-in.
+4. **Approve.** Claude receives an authorization code, exchanges it for an
+   access + refresh token, and calls `/api/mcp` with `Authorization: Bearer …`.
+
+The token is minted for **one MateCrew user**, so every tool call carries exactly
+that person's authority. Access lasts an hour and is refreshed silently for a
+week of inactivity. Revoke it under **Profile → Connect to Claude → Connected
+apps**, which drops that user's tokens only — colleagues using the same Claude
+installation are unaffected.
+
+In Claude Code the same thing happens without a browser dialog:
+`claude mcp add …`, then `/mcp` → Authenticate opens the sign-in page.
+
 ### How the auth works
 
 MateCrew is its own OAuth 2.1 authorization server, via Better Auth's `mcp`
@@ -414,8 +439,23 @@ plugin. Authorization code + PKCE (S256 only), with refresh tokens.
 `BETTER_AUTH_URL` (or `NEXT_PUBLIC_APP_URL`) **must** be set to the public origin
 — it is published verbatim as the OAuth `issuer`, and clients reject a mismatch.
 
-A user can revoke access by deleting the client's rows from `OauthApplication`;
-expired tokens are swept weekly by the `sync-schedules` cron.
+Expired tokens are swept weekly by the `sync-schedules` cron.
+
+**`/api/mcp` must send CORS headers**, including
+`Access-Control-Expose-Headers: WWW-Authenticate`. `mcp-handler` applies CORS to
+its metadata handlers but not to the MCP endpoint, and without it the Claude web
+app is blocked in the browser while Claude Code — which connects server-side —
+works fine. If the challenge header is not *exposed*, a browser client cannot
+read the 401 and so never discovers where to sign in; the connector then fails
+looking like an unreachable server. `src/app/api/mcp/route.ts` wraps the handler
+to add these.
+
+Two other things the `mcp` plugin gets wrong, corrected in
+`src/app/.well-known/oauth-authorization-server/[[...path]]/route.ts`: it
+advertises `jwks_uri` and `userinfo_endpoint` without registering either route,
+and claims `RS256` id_tokens when they are in fact HS256. (`oidcConfig.metadata`
+looks like the place to fix this but is never read — the plugin passes its outer
+options to the metadata builder.)
 
 ### Cron Setup
 

@@ -101,6 +101,11 @@ export const auth = betterAuth({
         // exclusively — `plain` would contradict it).
         requirePKCE: true,
         allowPlainCodeChallengeMethod: false,
+        // NB: `oidcConfig.metadata` would be the natural place to correct the
+        // published discovery document, but the plugin calls its metadata
+        // builder with the outer `mcp()` options rather than `oidcConfig`, so
+        // anything set here is ignored. The corrections live in the
+        // /.well-known/oauth-authorization-server route instead.
       },
     }),
     // Must stay last: it copies Set-Cookie onto the Next.js response, so any

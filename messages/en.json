@@ -852,7 +852,6 @@
     "title": "Connect to Claude",
     "subtitle": "Use MateCrew from Claude: order a maté, check the stock, or run the month's numbers by just asking.",
     "addButton": "Add to Claude",
-    "addHint": "Opens claude.ai with MateCrew pre-filled. Confirm the connector, then sign in here to authorise it.",
     "scopeMember": "Claude will act as you: your orders, your consumption, and your office's stock and statistics.",
     "scopeAdmin": "Claude will act as you — including your admin rights in {offices}, so it can manage stock, purchases, members and reimbursements there.",
     "connectedTitle": "Connected apps",
@@ -869,6 +868,10 @@
     "orgButton": "Add for the organisation",
     "copy": "Copy",
     "copied": "Copied",
-    "copyFailed": "Could not copy — select the text and copy it manually."
+    "copyFailed": "Could not copy — select the text and copy it manually.",
+    "step1": "Click the button — claude.ai opens with MateCrew already filled in.",
+    "step2": "Check the URL shown, then click \"Add\".",
+    "step3": "Claude sends you back here to sign in to MateCrew (or reuses your session if you are already signed in).",
+    "step4": "Approve the access. Claude can then use MateCrew — enable it from the + menu in a chat."
   }
 }

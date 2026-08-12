@@ -110,9 +110,14 @@ export function ConnectClaudeCard({
               <ExternalLink className="h-3.5 w-3.5 opacity-70" />
             </a>
           </Button>
-          <p className="text-sm text-muted-foreground">
-            {t("connectClaude.addHint")}
-          </p>
+          {/* Spelled out because the flow crosses two sites: people otherwise
+              stop at Claude's "Add" dialog and miss the sign-in that follows. */}
+          <ol className="ml-4 list-decimal space-y-1 text-sm text-muted-foreground">
+            <li>{t("connectClaude.step1")}</li>
+            <li>{t("connectClaude.step2")}</li>
+            <li>{t("connectClaude.step3")}</li>
+            <li>{t("connectClaude.step4")}</li>
+          </ol>
           <p className="text-sm text-muted-foreground">
             {adminOffices.length > 0
               ? t("connectClaude.scopeAdmin", {
