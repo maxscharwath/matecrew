@@ -39,6 +39,7 @@ export async function getSidebarData() {
     userLocale: user?.locale ?? "fr",
     emailVerified: session.user.emailVerified,
     userEmail: session.user.email,
+    userId: session.user.id,
     unreadWhatsNew,
   };
 }

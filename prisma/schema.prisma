@@ -455,4 +455,7 @@ model ReimbursementLine {
   currency   String              @default("CHF")
   status     PaymentStatus       @default(PENDING)
   paidAt     DateTime?
+
+  // The unpaid-invoices banner queries this on every signed-in page render.
+  @@index([fromUserId, status])
 }

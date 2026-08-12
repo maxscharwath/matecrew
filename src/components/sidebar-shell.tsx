@@ -1,6 +1,7 @@
 import { AppSidebar } from "@/components/app-sidebar";
 import { NavBreadcrumb } from "@/components/nav-breadcrumb";
 import { EmailVerificationBanner } from "@/components/email-verification-banner";
+import { UnpaidInvoicesBanner } from "@/components/unpaid-invoices-banner";
 import { WhatsNewAnnouncer } from "@/components/whats-new/whats-new-announcer";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -18,6 +19,7 @@ interface SidebarShellProps {
   readonly avatarUrl?: string;
   readonly emailVerified?: boolean;
   readonly userEmail?: string;
+  readonly userId: string;
   readonly unreadWhatsNew?: number;
 }
 
@@ -29,6 +31,7 @@ export function SidebarShell({
   avatarUrl,
   emailVerified,
   userEmail,
+  userId,
   unreadWhatsNew,
 }: SidebarShellProps) {
   return (
@@ -50,6 +53,10 @@ export function SidebarShell({
         {!emailVerified && userEmail && (
           <EmailVerificationBanner email={userEmail} />
         )}
+        {/* Sits outside <main>, which is the only scrolling area, so an unpaid
+            balance stays on screen and cannot be dismissed. */}
+        <UnpaidInvoicesBanner userId={userId} />
+
         {/* Faint herbal wash so the content area is not flat white. */}
         <main className="brand-wash flex-1 overflow-y-auto p-4 md:p-6">
           {children}

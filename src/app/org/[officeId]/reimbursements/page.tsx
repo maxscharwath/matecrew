@@ -46,9 +46,13 @@ export default async function UserReimbursementsPage({ params, searchParams }: P
         <HistorySection officeId={officeId} userId={userId} page={consumptionPage} />
       </Suspense>
 
-      <Suspense fallback={<PeriodsSectionFallback />}>
-        <PeriodsSection officeId={officeId} userId={userId} />
-      </Suspense>
+      {/* Anchor target for the unpaid-invoices banner: the mark-as-paid
+          buttons live in here. */}
+      <div id="pending-payments" className="scroll-mt-4">
+        <Suspense fallback={<PeriodsSectionFallback />}>
+          <PeriodsSection officeId={officeId} userId={userId} />
+        </Suspense>
+      </div>
     </div>
   );
 }

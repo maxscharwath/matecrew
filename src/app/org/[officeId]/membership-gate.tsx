@@ -67,6 +67,7 @@ export async function MembershipGate({ children, officeId }: Props) {
       avatarUrl={avatarUrl}
       emailVerified={session.user.emailVerified}
       userEmail={session.user.email}
+      userId={session.user.id}
       unreadWhatsNew={unreadWhatsNew}
     >
       <OfficeCookie officeId={officeId} />
