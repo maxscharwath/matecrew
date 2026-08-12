@@ -1,10 +1,11 @@
 import { cache } from "react";
-import { TrendingDown, TrendingUp, Scale, Eye, CupSoda, Banknote } from "lucide-react";
+import { Eye, CupSoda, Banknote, CircleCheckBig, Wallet } from "lucide-react";
 import { getTranslations, getLocale } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { UserReimbursementCard } from "@/components/user-reimbursement-card";
+import { PaymentLineRow } from "@/components/payment-line-row";
 import { ConsumptionHistoryCard } from "@/components/consumption-history-card";
 import { DataPagination } from "@/components/pagination";
 import {
@@ -37,7 +38,7 @@ function formatPeriodLabel(startDate: Date, endDate: Date) {
   return `${startDate.toLocaleDateString("fr-CH")} – ${endDate.toLocaleDateString("fr-CH")}`;
 }
 
-// Cached data fetcher — shared between BalanceSection and PeriodsSection
+// Cached data fetcher — shared between PendingPaymentsSection and PeriodsSection
 const getPeriodsData = cache(async (officeId: string, userId: string) => {
   const periods = await prisma.reimbursementPeriod.findMany({
     where: { officeId },
@@ -106,21 +107,19 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
 
 // ── Skeleton fallbacks ───────────────────────────────────
 
-export function BalanceSectionFallback() {
+export function PendingPaymentsSectionFallback() {
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardHeader className="pb-2">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="mt-1 h-7 w-24" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-3 w-32" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card>
+      <CardHeader className="pb-3">
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="mt-1 h-4 w-64" />
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -189,85 +188,132 @@ interface SectionProps {
   readonly userId: string;
 }
 
-export async function BalanceSection({ officeId, userId }: SectionProps) {
-  const t = await getTranslations();
-  const { totalOwed, totalOwedToYou, netBalance } = await getPeriodsData(officeId, userId);
+/// Every unsettled line across every period, lifted to the top of the page.
+/// Buried at the bottom inside collapsed period cards, these were easy to miss
+/// entirely — and they are the only rows on this page you can act on.
+export async function PendingPaymentsSection({ officeId, userId }: SectionProps) {
+  const t = await getTranslations("reimbursements");
+  const { periodsWithData } = await getPeriodsData(officeId, userId);
+
+  const pending = periodsWithData.flatMap((p) =>
+    p.lines
+      .filter((l) => l.status === "PENDING")
+      .map((l) => ({ line: l, periodLabel: p.label })),
+  );
+
+  if (pending.length === 0) {
+    return (
+      <Card className="border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30">
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-3">
+            <CircleCheckBig className="size-5 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <CardTitle className="text-base">{t("allSettledTitle")}</CardTitle>
+              <CardDescription>{t("allSettledDescription")}</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const toPay = pending.filter((p) => p.line.direction === "pay");
+  const toReceive = pending.filter((p) => p.line.direction === "receive");
+  const owedTotal = toPay.reduce((sum, p) => sum + p.line.amount, 0);
+  const owedToYouTotal = toReceive.reduce((sum, p) => sum + p.line.amount, 0);
+  const netBalance = owedToYouTotal - owedTotal;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardDescription>{t('reimbursements.youOweLabel')}</CardDescription>
-            <TrendingDown className="size-5 text-red-500 dark:text-red-400" />
+    <Card
+      className={
+        toPay.length > 0
+          ? "border-red-200 dark:border-red-900"
+          : "border-emerald-200 dark:border-emerald-900"
+      }
+    >
+      <CardHeader className="pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Wallet className="size-5 text-muted-foreground" />
+            <CardTitle className="text-base">
+              {t("pendingPaymentsTitle")}
+            </CardTitle>
           </div>
-          <CardTitle
-            className={`text-2xl ${
-              totalOwed > 0.01
-                ? "text-red-600 dark:text-red-400"
-                : "text-muted-foreground"
-            }`}
-          >
-            CHF {totalOwed.toFixed(2)}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground">{t('reimbursements.pendingPayments')}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardDescription>{t('reimbursements.owedToYouLabel')}</CardDescription>
-            <TrendingUp className="size-5 text-green-500 dark:text-green-400" />
+          <Badge variant={toPay.length > 0 ? "destructive" : "secondary"}>
+            {t("pendingCount", { count: pending.length })}
+          </Badge>
+        </div>
+        {/* The former three balance cards, folded in — they showed exactly
+            these numbers again, one screenful lower. */}
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-xs text-muted-foreground">
+              {t("youOweLabel")}
+            </p>
+            <p className="text-xl font-bold tabular-nums text-red-600 dark:text-red-400">
+              CHF {owedTotal.toFixed(2)}
+            </p>
           </div>
-          <CardTitle
-            className={`text-2xl ${
-              totalOwedToYou > 0.01
-                ? "text-green-600 dark:text-green-400"
-                : "text-muted-foreground"
-            }`}
-          >
-            CHF {totalOwedToYou.toFixed(2)}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground">{t('reimbursements.pendingReceipts')}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardDescription>{t('reimbursements.netBalanceLabel')}</CardDescription>
-            <Scale className="size-5 text-muted-foreground" />
+          <div>
+            <p className="text-xs text-muted-foreground">
+              {t("owedToYouLabel")}
+            </p>
+            <p className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+              CHF {owedToYouTotal.toFixed(2)}
+            </p>
           </div>
-          <CardTitle
-            className={`text-2xl ${
-              netBalance > 0.01
-                ? "text-green-600 dark:text-green-400"
-                : netBalance < -0.01
-                  ? "text-red-600 dark:text-red-400"
-                  : "text-muted-foreground"
-            }`}
-          >
-            {netBalance > 0.01
-              ? `+CHF ${netBalance.toFixed(2)}`
-              : netBalance < -0.01
-                ? `-CHF ${Math.abs(netBalance).toFixed(2)}`
-                : "CHF 0.00"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground">
-            {netBalance > 0.01
-              ? t('reimbursements.inYourFavor')
-              : netBalance < -0.01
-                ? t('dashboard.youOwe')
-                : t('reimbursements.allSettled')}
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+          <div>
+            <p className="text-xs text-muted-foreground">
+              {t("netBalanceLabel")}
+            </p>
+            <p
+              className={`text-xl font-bold tabular-nums ${
+                netBalance > 0.01
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : netBalance < -0.01
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {netBalance < -0.01 ? "-" : netBalance > 0.01 ? "+" : ""}CHF{" "}
+              {Math.abs(netBalance).toFixed(2)}
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {toPay.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {t("toPayGroup")}
+            </p>
+            {toPay.map(({ line, periodLabel }) => (
+              <PaymentLineRow
+                key={line.lineId}
+                officeId={officeId}
+                line={line}
+                periodLabel={periodLabel}
+              />
+            ))}
+          </div>
+        )}
+        {toReceive.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {t("toReceiveGroup")}
+            </p>
+            {toReceive.map(({ line, periodLabel }) => (
+              <PaymentLineRow
+                key={line.lineId}
+                officeId={officeId}
+                line={line}
+                periodLabel={periodLabel}
+              />
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -423,9 +469,10 @@ export async function PeriodsSection({ officeId, userId }: SectionProps) {
           qty={p.qty}
           costShare={p.costShare}
           amountPaid={p.amountPaid}
-          netOwed={p.netOwed}
           lines={p.lines}
-          defaultExpanded={i === 0}
+          // Open anything still owing, so nothing actionable hides behind a
+          // collapsed header; otherwise just the newest period.
+          defaultExpanded={i === 0 || p.lines.some((l) => l.status === "PENDING")}
         />
       ))}
     </div>

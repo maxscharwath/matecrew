@@ -26,7 +26,9 @@ export async function UnpaidInvoicesBanner({ userId }: { readonly userId: string
   return (
     <div
       role="alert"
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+      // text-xs on phones: the banner is pinned, so every extra wrapped line
+      // is permanently stolen from the viewport.
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800 sm:text-sm dark:border-red-900 dark:bg-red-950 dark:text-red-200"
     >
       <ReceiptText className="size-4 shrink-0" />
       <span className="flex-1">

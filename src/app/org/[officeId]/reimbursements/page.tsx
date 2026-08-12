@@ -2,8 +2,8 @@ import { Suspense } from "react";
 import { getTranslations } from "next-intl/server";
 import { requireMembership } from "@/lib/auth-utils";
 import {
-  BalanceSection,
-  BalanceSectionFallback,
+  PendingPaymentsSection,
+  PendingPaymentsSectionFallback,
   PreviewSection,
   PreviewSectionFallback,
   HistorySection,
@@ -34,25 +34,32 @@ export default async function UserReimbursementsPage({ params, searchParams }: P
         </p>
       </div>
 
-      <Suspense fallback={<BalanceSectionFallback />}>
-        <BalanceSection officeId={officeId} userId={userId} />
-      </Suspense>
+      {/* Anything actionable comes first, and it is what the unpaid-invoices
+          banner anchors to. */}
+      {/* Clears the sticky banner + header stack, which is taller on mobile
+          where the banner text wraps. */}
+      <div id="pending-payments" className="scroll-mt-48 md:scroll-mt-40">
+        <Suspense fallback={<PendingPaymentsSectionFallback />}>
+          <PendingPaymentsSection officeId={officeId} userId={userId} />
+        </Suspense>
+      </div>
 
       <Suspense fallback={<PreviewSectionFallback />}>
         <PreviewSection officeId={officeId} userId={userId} />
       </Suspense>
 
-      <Suspense fallback={<HistorySectionFallback />}>
-        <HistorySection officeId={officeId} userId={userId} page={consumptionPage} />
-      </Suspense>
-
-      {/* Anchor target for the unpaid-invoices banner: the mark-as-paid
-          buttons live in here. */}
-      <div id="pending-payments" className="scroll-mt-4">
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">
+          {t('reimbursements.periodHistoryTitle')}
+        </h2>
         <Suspense fallback={<PeriodsSectionFallback />}>
           <PeriodsSection officeId={officeId} userId={userId} />
         </Suspense>
-      </div>
+      </section>
+
+      <Suspense fallback={<HistorySectionFallback />}>
+        <HistorySection officeId={officeId} userId={userId} page={consumptionPage} />
+      </Suspense>
     </div>
   );
 }
