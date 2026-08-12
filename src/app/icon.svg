@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    Favicon: the MateCrew gourd on the brand green, matching the sidebar mark.
+    Replaces the create-next-app default. Geometry is scaled up from the 24px
+    component and thickened, because a browser tab renders this at 16px: the
+    straw is 3px so it survives, and there is no interior detail to turn to mud.
+    Colours are literal rather than tokens, since a favicon is fetched outside
+    the page and inherits no CSS.
+  -->
+  <rect width="32" height="32" rx="8" fill="#0B6B3F"/>
+  <g stroke="#F2FBF5" fill="#F2FBF5">
+    <path d="M19.6 9.4 26.6 3.6" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <circle cx="15" cy="19.6" r="8.6" stroke="none"/>
+    <rect x="13.2" y="6.6" width="6.4" height="6" rx="2" transform="rotate(12 16.4 9.6)" stroke="none"/>
+  </g>
+</svg>

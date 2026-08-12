@@ -1,7 +1,7 @@
 export const meta = {
   title: "More than one kind of maté",
   summary:
-    "Offices can stock several products — Classic, Zero, Ginger — each with its own stock, orders and price.",
+    "Offices can stock several products (Classic, Zero, Ginger), each with its own stock, orders and price.",
 };
 
 Until now MateCrew assumed one fridge held one product. Offices stock several, so
@@ -18,22 +18,23 @@ everything that used to be a single number is now tracked per product.
 
 <Highlights
   items={[
-    "Pick which maté you want when you order — in the app or straight from Slack",
+    "Pick which maté you want when you order, in the app or straight from Slack",
     "Change your mind while the session is still open; switching is not a second order",
     "Sold-out products are hidden, so you cannot order what is not there",
     "The prep list is grouped by product, so whoever fetches the round knows what to carry",
   ]}
 />
 
-Every office has one **default** product, used whenever a flow does not name one
-— that is what keeps older history intact and what "take a can" falls back to.
+Every office has one **default** product, used whenever a flow does not name
+one. That is what keeps older history intact, and what "take a can" falls back
+to.
 
 ## For admins
 
 Manage the catalogue under **Admin → Items**. You can add a product, retire one
 without losing its history, reorder them, and set which is the default.
 
-Each product also carries its own nutrition figures — volume, sugar, caffeine —
+Each product also carries its own nutrition figures (volume, sugar, caffeine),
 which is what makes the health side of the statistics meaningful once you stock a
 zero-sugar option next to a regular one.
 

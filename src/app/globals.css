@@ -34,6 +34,12 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-on-soft: var(--brand-on-soft);
+  --color-warm: var(--warm);
+  --color-warm-soft: var(--warm-soft);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -48,72 +54,106 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Softer than shadcn's 0.625rem: the larger radius is a big part of what
+     stops the UI reading as an untouched component-library default. */
+  --radius: 0.75rem;
+
+  /* ── Brand ────────────────────────────────────────────────────────────
+     MateCrew is shared yerba maté, so the identity is herbal green with a
+     warm gourd amber as the secondary. Every surface below carries a little
+     of that green, which is what the stock theme lacked: its tokens were all
+     oklch(L 0 0), literally zero chroma, so nothing could look like a brand. */
+  --brand: oklch(0.47 0.112 156);
+  --brand-strong: oklch(0.39 0.1 157);
+  --brand-soft: oklch(0.945 0.032 150);
+  --brand-on-soft: oklch(0.34 0.075 157);
+  --warm: oklch(0.7 0.128 66);
+  --warm-soft: oklch(0.96 0.038 82);
+
+  /* Warm paper rather than clinical white, so white cards lift off it. */
+  --background: oklch(0.988 0.006 116);
+  --foreground: oklch(0.22 0.018 155);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.22 0.018 155);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.22 0.018 155);
+  --primary: oklch(0.47 0.112 156);
+  --primary-foreground: oklch(0.985 0.012 150);
+  --secondary: oklch(0.955 0.014 140);
+  --secondary-foreground: oklch(0.29 0.032 156);
+  --muted: oklch(0.962 0.009 130);
+  --muted-foreground: oklch(0.505 0.021 150);
+  --accent: oklch(0.945 0.03 148);
+  --accent-foreground: oklch(0.32 0.062 157);
+  --destructive: oklch(0.552 0.19 27.5);
+  --border: oklch(0.915 0.011 135);
+  --input: oklch(0.902 0.013 135);
+  --ring: oklch(0.55 0.1 156);
+
+  /* Categorical chart palette, validated for CVD separation, chroma floor and
+     contrast against this surface. Kept as hex so the checked values survive
+     exactly; re-run the validator before changing any of them. */
+  --chart-1: #15693f;
+  --chart-2: #b0760b;
+  --chart-3: #1b6e9c;
+  --chart-4: #d4634a;
+  --chart-5: #7b4fa8;
+
+  /* The sidebar is a distinct, greener surface: it reads as chrome rather than
+     as more page. */
+  --sidebar: oklch(0.971 0.015 145);
+  --sidebar-foreground: oklch(0.26 0.021 155);
+  --sidebar-primary: oklch(0.47 0.112 156);
+  --sidebar-primary-foreground: oklch(0.985 0.012 150);
+  --sidebar-accent: oklch(0.928 0.034 148);
+  --sidebar-accent-foreground: oklch(0.3 0.062 157);
+  --sidebar-border: oklch(0.9 0.015 140);
+  --sidebar-ring: oklch(0.55 0.1 156);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --brand: oklch(0.72 0.14 156);
+  --brand-strong: oklch(0.8 0.15 157);
+  --brand-soft: oklch(0.3 0.048 155);
+  --brand-on-soft: oklch(0.88 0.08 150);
+  --warm: oklch(0.78 0.13 68);
+  --warm-soft: oklch(0.32 0.05 70);
+
+  --background: oklch(0.19 0.018 158);
+  --foreground: oklch(0.958 0.008 130);
+  --card: oklch(0.236 0.02 158);
+  --card-foreground: oklch(0.958 0.008 130);
+  --popover: oklch(0.236 0.02 158);
+  --popover-foreground: oklch(0.958 0.008 130);
+  --primary: oklch(0.72 0.14 156);
+  --primary-foreground: oklch(0.18 0.03 158);
+  --secondary: oklch(0.292 0.02 158);
+  --secondary-foreground: oklch(0.958 0.008 130);
+  --muted: oklch(0.281 0.018 158);
+  --muted-foreground: oklch(0.72 0.021 140);
+  --accent: oklch(0.322 0.042 155);
+  --accent-foreground: oklch(0.94 0.022 145);
+  --destructive: oklch(0.68 0.18 24);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.65 0.12 156);
+
+  /* Dark is stepped independently and validated against the dark surface, not
+     flipped from the light set. */
+  --chart-1: #3fa873;
+  --chart-2: #b07e26;
+  --chart-3: #4a96c4;
+  --chart-4: #cc6a52;
+  --chart-5: #9877c9;
+
+  --sidebar: oklch(0.165 0.018 158);
+  --sidebar-foreground: oklch(0.93 0.01 130);
+  --sidebar-primary: oklch(0.72 0.14 156);
+  --sidebar-primary-foreground: oklch(0.18 0.03 158);
+  --sidebar-accent: oklch(0.3 0.042 155);
+  --sidebar-accent-foreground: oklch(0.94 0.022 145);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.65 0.12 156);
 }
 
 @layer base {
@@ -123,4 +163,61 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+@layer base {
+  /* The stock theme had flat cards on a flat page, which is most of why it read
+     as a wireframe. A hairline plus a very soft shadow gives depth without the
+     heavy drop-shadow look. */
+  [data-slot="card"] {
+    box-shadow:
+      0 1px 2px oklch(0.22 0.018 155 / 4%),
+      0 4px 16px -8px oklch(0.22 0.018 155 / 8%);
+  }
+  .dark [data-slot="card"] {
+    box-shadow:
+      0 1px 2px oklch(0 0 0 / 20%),
+      0 4px 16px -8px oklch(0 0 0 / 30%);
+  }
+
+  /* Interactive surfaces settle instead of snapping. */
+  button,
+  a,
+  [data-slot="sidebar-menu-button"] {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  /* Long shell commands and article prose read better with tabular figures. */
+  code,
+  pre {
+    font-variant-ligatures: none;
+  }
+}
+
+@utility brand-gradient {
+  background-image: linear-gradient(
+    135deg,
+    var(--brand-strong) 0%,
+    var(--brand) 55%,
+    color-mix(in oklab, var(--brand) 70%, var(--warm)) 100%
+  );
+}
+
+/* A faint herbal wash behind the app shell, so the page is not flat white. */
+@utility brand-wash {
+  background-image:
+    radial-gradient(
+      60rem 30rem at 12% -10%,
+      oklch(0.47 0.112 156 / 5%),
+      transparent 70%
+    ),
+    radial-gradient(
+      50rem 26rem at 100% 0%,
+      oklch(0.7 0.128 66 / 4%),
+      transparent 70%
+    );
 }

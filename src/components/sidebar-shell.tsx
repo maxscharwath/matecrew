@@ -50,7 +50,10 @@ export function SidebarShell({
         {!emailVerified && userEmail && (
           <EmailVerificationBanner email={userEmail} />
         )}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        {/* Faint herbal wash so the content area is not flat white. */}
+        <main className="brand-wash flex-1 overflow-y-auto p-4 md:p-6">
+          {children}
+        </main>
         {/* Renders nothing unless there are unread release notes, so it can sit
             on every signed-in page. */}
         <WhatsNewAnnouncer />

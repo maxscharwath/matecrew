@@ -31,6 +31,7 @@ import type { LucideIcon } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { MateCrewLogo } from "@/components/matecrew-logo";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -129,8 +130,8 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href={`${prefix}/dashboard`}>
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <CupSoda className="size-4" />
+                <div className="brand-gradient flex aspect-square size-9 items-center justify-center rounded-xl text-primary-foreground shadow-sm">
+                  <MateCrewLogo className="size-5" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">MateCrew</span>
