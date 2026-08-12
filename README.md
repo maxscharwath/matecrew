@@ -114,6 +114,33 @@ Storage provider is selected via `STORAGE_PROVIDER` (default: `vercel-blob`).
 | `R2_ACCESS_KEY_ID` | R2 access key (prod) | |
 | `R2_SECRET_ACCESS_KEY` | R2 secret key (prod) | |
 
+#### Never call `list()` on a read path
+
+Vercel Blob bills and rate-limits two classes of operation, and the difference
+is five-fold in price and, on Hobby, five-fold in allowance:
+
+| Class | Methods | Hobby allowance |
+|---|---|---|
+| **Advanced** | `put()`, `copy()`, `list()` | 2,000/month |
+| **Simple** | `head()`, fetching a blob by URL (cache miss) | 10,000/month |
+
+`del()` is free but still counts toward advanced *rate* limits.
+
+The adapter originally resolved each key to a URL with
+`list({ prefix: key, limit: 1 })` before downloading it, so **every avatar and
+item image on every page view cost one advanced operation**. With half a megabyte
+stored, that alone reached 2.1k/2k in a month and Vercel suspended the store —
+which surfaced as every image 404ing site-wide, not as a quota warning.
+
+`get()`, `head()` and `del()` all accept a pathname and derive the URL from the
+token's store id, so a key is sufficient and no lookup is needed. `put()` is the
+only advanced operation left, once per real upload.
+
+The other half is caching: `/api/files/[...key]` marks `avatars/` and `items/`
+`public, max-age=1y, immutable` (keys embed a UUID, so content never changes at a
+given key) which lets a shared CDN cache serve repeat views. `invoices/` and
+`reimbursements/` stay `private` and require a session.
+
 ### Microsoft SSO (Optional)
 
 | Variable | Description | Default |
