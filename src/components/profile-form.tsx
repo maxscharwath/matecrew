@@ -116,10 +116,13 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
     });
   }
 
+  // No width constraint of its own: the page container sets it (max-w-4xl, as
+  // everywhere else in the app), so these cards line up with the page's other
+  // sections instead of stopping short of them.
   return (
-    <form action={handleSubmit} className="max-w-2xl space-y-6">
+    <form action={handleSubmit} className="space-y-6">
       {/* Profile card */}
-      <Card>
+      <Card id="profile" className="scroll-mt-20">
         <CardContent className="space-y-6 pt-6">
           <div className="flex items-center gap-4">
             <Avatar className="size-16">
@@ -202,7 +205,7 @@ export function ProfileForm({ user, avatarUrl, offices }: ProfileFormProps) {
 
       {/* Offices card */}
       {offices.length > 0 && (
-        <Card>
+        <Card id="offices" className="scroll-mt-20">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{t("profile.offices")}</CardTitle>
           </CardHeader>

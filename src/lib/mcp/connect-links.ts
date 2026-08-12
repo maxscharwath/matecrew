@@ -21,8 +21,12 @@ export interface ConnectLinks {
   personalInstallUrl: string;
   /** Same, but the org-wide dialog — only usable by a Claude org admin. */
   organizationInstallUrl: string;
-  /** Ready-to-paste Claude Code command, registered for every project. */
-  claudeCodeCommand: string;
+  /** Installs the Claude Code CLI itself (macOS, Linux, WSL). */
+  claudeCodeInstall: string;
+  /** Registers MateCrew for every project the user opens. */
+  claudeCodeAdd: string;
+  /** Shows the connection status, so a user can confirm it worked. */
+  claudeCodeVerify: string;
 }
 
 export function getConnectLinks(): ConnectLinks {
@@ -39,6 +43,10 @@ export function getConnectLinks(): ConnectLinks {
     serverUrl,
     personalInstallUrl: `https://claude.ai/customize/connectors?${params}`,
     organizationInstallUrl: `https://claude.ai/admin-settings/connectors?${params}`,
-    claudeCodeCommand: `claude mcp add --scope user --transport http matecrew ${serverUrl}`,
+    claudeCodeInstall: "curl -fsSL https://claude.ai/install.sh | bash",
+    // `--scope user` rather than the default `local`, which would tie MateCrew
+    // to whichever directory the command happened to be run in.
+    claudeCodeAdd: `claude mcp add --scope user --transport http matecrew ${serverUrl}`,
+    claudeCodeVerify: "claude mcp list",
   };
 }

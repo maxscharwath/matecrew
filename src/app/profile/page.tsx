@@ -39,6 +39,8 @@ export default async function ProfilePage() {
       <ProfileForm user={user} avatarUrl={avatarUrl} offices={offices} />
       <ConnectClaudeCard
         {...connectLinks}
+        // Claude Code is the primary route: adding a custom connector on
+        // claude.ai/Desktop depends on Claude org policy, which may forbid it.
         // Dates are formatted server-side so the markup matches on hydration
         // regardless of the visitor's own locale settings.
         connections={connections.map((c) => ({
