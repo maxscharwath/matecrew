@@ -880,5 +880,21 @@
     "copy": "Copier",
     "copied": "Copié",
     "copyFailed": "Copie impossible — sélectionnez le texte et copiez-le manuellement."
+  },
+  "whatsNew": {
+    "title": "Nouveautés",
+    "subtitle": "Tout ce qui est arrivé dans MateCrew, du plus récent au plus ancien.",
+    "new": "Nouveau",
+    "readMore": "Lire la suite",
+    "backToList": "Toutes les nouveautés",
+    "markRead": "Marquer comme lu",
+    "markUnread": "Marquer comme non lu",
+    "markAllRead": "Tout marquer comme lu",
+    "allMarkedRead": "{count, plural, =0 {Rien à marquer.} one {1 nouveauté marquée comme lue.} other {# nouveautés marquées comme lues.}}",
+    "dialogTitle": "Nouveau dans MateCrew",
+    "dialogSubtitleOne": "Une nouveauté que vous n’avez pas encore vue.",
+    "dialogSubtitleMany": "{count, plural, one {# nouveauté que vous n’avez pas encore vue.} other {# nouveautés que vous n’avez pas encore vues.}}",
+    "dialogLater": "Plus tard",
+    "dialogRead": "Voir les nouveautés"
   }
 }

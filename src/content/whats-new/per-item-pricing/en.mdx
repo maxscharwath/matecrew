@@ -1,0 +1,44 @@
+export const meta = {
+  title: "Everyone pays for what they actually drank",
+  summary:
+    "Reimbursements now bill each product at its own price, so a cheap maté no longer subsidises an expensive one.",
+};
+
+Once offices stocked several products at different prices, splitting the bill by
+head stopped being fair. Reimbursements now bill **per product**.
+
+## How it works
+
+Each product gets its own price: the weighted average of what was actually paid
+for it, counting only purchases made up to the end of the period.
+
+<Compare
+  beforeLabel="Before"
+  afterLabel="Now"
+  before="One average price for everything. Drink only the cheap one, pay the same as someone on the expensive one."
+  after="Your cost is the sum, per product, of how many you drank × that product's price."
+/>
+
+Whoever paid is credited **per product** too, in proportion to what they spent on
+it. Over the full run of a purchase, a payer is credited back exactly what they
+put in — no money appears or disappears in the split.
+
+## Periods stay stable
+
+A period's prices are capped at its end date, so recording a bulk order in
+September never reshuffles August. Once a period is generated its payment lines
+are frozen.
+
+If something genuinely needs correcting — a late invoice, a wrong consumption —
+an admin can recalculate the period. Lines already marked paid are left alone and
+their amounts are deducted from the remaining balances, so nobody is asked to pay
+twice.
+
+<Callout>
+  Admins can preview a month before generating it, which shows each person's
+  share, the per-product prices used, and the transfers that would be created —
+  without saving anything.
+</Callout>
+
+There is also a price-history chart on the purchases screen, so you can see what
+maté has been costing over time.

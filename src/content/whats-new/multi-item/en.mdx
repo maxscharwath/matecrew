@@ -1,0 +1,43 @@
+export const meta = {
+  title: "More than one kind of maté",
+  summary:
+    "Offices can stock several products — Classic, Zero, Ginger — each with its own stock, orders and price.",
+};
+
+Until now MateCrew assumed one fridge held one product. Offices stock several, so
+everything that used to be a single number is now tracked per product.
+
+<Compare
+  beforeLabel="Before"
+  afterLabel="Now"
+  before="One stock count, one price, one order per person."
+  after="Each product has its own stock, its own price and its own order list."
+/>
+
+## What changed for you
+
+<Highlights
+  items={[
+    "Pick which maté you want when you order — in the app or straight from Slack",
+    "Change your mind while the session is still open; switching is not a second order",
+    "Sold-out products are hidden, so you cannot order what is not there",
+    "The prep list is grouped by product, so whoever fetches the round knows what to carry",
+  ]}
+/>
+
+Every office has one **default** product, used whenever a flow does not name one
+— that is what keeps older history intact and what "take a can" falls back to.
+
+## For admins
+
+Manage the catalogue under **Admin → Items**. You can add a product, retire one
+without losing its history, reorder them, and set which is the default.
+
+Each product also carries its own nutrition figures — volume, sugar, caffeine —
+which is what makes the health side of the statistics meaningful once you stock a
+zero-sugar option next to a regular one.
+
+<Callout>
+  Purchases are recorded per line, so one order can contain several products at
+  different prices. That is what makes per-product billing possible.
+</Callout>

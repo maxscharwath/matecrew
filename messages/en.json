@@ -880,5 +880,21 @@
     "copy": "Copy",
     "copied": "Copied",
     "copyFailed": "Could not copy — select the text and copy it manually."
+  },
+  "whatsNew": {
+    "title": "What's new",
+    "subtitle": "Everything that has shipped in MateCrew, newest first.",
+    "new": "New",
+    "readMore": "Read more",
+    "backToList": "All updates",
+    "markRead": "Mark as read",
+    "markUnread": "Mark as unread",
+    "markAllRead": "Mark all as read",
+    "allMarkedRead": "{count, plural, =0 {Nothing left to mark.} one {1 update marked as read.} other {# updates marked as read.}}",
+    "dialogTitle": "New in MateCrew",
+    "dialogSubtitleOne": "There's an update you haven't seen yet.",
+    "dialogSubtitleMany": "{count, plural, other {There are # updates you haven't seen yet.}}",
+    "dialogLater": "Later",
+    "dialogRead": "See what's new"
   }
 }

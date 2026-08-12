@@ -1,6 +1,7 @@
 import { AppSidebar } from "@/components/app-sidebar";
 import { NavBreadcrumb } from "@/components/nav-breadcrumb";
 import { EmailVerificationBanner } from "@/components/email-verification-banner";
+import { WhatsNewAnnouncer } from "@/components/whats-new/whats-new-announcer";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 
@@ -17,6 +18,7 @@ interface SidebarShellProps {
   readonly avatarUrl?: string;
   readonly emailVerified?: boolean;
   readonly userEmail?: string;
+  readonly unreadWhatsNew?: number;
 }
 
 export function SidebarShell({
@@ -27,6 +29,7 @@ export function SidebarShell({
   avatarUrl,
   emailVerified,
   userEmail,
+  unreadWhatsNew,
 }: SidebarShellProps) {
   return (
     <SidebarProvider>
@@ -36,6 +39,7 @@ export function SidebarShell({
         memberships={memberships}
         currentOfficeId={officeId}
         avatarUrl={avatarUrl}
+        unreadWhatsNew={unreadWhatsNew}
       />
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
@@ -47,6 +51,9 @@ export function SidebarShell({
           <EmailVerificationBanner email={userEmail} />
         )}
         <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        {/* Renders nothing unless there are unread release notes, so it can sit
+            on every signed-in page. */}
+        <WhatsNewAnnouncer />
       </SidebarInset>
     </SidebarProvider>
   );

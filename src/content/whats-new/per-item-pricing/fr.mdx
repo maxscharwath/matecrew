@@ -1,0 +1,46 @@
+export const meta = {
+  title: "Chacun paie ce qu’il a réellement bu",
+  summary:
+    "Les remboursements facturent maintenant chaque produit à son propre prix : un maté bon marché ne subventionne plus un maté cher.",
+};
+
+Dès que les bureaux ont proposé plusieurs produits à des prix différents, un
+partage par tête a cessé d’être équitable. Les remboursements sont désormais
+calculés **par produit**.
+
+## Comment ça marche
+
+Chaque produit a son prix : la moyenne pondérée de ce qui a réellement été payé
+pour lui, en ne comptant que les achats effectués jusqu’à la fin de la période.
+
+<Compare
+  beforeLabel="Avant"
+  afterLabel="Maintenant"
+  before="Un prix moyen pour tout. Ne boire que le moins cher coûtait autant que boire le plus cher."
+  after="Votre coût est la somme, par produit, du nombre bu × le prix de ce produit."
+/>
+
+Celui qui a payé est également crédité **par produit**, proportionnellement à ce
+qu’il a dépensé pour celui-ci. Sur la durée de vie complète d’un achat, un payeur
+récupère exactement ce qu’il a avancé — aucun montant n’apparaît ni ne disparaît
+dans le partage.
+
+## Les périodes restent stables
+
+Les prix d’une période sont arrêtés à sa date de fin : enregistrer une grosse
+commande en septembre ne rebat jamais les cartes d’août. Une fois la période
+générée, ses lignes de paiement sont figées.
+
+Si une correction est réellement nécessaire — facture tardive, consommation
+erronée — un administrateur peut recalculer la période. Les lignes déjà marquées
+payées ne sont pas touchées et leurs montants sont déduits des soldes restants :
+personne ne paie deux fois.
+
+<Callout>
+  Les administrateurs peuvent prévisualiser un mois avant de le générer : part de
+  chacun, prix par produit utilisés et virements qui seraient créés — sans rien
+  enregistrer.
+</Callout>
+
+Un graphique d’historique des prix est aussi disponible sur l’écran des achats,
+pour suivre l’évolution du coût du maté.

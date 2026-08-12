@@ -1,0 +1,52 @@
+export const meta = {
+  title: "Commandez votre maté depuis Claude",
+  summary:
+    "MateCrew se connecte à Claude : commandez un maté, consultez le stock ou réglez les comptes du mois simplement en le demandant.",
+};
+
+MateCrew est désormais disponible dans Claude sous forme de connecteur. Une fois
+relié à votre compte, vous pouvez vous passer de l’application pour l’essentiel
+du quotidien et simplement demander.
+
+<TryIt
+  examples={[
+    "Les commandes de maté sont-elles ouvertes ? Commande-moi un Maté Zero.",
+    "Combien de matés ai-je bus ce mois-ci ?",
+    "Qui doit combien pour juillet ?",
+  ]}
+/>
+
+## Ce que Claude peut faire
+
+Claude agit en **votre nom** — il obtient exactement vos propres droits, jamais
+davantage :
+
+- Passer, changer et annuler vos commandes, ou prendre une canette au frigo
+- Consulter le stock, le planning hebdomadaire et les statistiques du bureau
+- Servir toute une tournée quand c’est vous qui allez les chercher
+- Voir ce que vous devez et ce qu’on vous doit
+
+Si vous êtes administrateur d’un bureau, il peut aussi y gérer le stock, les
+achats, les membres, le planning et les remboursements — mais uniquement dans les
+bureaux où vous l’êtes déjà. Être administrateur à Lausanne ne donne aucun droit
+à Claude sur Genève.
+
+## Mise en place
+
+Rendez-vous sur [votre profil](/profile#claude) et suivez les étapes Claude Code.
+Comptez environ une minute : installer le CLI, ajouter MateCrew avec une seule
+commande, puis se connecter via le navigateur.
+
+<Callout>
+  L’ajout de MateCrew dans l’application Claude **web ou desktop** dépend des
+  paramètres de votre organisation Claude, et la nôtre désactive actuellement les
+  connecteurs personnalisés. Utilisez Claude Code dans le terminal — cette
+  restriction n’y existe pas.
+</Callout>
+
+## Est-ce sûr ?
+
+L’accès est accordé individuellement via une connexion classique, et vous pouvez
+le couper à tout moment depuis **Profil → Connecter à Claude → Applications
+connectées**. Se déconnecter n’affecte que votre propre accès ; vos collègues qui
+utilisent Claude conservent le leur.

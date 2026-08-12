@@ -1,0 +1,36 @@
+export const meta = {
+  title: "Order your maté straight from Slack",
+  summary:
+    "No more switching to the app: press the button in the channel message and you are registered.",
+};
+
+When a maté session opens, MateCrew posts to the office channel. That message is
+now interactive — pressing the button registers you on the spot, with no browser
+redirect.
+
+<Highlights
+  items={[
+    "Order or cancel with one press, straight from the channel",
+    "The message updates itself with the running list of who is in",
+    "Pick a product from the dropdown instead of taking the default",
+    "Out-of-stock products are hidden, so you cannot order what is not there",
+  ]}
+/>
+
+## Linking your account
+
+The first time you press the button, MateCrew matches your Slack email to your
+MateCrew account and links the two automatically. If the emails differ, you get a
+private message with a **Connect** button that opens a one-time link to confirm —
+after that it just works.
+
+## When the session closes
+
+At the cutoff, MateCrew posts a summary with a **mark all served** button, so
+whoever fetched the round can close it out without leaving Slack. That records
+everyone's consumption and deducts the cans from stock.
+
+<Callout>
+  Your reply is private to you where it should be, and in the channel where it is
+  useful — the running list of who ordered stays visible to everyone.
+</Callout>

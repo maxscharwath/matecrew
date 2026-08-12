@@ -1,0 +1,37 @@
+export const meta = {
+  title: "Commandez votre maté directement depuis Slack",
+  summary:
+    "Plus besoin de passer par l’application : appuyez sur le bouton du message dans le canal et vous êtes inscrit.",
+};
+
+À l’ouverture d’une session de maté, MateCrew publie un message dans le canal du
+bureau. Ce message est maintenant interactif : appuyer sur le bouton vous inscrit
+immédiatement, sans redirection vers le navigateur.
+
+<Highlights
+  items={[
+    "Commandez ou annulez en un appui, directement depuis le canal",
+    "Le message se met à jour tout seul avec la liste de ceux qui participent",
+    "Choisissez un produit dans le menu déroulant au lieu du produit par défaut",
+    "Les produits épuisés sont masqués : impossible de commander ce qui n’est pas là",
+  ]}
+/>
+
+## Lier votre compte
+
+La première fois que vous appuyez sur le bouton, MateCrew rapproche votre e-mail
+Slack de votre compte MateCrew et relie les deux automatiquement. Si les adresses
+diffèrent, vous recevez un message privé avec un bouton **Connecter** qui ouvre un
+lien à usage unique pour confirmer — ensuite, tout est transparent.
+
+## À la fermeture de la session
+
+À l’heure de clôture, MateCrew publie un récapitulatif avec un bouton **tout
+marquer comme servi** : celui qui est allé chercher la tournée peut la clôturer
+sans quitter Slack. Cela enregistre la consommation de chacun et déduit les
+canettes du stock.
+
+<Callout>
+  Votre réponse reste privée là où elle doit l’être, et publique là où elle est
+  utile — la liste de ceux qui ont commandé reste visible par tous.
+</Callout>

@@ -21,6 +21,7 @@ import {
   Plus,
   Receipt,
   Settings,
+  Sparkles,
   Timer,
   User,
   Users,
@@ -29,6 +30,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +70,8 @@ interface AppSidebarProps {
   memberships: OrgMembership[];
   currentOfficeId: string;
   avatarUrl?: string;
+  /** Unread release notes, shown as a badge on the What's new entry. */
+  unreadWhatsNew?: number;
 }
 
 export function AppSidebar({
@@ -76,6 +80,7 @@ export function AppSidebar({
   memberships,
   currentOfficeId,
   avatarUrl,
+  unreadWhatsNew = 0,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -191,6 +196,31 @@ export function AppSidebar({
             </SidebarGroupContent>
           </SidebarGroup>
         )}
+        {/* Global, not office-scoped — and deliberately always visible: an
+            unread badge tucked inside a closed dropdown is never seen. */}
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/whats-new")}
+                  onClick={() => setOpenMobile(false)}
+                >
+                  <Link href="/whats-new">
+                    <Sparkles />
+                    <span>{t("whatsNew.title")}</span>
+                    {unreadWhatsNew > 0 && (
+                      <Badge className="ml-auto h-5 min-w-5 justify-center px-1 text-[10px]">
+                        {unreadWhatsNew}
+                      </Badge>
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>

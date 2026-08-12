@@ -4,10 +4,12 @@ import { cookies } from "next/headers";
 import { requireSession, getUserMemberships } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
+import { countUnread } from "@/lib/whats-new/read-state";
 
 export async function getSidebarData() {
   const session = await requireSession();
   const memberships = await getUserMemberships(session.user.id);
+  const unreadWhatsNew = await countUnread(session.user.id);
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
@@ -37,5 +39,6 @@ export async function getSidebarData() {
     userLocale: user?.locale ?? "fr",
     emailVerified: session.user.emailVerified,
     userEmail: session.user.email,
+    unreadWhatsNew,
   };
 }

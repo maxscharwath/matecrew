@@ -5,6 +5,7 @@ import { OfficeCookie } from "@/components/office-cookie";
 import { LocaleSync } from "@/components/locale-sync";
 import { JoinRequestScreen } from "@/components/join-request-screen";
 import { SidebarShell } from "@/components/sidebar-shell";
+import { countUnread } from "@/lib/whats-new/read-state";
 import { redirect } from "next/navigation";
 
 interface Props {
@@ -45,9 +46,13 @@ export async function MembershipGate({ children, officeId }: Props) {
     );
   }
 
-  const [memberships, avatarUrl] = await Promise.all([
+  const [memberships, avatarUrl, unreadWhatsNew] = await Promise.all([
     getUserMemberships(session.user.id),
     resolveAvatarUrl(membership.user.image),
+    // This gate builds the shell itself rather than going through
+    // getSidebarData(), so the unread count has to be fetched here too or the
+    // badge would silently read zero on every office page.
+    countUnread(session.user.id),
   ]);
   const isAdmin = membership.roles.includes("ADMIN");
 
@@ -62,6 +67,7 @@ export async function MembershipGate({ children, officeId }: Props) {
       avatarUrl={avatarUrl}
       emailVerified={session.user.emailVerified}
       userEmail={session.user.email}
+      unreadWhatsNew={unreadWhatsNew}
     >
       <OfficeCookie officeId={officeId} />
       <LocaleSync userLocale={membership.user.locale ?? "fr"} />

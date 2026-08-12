@@ -71,6 +71,8 @@ model User {
   oauthAccessTokens OauthAccessToken[]
   oauthConsents     OauthConsent[]
 
+  articleReads      ArticleRead[]
+
   // App relations
   memberships        Membership[]
   joinRequests       JoinRequest[]
@@ -188,6 +190,25 @@ model OauthConsent {
   updatedAt    DateTime         @updatedAt
 
   @@index([clientId])
+  @@index([userId])
+}
+
+// ─── Release notes ──────────────────────────────────────
+
+/// One row per (user, article) once that user has read it. Absence means unread,
+/// so a newly published article is unread for everyone without a backfill, and a
+/// user created later doesn't inherit a pile of "read" rows.
+///
+/// `slug` deliberately has no foreign key: articles are MDX files in the repo,
+/// not database rows. A slug that no longer exists is simply ignored when the
+/// unread count is computed against the current catalogue.
+model ArticleRead {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug   String
+  readAt DateTime @default(now())
+
+  @@id([userId, slug])
   @@index([userId])
 }
 
