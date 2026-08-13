@@ -5,6 +5,7 @@ import { toISODateString } from "@/lib/date";
 import { McpToolError, resolveOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
+import { roundCents } from "@/lib/money";
 
 /**
  * The money side, from a member's point of view. Reimbursement periods are
@@ -75,9 +76,9 @@ export function registerReimbursementTools(server: McpServer): void {
 
       return {
         office: scope.officeName,
-        pendingTotalYouOwe: round2(owe),
-        pendingTotalOwedToYou: round2(owed),
-        netBalance: round2(owe - owed),
+        pendingTotalYouOwe: roundCents(owe),
+        pendingTotalOwedToYou: roundCents(owed),
+        netBalance: roundCents(owe - owed),
         lines: rows,
         note:
           rows.length === 0
@@ -155,8 +156,4 @@ export function registerReimbursementTools(server: McpServer): void {
       };
     },
   );
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }

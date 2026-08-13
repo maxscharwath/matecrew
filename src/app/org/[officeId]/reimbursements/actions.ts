@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireMembership, requireOrgRoles } from "@/lib/auth-utils";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { generateUserSettlementPdf } from "@/lib/pdf-export";
+import { roundCents } from "@/lib/money";
 import {
   buildUserSettlementKey,
   fileExists,
@@ -135,10 +136,11 @@ export async function exportUserPeriodPdf(
 
   const userShare = result.shares.find((s) => s.userId === userId);
 
-  // The user's effective average price across the items they drank.
+  // The user's average price across the items they drank. Their share of the
+  // missing cans is left out — it is a loss, not a price — and shown separately.
   const userAvgPrice =
     userShare && userShare.qty > 0
-      ? Math.round((userShare.costShare / userShare.qty) * 100) / 100
+      ? roundCents((userShare.costShare - userShare.lossShare) / userShare.qty)
       : result.avgUnitPrice;
 
   const userLines = period.lines.map((l) => {
@@ -164,6 +166,7 @@ export async function exportUserPeriodPdf(
     avgUnitPrice: userAvgPrice,
     qty: userShare?.qty ?? 0,
     costShare: userShare?.costShare ?? 0,
+    lossShare: userShare?.lossShare ?? 0,
     amountPaid: userShare?.amountPaid ?? 0,
     netOwed: userShare?.netOwed ?? 0,
     lines: userLines,

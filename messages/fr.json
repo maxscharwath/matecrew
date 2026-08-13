@@ -77,7 +77,8 @@
     "members": "Membres",
     "accounts": "Comptes",
     "switchOffice": "Changer de bureau",
-    "items": "Articles"
+    "items": "Articles",
+    "inventory": "Inventaire"
   },
   "home": {
     "noOfficeTitle": "Pas de bureau",
@@ -381,7 +382,8 @@
       "SERVED": "Servi",
       "UNSERVED": "Annulé",
       "ADJUSTMENT": "Ajustement",
-      "PURCHASE": "Achat"
+      "PURCHASE": "Achat",
+      "INVENTORY": "Inventaire"
     },
     "chartTitle": "Niveau de stock · {office}",
     "chartSubtitle": "30 derniers jours",
@@ -425,8 +427,7 @@
     "purchaseRecorded": "Achat enregistré",
     "noPurchases": "Aucun achat enregistré.",
     "priceHistory": "Historique des prix",
-    "priceHistoryDescription": "Prix unitaire par article au fil des commandes. La moyenne pondérée est le prix utilisé pour la facturation.",
-    "runningAvg": "moy.",
+    "priceHistoryDescription": "Prix de facturation de chaque article au fil des commandes : moyenne mobile sur le stock restant. Les points marquent les achats réels.",
     "status": "Statut",
     "qty": "Qté",
     "perCanHeader": "Par canette",
@@ -440,11 +441,15 @@
     "selectItem": "Choisir un article",
     "addLine": "Ajouter un article",
     "removeLine": "Supprimer la ligne",
-    "linePrice": "Prix (CHF)",
+    "linePrice": "Total ligne (CHF)",
     "perUnit": "{price} / unité",
     "orderTotal": "Total commande : CHF {total}",
     "addAtLeastOneLine": "Ajoutez au moins une ligne d'article",
-    "items": "Articles"
+    "items": "Articles",
+    "billingPrice": "prix facturé",
+    "paidPrice": "payé ce jour-là",
+    "estimatedPrice": "prix moyen de l'office, pas encore d'achat propre",
+    "linePricePlaceholder": "Total"
   },
   "reimbursements": {
     "adminTitle": "Règlements",
@@ -519,7 +524,11 @@
     "syncThisPeriod": "Synchroniser cette période ?",
     "syncDescription": "Recalcule les paiements en fonction des données de consommation actuelles. Les paiements déjà marqués comme payés seront conservés, seuls les paiements en attente seront mis à jour.",
     "syncPeriod": "Synchroniser",
-    "periodSynced": "Période synchronisée avec succès"
+    "periodSynced": "Période synchronisée avec succès",
+    "shrinkage": "{qty} canettes manquantes à l'inventaire (CHF {amount}), réparties entre les consommateurs de la période au prorata de ce qu'ils ont bu.",
+    "surplus": "{qty} canettes de plus qu'attendu à l'inventaire (CHF {amount}), créditées aux consommateurs de la période.",
+    "shrinkageUnallocated": "CHF {amount} n'ont pu être imputés à personne (aucune consommation sur la période) et restent à la charge de l'acheteur.",
+    "ofWhichLoss": "dont {amount} de coulage"
   },
   "members": {
     "title": "Membres",
@@ -682,7 +691,11 @@
     "balanceLabel": "Solde",
     "total": "Total",
     "yourShare": "Votre part",
-    "youPaidLabel": "Vous avez payé"
+    "youPaidLabel": "Vous avez payé",
+    "shrinkageNote": "Inventaire : {qty} canettes manquantes (CHF {amount}), réparties entre les consommateurs de la période au prorata.",
+    "surplusNote": "Inventaire : {qty} canettes de plus qu'attendu (CHF {amount}), créditées aux consommateurs de la période.",
+    "yourShrinkageShare": "dont CHF {amount} de canettes manquantes",
+    "shrinkageUnallocatedNote": "Dont CHF {amount} qui n'ont pu être imputés à personne et restent à la charge de l'acheteur."
   },
   "profile": {
     "title": "Profil",
@@ -916,5 +929,33 @@
     "dialogSubtitleMany": "{count, plural, one {# nouveauté que vous n’avez pas encore vue.} other {# nouveautés que vous n’avez pas encore vues.}}",
     "dialogLater": "Plus tard",
     "dialogRead": "Voir les nouveautés"
+  },
+  "inventory": {
+    "title": "Inventaire",
+    "subtitle": "Compter le frigo pour trouver les canettes manquantes. L'écart est facturé aux consommateurs de la période, pas à celui qui a acheté.",
+    "newCount": "Nouveau comptage",
+    "newCountDescription": "Saisissez ce qu'il y a réellement dans le frigo. Laissez vide un article que vous n'avez pas compté.",
+    "expected": "attendu {qty}",
+    "countedPlaceholder": "compté",
+    "countedFor": "Quantité comptée pour {item}",
+    "note": "Note",
+    "notePlaceholder": "Optionnel (ex. comptage de fin de mois)",
+    "fillToSee": "Saisissez au moins un article pour voir l'écart.",
+    "gapSummary": "{missing} manquantes, {surplus} en trop",
+    "recording": "Enregistrement...",
+    "recordCount": "Enregistrer l'inventaire",
+    "countMatches": "Inventaire enregistré : le stock correspond.",
+    "countRecorded": "Inventaire enregistré : {missing} manquantes, {surplus} en trop.",
+    "history": "Inventaires précédents",
+    "historyDescription": "Chaque écart est valorisé au prix que portaient les canettes ce jour-là.",
+    "noCounts": "Aucun inventaire enregistré pour l'instant.",
+    "date": "Date",
+    "countedBy": "Compté par",
+    "gap": "Écart",
+    "gapValue": "Valeur",
+    "noGap": "Aucun écart",
+    "errors": {
+      "noItems": "Saisissez au moins un article compté."
+    }
   }
 }

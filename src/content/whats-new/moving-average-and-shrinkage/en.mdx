@@ -1,0 +1,81 @@
+export const meta = {
+  title: "A price that tracks the fridge, and missing cans finally billed",
+  summary:
+    "The billing price is now a moving average over the stock still on the shelf, and a stock count charges the missing cans to the drinkers instead of to whoever paid for the order.",
+};
+
+Two things were wrong with the price. Both are fixed.
+
+## The price no longer drags the past around
+
+Until now an item was billed at the average of **every** purchase ever made. A
+bulk order from February kept pushing the price up months after its last can was
+gone.
+
+<Compare
+  beforeLabel="Before"
+  afterLabel="Now"
+  before="Average of every purchase ever. The price crept towards the real one very slowly, sometimes never."
+  after="Moving average over the stock still in the fridge. An order leaves the calculation as soon as its cans are drunk."
+/>
+
+On a real case: three orders at 1.5336, 1.5334 and then 1.42, the old model
+billed 1.52 for cans that had cost 1.42. The new one bills 1.48, and drops to
+1.42 as soon as the leftovers from the older order run out.
+
+<TrendChart
+  title="Billed price per can across orders"
+  unit=" CHF"
+  caption="The price follows the actual stock instead of remembering cans drunk long ago."
+  data={[
+    { label: "5 Feb", value: 1.53 },
+    { label: "28 Apr", value: 1.53 },
+    { label: "7 Jul", value: 1.48 },
+    { label: "after", value: 1.42 },
+  ]}
+/>
+
+Unconsumed stock keeps its value and carries it into the next period, where it
+will actually be drunk. Drinking a can does not move the average — only a
+delivery does.
+
+## The price evolution applies to every item
+
+An item that had never been bought was billed at **CHF 0.00**: nobody paid, and
+the buyer swallowed the difference. An item with no history of its own is now
+billed at the office-wide price at that moment.
+
+On the Purchases chart, every item now has a line across the whole timeline.
+Dashed where the price comes from the office-wide average, solid once the item
+has purchases of its own, with a dot at every order that contained it.
+
+## The cans that vanish
+
+This was the real hole: MateCrew only billed a can if somebody recorded it. A can
+taken without being declared was billed to nobody, and whoever fronted the money
+for the order never saw it again.
+
+<Callout>
+  A new **Inventory** screen lets you count the fridge. The gap between the count
+  and what the app believes is shared out across the people who drank during the
+  period, in proportion to how much they drank. The buyer is reimbursed in full.
+</Callout>
+
+<SplitBar
+  title="40 cans missing, CHF 59.39"
+  unit=" CHF"
+  caption="Shared out by consumption over the period, rather than left on the buyer."
+  data={[
+    { label: "Heavy drinkers", value: 38 },
+    { label: "Occasional drinkers", value: 15 },
+    { label: "Everyone else", value: 6.39 },
+  ]}
+/>
+
+The existing stock adjustment stays what it was: a free bookkeeping repair with
+no effect on money. Billing is what the inventory count does.
+
+Every count is kept, with its gap in cans and in francs, valued at the price the
+cans were carrying that day. The gap also shows on the reimbursement period it
+falls in, and everyone sees their share of the shrinkage next to their share of
+what they drank.

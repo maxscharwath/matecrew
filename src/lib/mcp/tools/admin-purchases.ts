@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
+import { roundCents } from "@/lib/money";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { stockDeltaOps } from "@/lib/stock";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
@@ -85,25 +86,38 @@ export function registerAdminPurchaseTools(server: McpServer): void {
       name: "matecrew_admin_create_purchase",
       title: "Record a purchase order",
       description:
-        "Record a maté order that was placed. Stock is NOT increased yet — call matecrew_admin_mark_delivered when it arrives. The person who paid gets credited in the reimbursement calculation, so name them correctly. Invoice files can only be attached from the web app.",
+        "Record a maté order that was placed. Stock is NOT increased yet — call matecrew_admin_mark_delivered when it arrives. The person who paid gets credited in the reimbursement calculation, so name them correctly. Invoice files can only be attached from the web app. Price each line with `unitPrice` when the invoice quotes a price per can — never split the invoice total across the lines, which silently invents a different price per can for every line.",
       inputSchema: {
         office: officeArg,
         lines: z
           .array(
-            z.object({
-              item: z.string().describe("Item id or name."),
-              qty: z
-                .number()
-                .int()
-                .positive()
-                .describe("Number of cans bought on this line."),
-              total: z
-                .number()
-                .positive()
-                .describe(
-                  "Total price for this line (not per can) — the unit price is derived from total / qty.",
-                ),
-            }),
+            z
+              .object({
+                item: z.string().describe("Item id or name."),
+                qty: z
+                  .number()
+                  .int()
+                  .positive()
+                  .describe("Number of cans bought on this line."),
+                unitPrice: z
+                  .number()
+                  .positive()
+                  .optional()
+                  .describe(
+                    "Price of ONE can on this line. Use this whenever the invoice quotes a per-can price — it is the safer of the two.",
+                  ),
+                total: z
+                  .number()
+                  .positive()
+                  .optional()
+                  .describe(
+                    "Price of this line as a whole, i.e. qty × the per-can price. NOT the order total: an order total divided by the number of lines is wrong unless every line happens to hold the same number of cans.",
+                  ),
+              })
+              .refine(
+                (l) => (l.unitPrice == null) !== (l.total == null),
+                "Give either unitPrice or total for a line, not both and not neither.",
+              ),
           )
           .min(1)
           .describe("One entry per item bought."),
@@ -142,18 +156,21 @@ export function registerAdminPurchaseTools(server: McpServer): void {
             `No item called "${line.item}" in ${scope.officeName}.`,
           );
         }
+        // Whichever half of the price the caller gave, the other is derived —
+        // the pair is always consistent with the quantity.
+        const lineTotal = line.total ?? line.unitPrice! * line.qty;
         resolved.push({
           itemId: item.id,
           itemName: item.name,
           qty: line.qty,
-          unitPrice: Math.round((line.total / line.qty) * 100) / 100,
-          lineTotal: Math.round(line.total * 100) / 100,
+          unitPrice: roundCents(lineTotal / line.qty),
+          lineTotal: roundCents(lineTotal),
         });
       }
 
-      const totalPrice =
-        Math.round(resolved.reduce((sum, l) => sum + l.lineTotal, 0) * 100) /
-        100;
+      const totalPrice = roundCents(
+        resolved.reduce((sum, l) => sum + l.lineTotal, 0),
+      );
 
       const batch = await prisma.purchaseBatch.create({
         data: {

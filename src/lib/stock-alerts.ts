@@ -53,3 +53,13 @@ export async function checkAndAlertLowStock(
     });
   }
 }
+
+/** Re-checks several items at once. Never throws — alerts are best-effort. */
+export async function checkAndAlertLowStockMany(
+  officeId: string,
+  itemIds: string[],
+): Promise<void> {
+  await Promise.allSettled(
+    itemIds.map((itemId) => checkAndAlertLowStock(officeId, itemId)),
+  );
+}

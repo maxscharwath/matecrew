@@ -249,9 +249,12 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
   const userShare = share?.costShare ?? 0;
   const netOwed = share?.netOwed ?? 0;
   const hasPurchaseData = preview.avgUnitPrice > 0;
-  // Effective price for the mix of items this user actually drank.
+  // Price of the mix of items this user actually drank. Their share of the
+  // missing cans is excluded — it is a loss, not the price of a can.
   const userAvgPrice =
-    share && share.qty > 0 ? share.costShare / share.qty : preview.avgUnitPrice;
+    share && share.qty > 0
+      ? (share.costShare - share.lossShare) / share.qty
+      : preview.avgUnitPrice;
 
   const owedLines = preview.lines
     .filter((l) => l.fromUserId === userId)

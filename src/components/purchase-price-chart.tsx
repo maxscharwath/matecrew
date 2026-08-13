@@ -13,25 +13,39 @@ ChartJS.register(LineElement, PointElement);
 
 export interface PriceSeries {
   itemName: string;
-  /** Unit price at each order date; null where the order had no line for this item. */
-  prices: (number | null)[];
-  /** Cumulative weighted-average price after each order (the billing price). */
-  runningAvg: (number | null)[];
+  /** Billing price after each order — the moving average over remaining stock. */
+  billing: number[];
+  /** What was actually paid per can, at the orders that included this item. */
+  purchase: (number | null)[];
+  /** True where the billing price is the office-wide fallback, not this item's own. */
+  estimated: boolean[];
 }
 
 interface PurchasePriceChartProps {
   /** Order dates (ISO strings), ascending. */
   readonly dates: string[];
   readonly series: PriceSeries[];
-  readonly avgLabel: string;
+  readonly billingLabel: string;
+  readonly paidLabel: string;
+  readonly estimatedLabel: string;
 }
 
 /**
- * Unit price per item across orders. Stepped line — a price holds until the
- * next order changes it. The tooltip also shows the running weighted average,
- * which is the price reimbursements actually bill at.
+ * Billing price per item across orders. The line is what reimbursements charge:
+ * a moving average over the stock still in the fridge, so it steps at each
+ * delivery and holds until the next one.
+ *
+ * Every item spans the whole timeline, including before its first order — there
+ * the office-wide price applies, drawn dashed. Dots mark orders that actually
+ * contained the item, and the tooltip gives the price paid that day.
  */
-export function PurchasePriceChart({ dates, series, avgLabel }: PurchasePriceChartProps) {
+export function PurchasePriceChart({
+  dates,
+  series,
+  billingLabel,
+  paidLabel,
+  estimatedLabel,
+}: PurchasePriceChartProps) {
   const theme = useChartTheme();
   const locale = useLocale();
 
@@ -51,17 +65,21 @@ export function PurchasePriceChart({ dates, series, avgLabel }: PurchasePriceCha
           labels,
           datasets: series.map((s, i) => ({
             label: s.itemName,
-            data: s.prices,
+            data: s.billing,
             borderColor: theme.series[i],
             backgroundColor: theme.series[i],
             borderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 5,
+            // A dot only where this item was actually bought.
+            pointRadius: (ctx) => (s.purchase[ctx.dataIndex] != null ? 4 : 0),
+            pointHoverRadius: (ctx) => (s.purchase[ctx.dataIndex] != null ? 5 : 0),
             // 2px surface ring so overlapping points stay separable.
             pointBorderColor: theme.surface,
             pointBorderWidth: 2,
             stepped: "after" as const,
-            spanGaps: true,
+            segment: {
+              borderDash: (ctx) =>
+                s.estimated[ctx.p0DataIndex] ? [4, 4] : undefined,
+            },
           })),
         }}
         options={{
@@ -89,14 +107,18 @@ export function PurchasePriceChart({ dates, series, avgLabel }: PurchasePriceCha
             legend: legendOptions(theme),
             tooltip: {
               ...tooltipOptions(theme),
-              filter: (item) => item.raw != null,
               callbacks: {
                 label: (ctx) => {
-                  const price = (ctx.raw as number).toFixed(2);
-                  const avg = series[ctx.datasetIndex]?.runningAvg[ctx.dataIndex];
-                  const avgText =
-                    avg != null ? ` (${avgLabel}: CHF ${avg.toFixed(2)})` : "";
-                  return `${ctx.dataset.label}: CHF ${price}${avgText}`;
+                  const s = series[ctx.datasetIndex];
+                  const billing = (ctx.raw as number).toFixed(2);
+                  const paid = s?.purchase[ctx.dataIndex];
+                  const suffix =
+                    paid != null
+                      ? ` (${paidLabel}: CHF ${paid.toFixed(2)})`
+                      : s?.estimated[ctx.dataIndex]
+                        ? ` (${estimatedLabel})`
+                        : "";
+                  return `${ctx.dataset.label}: ${billingLabel} CHF ${billing}${suffix}`;
                 },
               },
             },

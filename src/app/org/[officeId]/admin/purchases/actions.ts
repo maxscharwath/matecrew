@@ -12,6 +12,7 @@ import {
 } from "@/lib/storage";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { stockDeltaOps } from "@/lib/stock";
+import { roundCents } from "@/lib/money";
 import { getTranslations } from "next-intl/server";
 
 const ALLOWED_MIME_TYPES = [
@@ -80,11 +81,12 @@ export async function createPurchaseBatch(
   const lineData = lines.map((l) => ({
     itemId: l.itemId,
     qty: l.qty,
-    unitPrice: Math.round((l.total / l.qty) * 100) / 100,
-    lineTotal: Math.round(l.total * 100) / 100,
+    unitPrice: roundCents(l.total / l.qty),
+    lineTotal: roundCents(l.total),
   }));
-  const totalPrice =
-    Math.round(lineData.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;
+  const totalPrice = roundCents(
+    lineData.reduce((sum, l) => sum + l.lineTotal, 0),
+  );
 
   // Extract and validate files
   const files = formData.getAll("invoices") as File[];

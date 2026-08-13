@@ -180,7 +180,7 @@ export function PurchaseForm({ officeId, members, items }: PurchaseFormProps) {
                         type="number"
                         step="0.01"
                         min="0.01"
-                        placeholder={t("purchases.linePrice")}
+                        placeholder={t("purchases.linePricePlaceholder")}
                         value={line.total}
                         onChange={(e) => updateLine(line.id, "total", e.target.value)}
                         className="text-right tabular-nums"

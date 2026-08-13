@@ -226,6 +226,31 @@ function SettlementDocument({
             />
           </View>
 
+          {/* Shrinkage is money people are being charged for cans they did not
+              drink, so it is stated rather than folded silently into the total. */}
+          {data.lossQty !== 0 && (
+            <View style={tw("mb-8 -mt-6")}>
+              <Text style={tw("text-[8px] text-subtle")}>
+                {data.lossQty > 0
+                  ? t("pdf.shrinkageNote", {
+                      qty: data.lossQty,
+                      amount: data.lossCost.toFixed(2),
+                    })
+                  : t("pdf.surplusNote", {
+                      qty: -data.lossQty,
+                      amount: Math.abs(data.lossCost).toFixed(2),
+                    })}
+              </Text>
+              {Math.abs(data.unallocatedLossCost) > 0.005 && (
+                <Text style={tw("text-[8px] text-subtle mt-1")}>
+                  {t("pdf.shrinkageUnallocatedNote", {
+                    amount: data.unallocatedLossCost.toFixed(2),
+                  })}
+                </Text>
+              )}
+            </View>
+          )}
+
           {/* Per-item prices */}
           {data.itemPrices.length > 0 && (
             <View style={tw("mb-8")}>
@@ -323,6 +348,11 @@ export async function generateSettlementPdf(data: {
   totalConsumption: number;
   totalCost: number;
   avgUnitPrice: number;
+  /** Cans missing at inventory over the period, and what they were worth. */
+  lossQty: number;
+  lossCost: number;
+  /** Shrinkage nobody could be billed for; it stayed on the buyer. */
+  unallocatedLossCost: number;
   itemPrices: ItemPrice[];
   shares: ConsumptionShare[];
   lines: PaymentLine[];
@@ -430,6 +460,13 @@ function UserSettlementDocument({
                 <Text style={tw("font-bold text-[11px] text-ink")}>
                   CHF {data.costShare.toFixed(2)}
                 </Text>
+                {Math.abs(data.lossShare) > 0.005 && (
+                  <Text style={tw("text-[7px] text-subtle mt-1")}>
+                    {t("pdf.yourShrinkageShare", {
+                      amount: data.lossShare.toFixed(2),
+                    })}
+                  </Text>
+                )}
               </View>
               <View style={tw("flex-1")} />
             </View>
@@ -499,10 +536,12 @@ export async function generateUserSettlementPdf(data: {
   userName: string;
   startDate: Date;
   endDate: Date;
-  /** The user's effective average price (their costShare / qty). */
+  /** The user's average price per can, shrinkage excluded. */
   avgUnitPrice: number;
   qty: number;
   costShare: number;
+  /** Part of `costShare` that is this person's share of the missing cans. */
+  lossShare: number;
   amountPaid: number;
   netOwed: number;
   lines: UserPaymentLine[];

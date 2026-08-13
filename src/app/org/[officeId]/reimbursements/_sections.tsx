@@ -3,7 +3,8 @@ import { Eye, CupSoda, Banknote, CircleCheckBig, Wallet } from "lucide-react";
 import { getTranslations, getLocale } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
+import { buildCostingLedger } from "@/lib/costing";
+import { calculateReimbursements, sliceLedger } from "@/lib/reimbursement-calc";
 import { UserReimbursementCard } from "@/components/user-reimbursement-card";
 import { PaymentLineRow } from "@/components/payment-line-row";
 import { ConsumptionHistoryCard } from "@/components/consumption-history-card";
@@ -56,13 +57,12 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
     },
   });
 
+  // One replay for every period on the screen — see `sliceLedger`.
+  const ledger = await buildCostingLedger(officeId);
+
   const periodsWithData = await Promise.all(
     periods.map(async (period) => {
-      const result = await calculateReimbursements(
-        officeId,
-        period.startDate,
-        period.endDate,
-      );
+      const result = sliceLedger(ledger, period.startDate, period.endDate);
 
       const userShare = result.shares.find((s) => s.userId === userId);
 
@@ -85,6 +85,7 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
         label: formatPeriodLabel(period.startDate, period.endDate),
         qty: userShare?.qty ?? 0,
         costShare: userShare?.costShare ?? 0,
+        lossShare: userShare?.lossShare ?? 0,
         amountPaid: userShare?.amountPaid ?? 0,
         netOwed: userShare?.netOwed ?? 0,
         lines: userLines,
@@ -371,6 +372,13 @@ export async function PreviewSection({ officeId, userId }: SectionProps) {
             <p className="mt-1 text-base font-semibold">
               CHF {(previewShare?.costShare ?? 0).toFixed(2)}
             </p>
+            {Math.abs(previewShare?.lossShare ?? 0) > 0.005 && (
+              <p className="text-xs text-muted-foreground">
+                {t("reimbursements.ofWhichLoss", {
+                  amount: (previewShare?.lossShare ?? 0).toFixed(2),
+                })}
+              </p>
+            )}
           </div>
           <div className="rounded-lg bg-muted/50 p-3">
             <p className="text-xs text-muted-foreground">{t('reimbursements.youPaid')}</p>
@@ -468,6 +476,7 @@ export async function PeriodsSection({ officeId, userId }: SectionProps) {
           label={p.label}
           qty={p.qty}
           costShare={p.costShare}
+          lossShare={p.lossShare}
           amountPaid={p.amountPaid}
           lines={p.lines}
           // Open anything still owing, so nothing actionable hides behind a

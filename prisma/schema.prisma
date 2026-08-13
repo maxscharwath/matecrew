@@ -30,6 +30,11 @@ enum StockMovementReason {
   UNSERVED
   ADJUSTMENT
   PURCHASE
+  /// Gap found by a physical stock count. Unlike ADJUSTMENT — which only
+  /// repairs bookkeeping and is free — an INVENTORY delta moves money: the
+  /// missing cans are billed to the period's drinkers so the buyer is not the
+  /// one absorbing the shrinkage.
+  INVENTORY
 }
 
 enum PurchaseStatus {
@@ -83,6 +88,7 @@ model User {
   reimbursementsFrom ReimbursementLine[] @relation("ReimbursementFrom")
   reimbursementsTo   ReimbursementLine[] @relation("ReimbursementTo")
   stockMovements     StockMovement[]
+  stockCounts        StockCount[]        @relation("CountedBy")
 }
 
 model Session {
@@ -236,6 +242,7 @@ model Office {
   consumptionEntries   ConsumptionEntry[]
   reimbursementPeriods ReimbursementPeriod[]
   mateSessions         MateSession[]
+  stockCounts          StockCount[]
 }
 
 /// A consumable managed per office (e.g. "Maté Classic", "Maté Zero", "Ginger").
@@ -261,6 +268,7 @@ model Item {
   dailyRequests      DailyRequest[]
   consumptionEntries ConsumptionEntry[]
   purchaseLines      PurchaseLine[]
+  stockCountLines    StockCountLine[]
 
   @@unique([officeId, name])
   @@index([officeId])
@@ -362,6 +370,39 @@ model StockMovement {
   @@index([officeId, itemId])
 }
 
+/// One physical count of the fridge: what was actually on the shelf versus what
+/// the app believed. Each line with a non-zero delta emits an INVENTORY stock
+/// movement, and the missing cans are billed as shrinkage on the period that
+/// contains `countedAt`.
+model StockCount {
+  id              String   @id @default(cuid())
+  officeId        String
+  office          Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  countedAt       DateTime @default(now())
+  countedByUserId String
+  countedBy       User     @relation("CountedBy", fields: [countedByUserId], references: [id])
+  note            String?
+  createdAt       DateTime @default(now())
+
+  lines StockCountLine[]
+
+  @@index([officeId, countedAt])
+}
+
+model StockCountLine {
+  id          String     @id @default(cuid())
+  countId     String
+  count       StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  expectedQty Int
+  countedQty  Int
+  /// countedQty - expectedQty: negative is shrinkage, positive is a surplus.
+  delta       Int
+
+  @@index([countId])
+}
+
 /// A purchase order. Can span several item types via its `lines`; `totalPrice`
 /// is the order total (sum of the line totals).
 model PurchaseBatch {
@@ -382,6 +423,8 @@ model PurchaseBatch {
   lines              PurchaseLine[]
   invoices           InvoiceFile[]
   consumptionEntries ConsumptionEntry[]
+
+  @@index([officeId])
 }
 
 /// A single item line within a purchase order.

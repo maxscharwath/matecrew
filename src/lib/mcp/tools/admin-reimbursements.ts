@@ -15,6 +15,7 @@ import {
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
+import { roundCents } from "@/lib/money";
 
 const monthArg = z.number().int().min(1).max(12).describe("Month, 1-12.");
 const yearArg = z.number().int().min(2000).max(2100).describe("Four-digit year.");
@@ -69,11 +70,10 @@ export function registerAdminReimbursementTools(server: McpServer): void {
             year: p.year,
             startDate: toISODateString(p.startDate),
             endDate: toISODateString(p.endDate),
-            totalAmount:
-              Math.round(
-                p.lines.reduce((sum, l) => sum + l.amount.toNumber(), 0) * 100,
-              ) / 100,
-            outstanding: Math.round(outstanding * 100) / 100,
+            totalAmount: roundCents(
+              p.lines.reduce((sum, l) => sum + l.amount.toNumber(), 0),
+            ),
+            outstanding: roundCents(outstanding),
             allSettled: p.lines.every((l) => l.status === "PAID"),
             lines: p.lines.map((l) => ({
               lineId: l.id,
@@ -125,25 +125,35 @@ export function registerAdminReimbursementTools(server: McpServer): void {
           to: toISODateString(endDate),
         },
         totalConsumption: result.totalConsumption,
-        totalCost: round2(result.totalCost),
-        avgUnitPrice: round2(result.avgUnitPrice),
+        totalCost: roundCents(result.totalCost),
+        drinkCost: roundCents(result.drinkCost),
+        avgUnitPrice: roundCents(result.avgUnitPrice),
+        shrinkage: {
+          qty: result.lossQty,
+          cost: roundCents(result.lossCost),
+          unallocatedCost: roundCents(result.unallocatedLossCost),
+          note: "Cans missing at a stock count, billed to this period's drinkers pro rata. Negative qty means more cans were found than expected.",
+        },
         itemPrices: result.itemPrices.map((i) => ({
           item: i.itemName,
-          unitPrice: round2(i.unitPrice),
+          unitPrice: roundCents(i.unitPrice),
           qtyConsumed: i.qtyConsumed,
-          cost: round2(i.cost),
+          cost: roundCents(i.cost),
+          missingQty: i.lossQty,
+          shrinkageCost: roundCents(i.lossCost),
         })),
         shares: result.shares.map((s) => ({
           name: s.userName,
           qty: s.qty,
-          costShare: round2(s.costShare),
-          amountPaid: round2(s.amountPaid),
-          netOwed: round2(s.netOwed),
+          costShare: roundCents(s.costShare),
+          ofWhichShrinkage: roundCents(s.lossShare),
+          amountPaid: roundCents(s.amountPaid),
+          netOwed: roundCents(s.netOwed),
         })),
         proposedTransfers: result.lines.map((l) => ({
           from: l.fromUserName,
           to: l.toUserName,
-          amount: round2(l.amount),
+          amount: roundCents(l.amount),
         })),
         note: "Nothing was saved. Use matecrew_admin_generate_periods to create the period for real.",
       };
@@ -325,8 +335,4 @@ export function registerAdminReimbursementTools(server: McpServer): void {
       };
     },
   );
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }

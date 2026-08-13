@@ -77,7 +77,8 @@
     "members": "Members",
     "accounts": "Accounts",
     "switchOffice": "Switch office",
-    "items": "Items"
+    "items": "Items",
+    "inventory": "Inventory"
   },
   "home": {
     "noOfficeTitle": "No Office",
@@ -381,7 +382,8 @@
       "SERVED": "Served",
       "UNSERVED": "Unserved",
       "ADJUSTMENT": "Adjustment",
-      "PURCHASE": "Purchase"
+      "PURCHASE": "Purchase",
+      "INVENTORY": "Inventory"
     },
     "chartTitle": "Stock Level · {office}",
     "chartSubtitle": "Last 30 days",
@@ -425,8 +427,7 @@
     "purchaseRecorded": "Purchase recorded",
     "noPurchases": "No purchases recorded yet.",
     "priceHistory": "Price History",
-    "priceHistoryDescription": "Unit price per item across orders. The running average is the price used for billing.",
-    "runningAvg": "avg",
+    "priceHistoryDescription": "Billing price per item across orders: a moving average over the stock still in the fridge. Dots mark actual purchases.",
     "status": "Status",
     "qty": "Qty",
     "perCanHeader": "Per Can",
@@ -440,11 +441,15 @@
     "selectItem": "Select an item",
     "addLine": "Add item",
     "removeLine": "Remove line",
-    "linePrice": "Price (CHF)",
+    "linePrice": "Line total (CHF)",
     "perUnit": "{price} / unit",
     "orderTotal": "Order total: CHF {total}",
     "addAtLeastOneLine": "Add at least one item line",
-    "items": "Items"
+    "items": "Items",
+    "billingPrice": "billed",
+    "paidPrice": "paid that day",
+    "estimatedPrice": "office-wide price, no purchase of its own yet",
+    "linePricePlaceholder": "Total"
   },
   "reimbursements": {
     "adminTitle": "Settlements",
@@ -519,7 +524,11 @@
     "syncThisPeriod": "Sync this period?",
     "syncDescription": "Recalculate payments based on current consumption data. Already-paid payments will be preserved, only pending payments will be updated.",
     "syncPeriod": "Sync Period",
-    "periodSynced": "Period synced successfully"
+    "periodSynced": "Period synced successfully",
+    "shrinkage": "{qty} cans missing at inventory (CHF {amount}), shared out across the period's drinkers in proportion to what they drank.",
+    "surplus": "{qty} more cans than expected at inventory (CHF {amount}), credited back to the period's drinkers.",
+    "shrinkageUnallocated": "CHF {amount} could not be billed to anyone (nothing was drunk in this period) and stays on the buyer.",
+    "ofWhichLoss": "incl. {amount} shrinkage"
   },
   "members": {
     "title": "Members",
@@ -682,7 +691,11 @@
     "balanceLabel": "Balance",
     "total": "Total",
     "yourShare": "Your Share",
-    "youPaidLabel": "You Paid"
+    "youPaidLabel": "You Paid",
+    "shrinkageNote": "Inventory: {qty} cans missing (CHF {amount}), shared out across the period's drinkers in proportion to what they drank.",
+    "surplusNote": "Inventory: {qty} more cans than expected (CHF {amount}), credited back to the period's drinkers.",
+    "yourShrinkageShare": "of which CHF {amount} for missing cans",
+    "shrinkageUnallocatedNote": "Of which CHF {amount} could not be billed to anyone and stays on the buyer."
   },
   "profile": {
     "title": "Profile",
@@ -916,5 +929,33 @@
     "dialogSubtitleMany": "{count, plural, other {There are # updates you haven't seen yet.}}",
     "dialogLater": "Later",
     "dialogRead": "See what's new"
+  },
+  "inventory": {
+    "title": "Inventory",
+    "subtitle": "Count the fridge to find the missing cans. The gap is billed to the period's drinkers, not to whoever bought the last order.",
+    "newCount": "New count",
+    "newCountDescription": "Enter what is actually in the fridge. Leave an item blank if you did not count it.",
+    "expected": "expected {qty}",
+    "countedPlaceholder": "counted",
+    "countedFor": "Counted quantity for {item}",
+    "note": "Note",
+    "notePlaceholder": "Optional (e.g. end-of-month count)",
+    "fillToSee": "Enter at least one item to see the gap.",
+    "gapSummary": "{missing} missing, {surplus} extra",
+    "recording": "Recording...",
+    "recordCount": "Record count",
+    "countMatches": "Count recorded: stock matches.",
+    "countRecorded": "Count recorded: {missing} missing, {surplus} extra.",
+    "history": "Past counts",
+    "historyDescription": "Each gap is valued at the price the cans were carrying that day.",
+    "noCounts": "No count recorded yet.",
+    "date": "Date",
+    "countedBy": "Counted by",
+    "gap": "Gap",
+    "gapValue": "Value",
+    "noGap": "No gap",
+    "errors": {
+      "noItems": "Enter at least one counted item."
+    }
   }
 }

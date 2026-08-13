@@ -1,0 +1,83 @@
+export const meta = {
+  title: "Un prix qui suit le frigo, et les canettes manquantes enfin facturées",
+  summary:
+    "Le prix de facturation est maintenant une moyenne mobile sur le stock restant, et l’inventaire impute les canettes disparues aux buveurs plutôt qu’à celui qui a payé la commande.",
+};
+
+Deux choses clochaient dans le calcul du prix. Elles sont corrigées.
+
+## Le prix ne traîne plus le passé
+
+Jusqu’ici, un produit était facturé à la moyenne de **tous** les achats depuis le
+début. Une grosse commande de février continuait donc à peser sur le prix des
+mois après que sa dernière canette ait été bue.
+
+<Compare
+  beforeLabel="Avant"
+  afterLabel="Maintenant"
+  before="Moyenne de tous les achats depuis toujours. Le prix se rapprochait du prix réel très lentement, parfois jamais."
+  after="Moyenne mobile sur le stock encore présent. Une commande sort du calcul dès que ses canettes sont bues."
+/>
+
+Sur un cas réel : trois commandes à 1.5336, 1.5334 puis 1.42, l’ancien modèle
+facturait 1.52 pour des canettes qui avaient coûté 1.42. Le nouveau facture 1.48
+et tombe à 1.42 dès que le reliquat de l’ancienne commande est écoulé.
+
+<TrendChart
+  title="Prix facturé d’une canette au fil des commandes"
+  unit=" CHF"
+  caption="Le prix suit le stock réel au lieu de garder en mémoire des canettes bues depuis longtemps."
+  data={[
+    { label: "5 fév", value: 1.53 },
+    { label: "28 avr", value: 1.53 },
+    { label: "7 juil", value: 1.48 },
+    { label: "après", value: 1.42 },
+  ]}
+/>
+
+Le stock non consommé garde sa valeur et la reporte sur la période suivante, là
+où il sera effectivement bu. Boire une canette ne change pas le prix moyen :
+seule une livraison le fait bouger.
+
+## L’évolution du prix s’applique à tous les articles
+
+Un article jamais acheté était facturé **CHF 0.00** : personne ne payait, et
+l’acheteur avalait la différence. Un article sans historique propre est
+maintenant facturé au prix moyen de l’office au même moment.
+
+Sur le graphique de l’écran Achats, chaque article a désormais une courbe sur
+toute la période. En pointillé quand le prix vient de la moyenne de l’office,
+plein dès que l’article a ses propres achats, avec un point à chaque commande
+qui le contenait.
+
+## Les canettes qui disparaissent
+
+C’était le vrai trou : MateCrew ne facturait une canette que si quelqu’un
+l’enregistrait. Une canette prise sans être déclarée n’était facturée à personne,
+et celui qui avait avancé l’argent de la commande ne le revoyait jamais.
+
+<Callout>
+  Un nouvel écran **Inventaire** permet de compter le frigo. L’écart entre le
+  comptage et ce que croit l’application est réparti entre les personnes qui ont
+  bu pendant la période, au prorata de ce qu’elles ont bu. L’acheteur est
+  remboursé intégralement.
+</Callout>
+
+<SplitBar
+  title="40 canettes manquantes, CHF 59.39"
+  unit=" CHF"
+  caption="Réparti au prorata de la consommation de la période, plutôt que laissé à la charge de l’acheteur."
+  data={[
+    { label: "Gros buveurs", value: 38 },
+    { label: "Buveurs occasionnels", value: 15 },
+    { label: "Le reste", value: 6.39 },
+  ]}
+/>
+
+L’ajustement de stock existant reste ce qu’il était : une correction comptable
+gratuite, sans effet sur l’argent. C’est l’inventaire qui facture.
+
+Chaque comptage est conservé, avec son écart en canettes et en francs, valorisé
+au prix que portaient les canettes ce jour-là. Le décompte apparaît aussi sur la
+période de remboursement concernée, et chacun voit sa part de coulage à côté de
+sa part de consommation.

@@ -45,6 +45,14 @@ export interface ArticleEntry {
 /** Newest first — the order the What's New page displays. */
 export const ARTICLES: readonly ArticleEntry[] = [
   {
+    slug: "moving-average-and-shrinkage",
+    date: "2026-08-13",
+    load: {
+      en: () => import("@/content/whats-new/moving-average-and-shrinkage/en.mdx"),
+      fr: () => import("@/content/whats-new/moving-average-and-shrinkage/fr.mdx"),
+    },
+  },
+  {
     slug: "claude-integration",
     date: "2026-08-11",
     load: {

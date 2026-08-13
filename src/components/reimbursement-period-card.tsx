@@ -16,6 +16,7 @@ import {
   Check,
   Undo2,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ interface Share {
   userName: string;
   qty: number;
   costShare: number;
+  lossShare: number;
   amountPaid: number;
   netOwed: number;
 }
@@ -76,6 +78,11 @@ interface ReimbursementPeriodCardProps {
   readonly shares: Share[];
   readonly totalConsumption: number;
   readonly totalCost: number;
+  /** Cans missing at inventory over the period (negative = surplus found). */
+  readonly lossQty: number;
+  readonly lossCost: number;
+  /** Shrinkage nobody could be billed for; it stays on the buyer. */
+  readonly unallocatedLossCost: number;
   readonly defaultExpanded?: boolean;
 }
 
@@ -109,6 +116,9 @@ export function ReimbursementPeriodCard({
   shares,
   totalConsumption,
   totalCost,
+  lossQty,
+  lossCost,
+  unallocatedLossCost,
   defaultExpanded = false,
 }: ReimbursementPeriodCardProps) {
   const [isPending, startTransition] = useTransition();
@@ -229,6 +239,12 @@ export function ReimbursementPeriodCard({
                   <ArrowRightLeft className="size-3.5" />
                   {totalLines}
                 </span>
+                {lossQty > 0 && (
+                  <span className="flex items-center gap-1 text-destructive">
+                    <AlertTriangle className="size-3.5" />
+                    {lossQty}
+                  </span>
+                )}
                 {totalLines > 0 && (
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
@@ -255,6 +271,33 @@ export function ReimbursementPeriodCard({
         {expanded && (
           <CardContent className="space-y-4 pt-0">
             <Separator />
+
+            {/* Shrinkage found by a stock count during this period */}
+            {lossQty !== 0 && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+                <div>
+                  <p>
+                    {lossQty > 0
+                      ? t("reimbursements.shrinkage", {
+                          qty: lossQty,
+                          amount: lossCost.toFixed(2),
+                        })
+                      : t("reimbursements.surplus", {
+                          qty: -lossQty,
+                          amount: Math.abs(lossCost).toFixed(2),
+                        })}
+                  </p>
+                  {Math.abs(unallocatedLossCost) > 0.01 && (
+                    <p className="mt-0.5 text-muted-foreground">
+                      {t("reimbursements.shrinkageUnallocated", {
+                        amount: unallocatedLossCost.toFixed(2),
+                      })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Shares table */}
             {shares.length > 0 && (
@@ -289,6 +332,13 @@ export function ReimbursementPeriodCard({
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {s.costShare.toFixed(2)}
+                          {Math.abs(s.lossShare) > 0.005 && (
+                            <span className="block text-xs text-muted-foreground">
+                              {t("reimbursements.ofWhichLoss", {
+                                amount: s.lossShare.toFixed(2),
+                              })}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {s.amountPaid.toFixed(2)}

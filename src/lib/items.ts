@@ -81,3 +81,32 @@ export async function resolveItemId(
   }
   return getDefaultItemId(officeId);
 }
+
+/**
+ * Resolves item references — an id or a case-insensitive name — to ids in one
+ * query. Ids are matched first, so an item named after another item's id can
+ * never shadow it.
+ *
+ * Inactive items are included: a de-listed product can still have cans on the
+ * shelf, and a stock count has to be able to name them.
+ */
+export async function resolveItemRefs(
+  officeId: string,
+  refs: string[],
+): Promise<{ idByRef: Map<string, string>; names: string[] }> {
+  const items = await prisma.item.findMany({
+    where: { officeId },
+    orderBy: ITEM_DISPLAY_ORDER,
+    select: { id: true, name: true },
+  });
+  const byId = new Map(items.map((i) => [i.id, i.id]));
+  const byName = new Map(items.map((i) => [i.name.toLowerCase(), i.id]));
+
+  const idByRef = new Map<string, string>();
+  for (const ref of refs) {
+    const wanted = ref.trim();
+    const id = byId.get(wanted) ?? byName.get(wanted.toLowerCase());
+    if (id) idByRef.set(ref, id);
+  }
+  return { idByRef, names: items.map((i) => i.name) };
+}

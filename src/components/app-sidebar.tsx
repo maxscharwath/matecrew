@@ -10,6 +10,7 @@ import {
   ChartLine,
   Check,
   ChevronsUpDown,
+  ClipboardCheck,
   ClipboardList,
   CupSoda,
   GitMerge,
@@ -104,6 +105,7 @@ export function AppSidebar({
     { path: "/admin/cron", label: t("nav.cronJobs"), icon: Timer },
     { path: "/admin/items", label: t("nav.items"), icon: Boxes },
     { path: "/admin/stock", label: t("nav.stock"), icon: Package },
+    { path: "/admin/inventory", label: t("nav.inventory"), icon: ClipboardCheck },
     { path: "/admin/consumption", label: t("nav.consumption"), icon: ClipboardList },
     { path: "/admin/purchases", label: t("nav.purchases"), icon: Receipt },
     {

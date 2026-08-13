@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { StockChart } from "@/components/stock-chart";
 import { DataPagination } from "@/components/pagination";
+import { SignedQty } from "@/components/signed-qty";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -336,15 +337,7 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-center font-mono">
-                  <span
-                    className={
-                      m.delta > 0
-                        ? "text-green-600 dark:text-green-400"
-                        : "text-red-600 dark:text-red-400"
-                    }
-                  >
-                    {m.delta > 0 ? `+${m.delta}` : m.delta}
-                  </span>
+                  <SignedQty value={m.delta} />
                 </TableCell>
                 <TableCell>{m.user?.name ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground">

@@ -1,5 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
+import { buildCostingLedger } from "@/lib/costing";
+import { roundCents } from "@/lib/money";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { PurchaseList } from "@/components/purchase-list";
 import { PurchasePriceChart, type PriceSeries } from "@/components/purchase-price-chart";
@@ -115,75 +117,54 @@ const MAX_CHART_SERIES = 6;
 export async function PriceHistorySection({ officeId }: { readonly officeId: string }) {
   const t = await getTranslations();
 
-  const lines = await prisma.purchaseLine.findMany({
-    where: { batch: { officeId } },
-    select: {
-      itemId: true,
-      qty: true,
-      lineTotal: true,
-      item: { select: { name: true, sortOrder: true } },
-      batch: { select: { id: true, purchasedAt: true } },
-    },
-    orderBy: [{ batch: { purchasedAt: "asc" } }, { batch: { id: "asc" } }],
-  });
+  const ledger = await buildCostingLedger(officeId);
+  if (ledger.priceHistory.length === 0) return null;
 
-  if (lines.length === 0) return null;
+  // X axis: one slot per order, ascending — `priceHistory` is already
+  // chronological, so first sighting of a batch is its position.
+  const batches: { id: string; at: Date }[] = [];
+  // What was actually paid per can, per order and item — several lines of the
+  // same item in one order are blended by quantity.
+  const paid = new Map<string, { qty: number; spend: number }>();
+  const paidKey = (batchId: string, itemId: string) => `${batchId} ${itemId}`;
 
-  // X axis: one slot per order, ascending.
-  const batchIds: string[] = [];
-  const batchIndex = new Map<string, number>();
-  const dates: string[] = [];
-  for (const l of lines) {
-    if (!batchIndex.has(l.batch.id)) {
-      batchIndex.set(l.batch.id, batchIds.length);
-      batchIds.push(l.batch.id);
-      dates.push(l.batch.purchasedAt.toISOString());
+  for (const p of ledger.priceHistory) {
+    if (batches[batches.length - 1]?.id !== p.batchId) {
+      batches.push({ id: p.batchId, at: p.at });
     }
+    const key = paidKey(p.batchId, p.itemId);
+    const acc = paid.get(key) ?? { qty: 0, spend: 0 };
+    paid.set(key, { qty: acc.qty + p.qty, spend: acc.spend + p.spend });
   }
 
-  // One series per item, in the office's stable item order.
-  const itemOrder = new Map<string, { name: string; sortOrder: number }>();
-  for (const l of lines) {
-    if (!itemOrder.has(l.itemId)) itemOrder.set(l.itemId, l.item);
-  }
-  const itemIds = [...itemOrder.keys()].sort((a, b) => {
-    const ia = itemOrder.get(a)!;
-    const ib = itemOrder.get(b)!;
-    return ia.sortOrder - ib.sortOrder || ia.name.localeCompare(ib.name);
-  });
-
-  const series: PriceSeries[] = itemIds
+  // Items that were bought take the chart's slots first: an item that has only
+  // ever been drunk draws as a flat office-blend line, and it must not push a
+  // real purchase history off the chart.
+  const bought = new Set(ledger.priceHistory.map((p) => p.itemId));
+  const items = [...ledger.itemNames].map(([id, name]) => ({ id, name }));
+  const series: PriceSeries[] = [
+    ...items.filter((i) => bought.has(i.id)),
+    ...items.filter((i) => !bought.has(i.id)),
+  ]
     .slice(0, MAX_CHART_SERIES)
-    .map((itemId) => {
-      // Per order: spend and qty for this item (an order can have several
-      // lines of the same item), plus the cumulative weighted average.
-      const spendAt = new Array<number>(batchIds.length).fill(0);
-      const qtyAt = new Array<number>(batchIds.length).fill(0);
-      for (const l of lines) {
-        if (l.itemId !== itemId) continue;
-        const idx = batchIndex.get(l.batch.id)!;
-        spendAt[idx] += l.lineTotal.toNumber();
-        qtyAt[idx] += l.qty;
-      }
-
-      const prices: (number | null)[] = [];
-      const runningAvg: (number | null)[] = [];
-      let cumSpend = 0;
-      let cumQty = 0;
-      for (let i = 0; i < batchIds.length; i++) {
-        if (qtyAt[i] > 0) {
-          cumSpend += spendAt[i];
-          cumQty += qtyAt[i];
-          prices.push(Math.round((spendAt[i] / qtyAt[i]) * 100) / 100);
-          runningAvg.push(Math.round((cumSpend / cumQty) * 100) / 100);
-        } else {
-          prices.push(null);
-          runningAvg.push(null);
-        }
-      }
-
-      return { itemName: itemOrder.get(itemId)!.name, prices, runningAvg };
+    .map((item) => {
+      // The billing price is defined at every point on the timeline, even
+      // before an item was first bought — that is exactly when the office-wide
+      // fallback applies. The ledger decides that, so the dashed segments and
+      // the invoice can never disagree about what a fallback price is.
+      const prices = batches.map((b) => ledger.priceAt(item.id, b.at));
+      return {
+        itemName: item.name,
+        billing: prices.map((p) => roundCents(p.unitCost)),
+        estimated: prices.map((p) => p.estimated),
+        purchase: batches.map((b) => {
+          const line = paid.get(paidKey(b.id, item.id));
+          return line ? roundCents(line.spend / line.qty) : null;
+        }),
+      };
     });
+
+  const dates = batches.map((b) => b.at.toISOString());
 
   return (
     <Card>
@@ -195,7 +176,9 @@ export async function PriceHistorySection({ officeId }: { readonly officeId: str
         <PurchasePriceChart
           dates={dates}
           series={series}
-          avgLabel={t("purchases.runningAvg")}
+          billingLabel={t("purchases.billingPrice")}
+          paidLabel={t("purchases.paidPrice")}
+          estimatedLabel={t("purchases.estimatedPrice")}
         />
       </CardContent>
     </Card>

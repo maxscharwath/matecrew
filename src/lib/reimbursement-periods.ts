@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
+import { buildCostingLedger } from "@/lib/costing";
+import { roundCents } from "@/lib/money";
+import {
+  calculateReimbursements,
+  matchBalances,
+  sliceLedger,
+} from "@/lib/reimbursement-calc";
 import {
   buildSettlementKey,
   buildUserSettlementKey,
@@ -61,49 +67,52 @@ export async function backfillReimbursementPeriods(
   const lastMonth = new Date(
     Date.UTC(now.getFullYear(), now.getMonth() - 1, 1),
   );
-  let created = 0;
-
+  const missing: { month: number; year: number }[] = [];
   const cursor = new Date(
     Date.UTC(earliest.getFullYear(), earliest.getMonth(), 1),
   );
   while (cursor <= lastMonth) {
     const month = cursor.getUTCMonth() + 1;
     const year = cursor.getUTCFullYear();
+    if (!existingSet.has(`${year}-${month}`)) missing.push({ month, year });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  // Clicking "generate" on an office that is already up to date is the common
+  // case, and it should not replay the whole history to create nothing.
+  if (missing.length === 0) return { kind: "ok", created: 0 };
 
-    if (!existingSet.has(`${year}-${month}`)) {
-      const startDate = new Date(Date.UTC(year, month - 1, 1));
-      // Day 0 of the next month is the last day of this one.
-      const endDate = new Date(Date.UTC(year, month, 0));
+  let created = 0;
 
-      const result = await calculateReimbursements(
+  // Replayed once for the whole backfill rather than once per month — the
+  // months are slices of one causal history.
+  const ledger = await buildCostingLedger(officeId);
+
+  for (const { month, year } of missing) {
+    const startDate = new Date(Date.UTC(year, month - 1, 1));
+    // Day 0 of the next month is the last day of this one.
+    const endDate = new Date(Date.UTC(year, month, 0));
+
+    const result = sliceLedger(ledger, startDate, endDate);
+    if (result.totalConsumption === 0 && result.totalCost === 0) continue;
+
+    await prisma.reimbursementPeriod.create({
+      data: {
         officeId,
+        month,
+        year,
         startDate,
         endDate,
-      );
-
-      if (result.totalConsumption > 0 || result.totalCost > 0) {
-        await prisma.reimbursementPeriod.create({
-          data: {
-            officeId,
-            month,
-            year,
-            startDate,
-            endDate,
-            lines: {
-              create: result.lines.map((l) => ({
-                fromUserId: l.fromUserId,
-                toUserId: l.toUserId,
-                amount: l.amount,
-                currency: "CHF",
-              })),
-            },
-          },
-        });
-        created++;
-      }
-    }
-
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+        lines: {
+          create: result.lines.map((l) => ({
+            fromUserId: l.fromUserId,
+            toUserId: l.toUserId,
+            amount: l.amount,
+            currency: "CHF",
+          })),
+        },
+      },
+    });
+    created++;
   }
 
   return { kind: "ok", created };
@@ -158,37 +167,12 @@ export async function syncReimbursementPeriod(
     balanceMap.set(paid.toUserId, (balanceMap.get(paid.toUserId) ?? 0) + amount);
   }
 
-  const debtors: { userId: string; remaining: number }[] = [];
-  const creditors: { userId: string; remaining: number }[] = [];
-
-  for (const [userId, balance] of balanceMap) {
-    const rounded = Math.round(balance * 100) / 100;
-    if (rounded > 0.01) debtors.push({ userId, remaining: rounded });
-    else if (rounded < -0.01) creditors.push({ userId, remaining: -rounded });
-  }
-
-  debtors.sort((a, b) => b.remaining - a.remaining);
-  creditors.sort((a, b) => b.remaining - a.remaining);
-
-  const newLines: { fromUserId: string; toUserId: string; amount: number }[] =
-    [];
-  let di = 0;
-  let ci = 0;
-
-  while (di < debtors.length && ci < creditors.length) {
-    const amount = Math.min(debtors[di].remaining, creditors[ci].remaining);
-    if (amount > 0.01) {
-      newLines.push({
-        fromUserId: debtors[di].userId,
-        toUserId: creditors[ci].userId,
-        amount: Math.round(amount * 100) / 100,
-      });
-    }
-    debtors[di].remaining -= amount;
-    creditors[ci].remaining -= amount;
-    if (debtors[di].remaining < 0.01) di++;
-    if (creditors[ci].remaining < 0.01) ci++;
-  }
+  const newLines = matchBalances(
+    [...balanceMap].map(([userId, balance]) => ({
+      userId,
+      netOwed: roundCents(balance),
+    })),
+  );
 
   await prisma.$transaction([
     prisma.reimbursementLine.deleteMany({

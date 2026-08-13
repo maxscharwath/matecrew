@@ -25,6 +25,8 @@ interface UserReimbursementCardProps {
   readonly label: string;
   readonly qty: number;
   readonly costShare: number;
+  /** Part of `costShare` that is this person's share of the missing cans. */
+  readonly lossShare: number;
   readonly amountPaid: number;
   readonly lines: PaymentLine[];
   readonly defaultExpanded?: boolean;
@@ -36,6 +38,7 @@ export function UserReimbursementCard({
   label,
   qty,
   costShare,
+  lossShare,
   amountPaid,
   lines,
   defaultExpanded = false,
@@ -153,9 +156,18 @@ export function UserReimbursementCard({
                   <Banknote className="size-3 text-blue-500" />
                   {t("reimbursements.yourShare")}
                 </p>
-                <p className="text-sm font-semibold tabular-nums sm:mt-1">
-                  CHF {costShare.toFixed(2)}
-                </p>
+                <div className="sm:mt-1">
+                  <p className="text-sm font-semibold tabular-nums">
+                    CHF {costShare.toFixed(2)}
+                  </p>
+                  {Math.abs(lossShare) > 0.005 && (
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {t("reimbursements.ofWhichLoss", {
+                        amount: lossShare.toFixed(2),
+                      })}
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between gap-2 sm:block">
                 <p className="text-xs text-muted-foreground">

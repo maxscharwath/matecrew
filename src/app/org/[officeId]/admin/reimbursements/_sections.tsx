@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
+import { buildCostingLedger } from "@/lib/costing";
+import { sliceLedger } from "@/lib/reimbursement-calc";
 import { ReimbursementPeriodCard } from "@/components/reimbursement-period-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,26 +34,27 @@ export function PeriodsSectionFallback() {
 export async function PeriodsSection({ officeId }: { readonly officeId: string }) {
   const t = await getTranslations();
 
-  const periods = await prisma.reimbursementPeriod.findMany({
-    where: { officeId },
-    orderBy: { startDate: "desc" },
-    include: {
-      lines: {
-        include: {
-          fromUser: { select: { name: true, image: true } },
-          toUser: { select: { name: true, image: true } },
+  // One replay for the whole screen, fetched alongside the periods: the ledger
+  // is causal, so each period is a slice of it rather than a rebuild.
+  const [periods, ledger] = await Promise.all([
+    prisma.reimbursementPeriod.findMany({
+      where: { officeId },
+      orderBy: { startDate: "desc" },
+      include: {
+        lines: {
+          include: {
+            fromUser: { select: { name: true, image: true } },
+            toUser: { select: { name: true, image: true } },
+          },
         },
       },
-    },
-  });
+    }),
+    buildCostingLedger(officeId),
+  ]);
 
   const periodsWithShares = await Promise.all(
     periods.map(async (period) => {
-      const result = await calculateReimbursements(
-        officeId,
-        period.startDate,
-        period.endDate,
-      );
+      const result = sliceLedger(ledger, period.startDate, period.endDate);
 
       const paidCount = period.lines.filter((l) => l.status === "PAID").length;
 
@@ -76,6 +78,9 @@ export async function PeriodsSection({ officeId }: { readonly officeId: string }
         shares: result.shares,
         totalConsumption: result.totalConsumption,
         totalCost: result.totalCost,
+        lossQty: result.lossQty,
+        lossCost: result.lossCost,
+        unallocatedLossCost: result.unallocatedLossCost,
         paidCount,
       };
     })
@@ -99,6 +104,9 @@ export async function PeriodsSection({ officeId }: { readonly officeId: string }
           shares={p.shares}
           totalConsumption={p.totalConsumption}
           totalCost={p.totalCost}
+          lossQty={p.lossQty}
+          lossCost={p.lossCost}
+          unallocatedLossCost={p.unallocatedLossCost}
         />
       ))}
     </div>

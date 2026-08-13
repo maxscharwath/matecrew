@@ -2,10 +2,15 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
 import { toISODateString } from "@/lib/date";
-import { ITEM_DISPLAY_ORDER } from "@/lib/items";
+import { ITEM_DISPLAY_ORDER, resolveItemRefs, sumStockQty } from "@/lib/items";
+import { roundCents } from "@/lib/money";
 import { predictReorder } from "@/lib/stock-prediction";
-import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import {
+  checkAndAlertLowStock,
+  checkAndAlertLowStockMany,
+} from "@/lib/stock-alerts";
 import { stockDeltaOps } from "@/lib/stock";
+import { recordStockCount } from "@/lib/stock-count";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
@@ -73,7 +78,7 @@ export function registerAdminStockTools(server: McpServer): void {
 
       const report = items.map((item) => {
         const itemMovements = movements.filter((m) => m.itemId === item.id);
-        const currentQty = item.stock.reduce((sum, s) => sum + s.currentQty, 0);
+        const currentQty = sumStockQty(item.stock);
         // Per-item forecast: only this item's own movements drive its rate.
         const prediction = predictReorder(
           currentQty,
@@ -87,7 +92,7 @@ export function registerAdminStockTools(server: McpServer): void {
           currentQty,
           lowStock: currentQty <= scope.lowStockThreshold,
           forecast: {
-            avgCansPerDay: round2(prediction.avgDailyConsumption),
+            avgCansPerDay: roundCents(prediction.avgDailyConsumption),
             daysUntilThreshold:
               prediction.daysUntilThreshold === null
                 ? null
@@ -132,9 +137,9 @@ export function registerAdminStockTools(server: McpServer): void {
     server,
     {
       name: "matecrew_admin_adjust_stock",
-      title: "Correct a stock count",
+      title: "Correct a stock number",
       description:
-        "Apply a manual correction to an item's stock — for a physical recount, breakage or a can taken without being recorded. Positive adds, negative removes. This does NOT record anyone's consumption and does not affect reimbursements; use matecrew_admin_record_consumption for that, or matecrew_admin_mark_delivered for an arriving order.",
+        "Apply a manual correction to an item's stock — a bookkeeping repair such as a mistyped delivery. Positive adds, negative removes. This is free: it records nobody's consumption and moves no money. To reconcile against a physical count, use matecrew_admin_record_stock_count instead, which bills the missing cans; for an arriving order use matecrew_admin_mark_delivered.",
       inputSchema: {
         office: officeArg,
         item: z.string().describe("Item id or name to adjust."),
@@ -211,8 +216,96 @@ export function registerAdminStockTools(server: McpServer): void {
       };
     },
   );
-}
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
+  defineTool(
+    server,
+    {
+      name: "matecrew_admin_record_stock_count",
+      title: "Record a physical stock count",
+      description:
+        "Record what is actually in the fridge, item by item, and reconcile it against what the app believes. The gap is the office's shrinkage: missing cans are billed to the people who drank during the period that contains today, in proportion to how much they drank, so the person who paid for the order is reimbursed in full. Counting is the only way MateCrew can detect cans taken without being recorded — confirm the numbers with the user before calling this, as it moves money.",
+      inputSchema: {
+        office: officeArg,
+        counts: z
+          .array(
+            z.object({
+              item: z.string().describe("Item id or name."),
+              countedQty: z
+                .number()
+                .int()
+                .min(0)
+                .max(10_000)
+                .describe("Cans actually on the shelf."),
+            }),
+          )
+          .min(1)
+          .describe(
+            "One entry per item counted. Items left out are not touched — omit an item rather than guessing its count.",
+          ),
+        note: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("Context for the count, shown in the inventory history."),
+      },
+    },
+    async ({ office, counts, note }, { actor }) => {
+      const scope = await resolveAdminOffice(actor, office);
+
+      const { idByRef, names } = await resolveItemRefs(
+        scope.officeId,
+        counts.map((c) => c.item),
+      );
+
+      const resolved = counts.map((c) => {
+        const itemId = idByRef.get(c.item);
+        if (!itemId) {
+          throw new McpToolError(
+            `No item called "${c.item}" in ${scope.officeName}. Existing items: ${names.join(", ") || "none"}.`,
+          );
+        }
+        return { itemId, countedQty: c.countedQty };
+      });
+
+      const outcome = await recordStockCount({
+        officeId: scope.officeId,
+        userId: actor.userId,
+        counts: resolved,
+        note: note || null,
+      });
+
+      if (!outcome.ok) {
+        throw new McpToolError(
+          outcome.reason === "duplicate_item"
+            ? "An item is counted twice. List each item once."
+            : `No item called "${outcome.itemId}" in ${scope.officeName}.`,
+        );
+      }
+
+      const { lines, gaps, missing, surplus } = outcome.result;
+      await notifyQuietly("low-stock", () =>
+        checkAndAlertLowStockMany(
+          scope.officeId,
+          gaps.map((g) => g.itemId),
+        ),
+      );
+
+      return {
+        ok: true,
+        office: scope.officeName,
+        counted: lines.map((l) => ({
+          item: l.itemName,
+          expectedQty: l.expectedQty,
+          countedQty: l.countedQty,
+          delta: l.delta,
+        })),
+        missing,
+        surplus,
+        message:
+          gaps.length === 0
+            ? "Count matches the app exactly — nothing to bill."
+            : `${missing} missing, ${surplus} extra. The missing cans are billed to this period's drinkers; call matecrew_admin_preview_reimbursements to see the effect.`,
+      };
+    },
+  );
 }
