@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getTranslations } from "next-intl/server";
 import { BulkConsumptionForm } from "@/components/bulk-consumption-form";
 import { getActiveItems } from "@/lib/items";
+import { toIdList } from "@/lib/search-params";
 import {
   ConsumptionListSection,
   ConsumptionListFallback,
@@ -18,6 +19,8 @@ export default async function ConsumptionPage({ params, searchParams }: Props) {
   const { officeId } = await params;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
+  const userIds = toIdList(sp.user);
+  const sources = toIdList(sp.source);
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
@@ -46,7 +49,12 @@ export default async function ConsumptionPage({ params, searchParams }: Props) {
       <BulkConsumptionForm officeId={officeId} members={members} items={items} />
 
       <Suspense fallback={<ConsumptionListFallback />}>
-        <ConsumptionListSection officeId={officeId} page={page} />
+        <ConsumptionListSection
+          officeId={officeId}
+          page={page}
+          userIds={userIds}
+          sources={sources}
+        />
       </Suspense>
     </div>
   );

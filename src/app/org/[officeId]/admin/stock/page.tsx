@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { getActiveItems } from "@/lib/items";
+import { toIdList } from "@/lib/search-params";
 import { StockCard } from "@/components/stock-card";
 import { getTranslations } from "next-intl/server";
 import {
@@ -22,7 +23,8 @@ export default async function StockPage({ params, searchParams }: Props) {
   const { officeId } = await params;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
-  const userId = typeof sp.user === "string" && sp.user ? sp.user : undefined;
+  const userIds = toIdList(sp.user);
+  const itemIds = toIdList(sp.item);
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
@@ -71,7 +73,12 @@ export default async function StockPage({ params, searchParams }: Props) {
       </Suspense>
 
       <Suspense fallback={<AuditLogFallback />}>
-        <AuditLogSection officeId={officeId} page={page} userId={userId} />
+        <AuditLogSection
+          officeId={officeId}
+          page={page}
+          userIds={userIds}
+          itemIds={itemIds}
+        />
       </Suspense>
     </div>
   );

@@ -12,8 +12,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { TableFilter } from "@/components/table-filter";
+import { toISODateString } from "@/lib/date";
 
 const PAGE_SIZE = 20;
+
+/** Civil day in the office's timezone, as YYYY-MM-DD, for comparing an
+ *  instant against a date-only column. */
+function zurichDay(at: Date): string {
+  return at.toLocaleDateString("en-CA", { timeZone: "Europe/Zurich" });
+}
 
 export function ConsumptionListFallback() {
   return (
@@ -39,14 +47,47 @@ export function ConsumptionListFallback() {
 interface Props {
   readonly officeId: string;
   readonly page: number;
+  readonly userIds: readonly string[];
+  readonly sources: readonly string[];
 }
 
-export async function ConsumptionListSection({ officeId, page }: Props) {
+/** The two ways a can leaves the fridge, labelled as the rest of the app does. */
+const SOURCES = ["DAILY_REQUEST", "MANUAL"] as const;
+type Source = (typeof SOURCES)[number];
+
+/**
+ * Every consumption in the office, whoever drank it and however it was
+ * recorded — a served daily request, a can taken on the spot, or an admin
+ * backfill. Filter by member to see one person's whole history.
+ */
+export async function ConsumptionListSection({
+  officeId,
+  page,
+  userIds,
+  sources,
+}: Props) {
   const t = await getTranslations();
 
-  const [entries, total] = await Promise.all([
+  const sourceLabel: Record<Source, string> = {
+    DAILY_REQUEST: t("dashboard.dailyRequest"),
+    MANUAL: t("dashboard.selfServe"),
+  };
+
+  // Cancelled entries are reversed consumption: they bill nobody, so they are
+  // not part of "what this person drank".
+  const listed = { officeId, cancelledAt: null };
+  const picked = sources.filter((s): s is Source =>
+    SOURCES.includes(s as Source),
+  );
+  const where = {
+    ...listed,
+    ...(userIds.length > 0 ? { userId: { in: [...userIds] } } : {}),
+    ...(picked.length > 0 ? { source: { in: picked } } : {}),
+  };
+
+  const [entries, total, listedMembers, listedSources] = await Promise.all([
     prisma.consumptionEntry.findMany({
-      where: { officeId, source: "MANUAL", cancelledAt: null },
+      where,
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -55,12 +96,29 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
         item: { select: { name: true } },
       },
     }),
-    prisma.consumptionEntry.count({
-      where: { officeId, source: "MANUAL", cancelledAt: null },
+    prisma.consumptionEntry.count({ where }),
+    // Both filters only offer values that occur in this office, so no
+    // combination of boxes can point at consumptions that never happened.
+    prisma.consumptionEntry.findMany({
+      where: listed,
+      distinct: ["userId"],
+      select: { user: { select: { id: true, name: true } } },
+    }),
+    prisma.consumptionEntry.findMany({
+      where: listed,
+      distinct: ["source"],
+      select: { source: true },
     }),
   ]);
 
-  if (total === 0) {
+  const members = listedMembers
+    .map((e) => e.user)
+    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  const sourceOptions = SOURCES.filter((s) =>
+    listedSources.some((e) => e.source === s),
+  ).map((s) => ({ id: s, name: sourceLabel[s] }));
+
+  if (members.length === 0) {
     return (
       <Card>
         <CardContent className="py-6 text-center text-sm text-muted-foreground">
@@ -73,8 +131,26 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
   return (
     <div className="space-y-3">
       <Card>
-        <CardHeader>
-          <CardTitle>{t("bulkConsumption.recentEntries")}</CardTitle>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle>{t("bulkConsumption.allEntries")}</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <TableFilter
+              options={sourceOptions}
+              selected={sources}
+              param="source"
+              icon="source"
+              label={t("bulkConsumption.filterBySource")}
+              allLabel={t("bulkConsumption.allSources")}
+            />
+            <TableFilter
+              options={members}
+              selected={userIds}
+              param="user"
+              icon="user"
+              label={t("bulkConsumption.filterByMember")}
+              allLabel={t("bulkConsumption.allMembers")}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -82,12 +158,22 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
               <TableRow>
                 <TableHead>{t("bulkConsumption.member")}</TableHead>
                 <TableHead>{t("bulkConsumption.item")}</TableHead>
+                <TableHead>{t("bulkConsumption.source")}</TableHead>
                 <TableHead>{t("bulkConsumption.date")}</TableHead>
                 <TableHead>{t("bulkConsumption.qty")}</TableHead>
-                <TableHead>{t("bulkConsumption.createdAt")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
+              {entries.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className="py-6 text-center text-sm text-muted-foreground"
+                  >
+                    {t("bulkConsumption.noEntriesForFilter")}
+                  </TableCell>
+                </TableRow>
+              )}
               {entries.map((entry) => (
                 <TableRow key={entry.id}>
                   <TableCell className="font-medium">
@@ -97,17 +183,11 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
                     {entry.item.name}
                   </TableCell>
                   <TableCell>
-                    {entry.date.toLocaleDateString("fr-CH", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                      timeZone: "UTC",
-                    })}
+                    <Badge variant="outline" className="font-normal">
+                      {sourceLabel[entry.source as Source]}
+                    </Badge>
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{entry.qty}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
+                  <TableCell className="whitespace-nowrap">
                     {entry.createdAt.toLocaleString("fr-CH", {
                       day: "2-digit",
                       month: "2-digit",
@@ -116,6 +196,25 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
                       minute: "2-digit",
                       timeZone: "Europe/Zurich",
                     })}
+                    {/* A backfilled entry is billed to a day other than the one
+                        it was typed on, so the timestamp alone would name the
+                        wrong day. */}
+                    {toISODateString(entry.date) !==
+                      zurichDay(entry.createdAt) && (
+                      <span className="block text-xs text-muted-foreground">
+                        {t("bulkConsumption.consumedOn", {
+                          date: entry.date.toLocaleDateString("fr-CH", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            timeZone: "UTC",
+                          }),
+                        })}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{entry.qty}</Badge>
                   </TableCell>
                 </TableRow>
               ))}

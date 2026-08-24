@@ -380,7 +380,9 @@
     "note": "Note",
     "filterByUser": "Filter by user",
     "allUsers": "All users",
-    "noMovementsForUser": "No stock movements for this user.",
+    "filterByItem": "Filter by item",
+    "allItems": "All items",
+    "noMovementsForFilter": "No stock movements for this selection.",
     "reasonLabels": {
       "SERVED": "Served",
       "UNSERVED": "Unserved",
@@ -721,7 +723,7 @@
   },
   "bulkConsumption": {
     "title": "Consumption",
-    "subtitle": "Bulk-add maté consumption entries. Ideal for migrating data from another system.",
+    "subtitle": "Review every consumption, by person and by source, and add them in bulk.",
     "formTitle": "Bulk Add Consumption",
     "formDescription": "Add consumption entries for any member. Entries will appear as unpaid in the current billing period.",
     "addRow": "Add row",
@@ -729,7 +731,6 @@
     "member": "Member",
     "date": "Date",
     "qty": "Qty",
-    "createdAt": "Created",
     "submit": "Create entries",
     "noRows": "Add at least one row with a member selected.",
     "noRowsHint": "Click \"Add row\" or \"Fill all members\" to start.",
@@ -739,9 +740,16 @@
     "stock": "Stock",
     "deductStock": "Deduct from stock",
     "deductStockHint": "Toggle the master switch to set all rows at once, or adjust per row in the table.",
-    "recentEntries": "Recent Manual Entries",
-    "noEntries": "No manual consumption entries yet.",
-    "item": "Item"
+    "noEntries": "No consumption recorded yet.",
+    "item": "Item",
+    "filterByMember": "Filter by member",
+    "allMembers": "All members",
+    "consumedOn": "consumed on {date}",
+    "allEntries": "All consumptions",
+    "source": "Source",
+    "filterBySource": "Filter by source",
+    "allSources": "All sources",
+    "noEntriesForFilter": "No consumption for this selection."
   },
   "slack": {
     "newMessage": "New message from MateCrew",

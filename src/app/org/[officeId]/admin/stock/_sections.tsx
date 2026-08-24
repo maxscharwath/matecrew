@@ -18,7 +18,7 @@ import { getTranslations, getLocale } from "next-intl/server";
 import { predictReorder, type PredictionConfidence } from "@/lib/stock-prediction";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
 import { CalendarClock, TrendingDown, AlertTriangle, Info } from "lucide-react";
-import { StockUserFilter } from "@/components/stock-user-filter";
+import { TableFilter } from "@/components/table-filter";
 
 const PAGE_SIZE = 20;
 
@@ -282,47 +282,83 @@ export async function StockChartSection({ officeId, officeName }: ChartProps) {
 interface AuditLogProps {
   readonly officeId: string;
   readonly page: number;
-  readonly userId?: string;
+  readonly userIds: readonly string[];
+  readonly itemIds: readonly string[];
 }
 
-export async function AuditLogSection({ officeId, page, userId }: AuditLogProps) {
+export async function AuditLogSection({
+  officeId,
+  page,
+  userIds,
+  itemIds,
+}: AuditLogProps) {
   const t = await getTranslations();
   const locale = await getLocale();
 
-  // The filter only offers users who actually moved stock here, so picking an
-  // option can never land on an empty log.
-  const where = { officeId, ...(userId ? { userId } : {}) };
+  const where = {
+    officeId,
+    ...(userIds.length > 0 ? { userId: { in: [...userIds] } } : {}),
+    ...(itemIds.length > 0 ? { itemId: { in: [...itemIds] } } : {}),
+  };
 
-  const [recentMovements, movementCount, movementUsers] = await Promise.all([
-    prisma.stockMovement.findMany({
-      where,
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: { select: { name: true } },
-        item: { select: { name: true } },
-      },
-    }),
-    prisma.stockMovement.count({ where }),
-    prisma.stockMovement.findMany({
-      where: { officeId, userId: { not: null } },
-      distinct: ["userId"],
-      select: { user: { select: { id: true, name: true } } },
-    }),
-  ]);
+  // Both filters only offer values that actually appear in this office's log,
+  // so no combination of boxes can point at movements that never existed.
+  const [recentMovements, movementCount, movementUsers, movementItems] =
+    await Promise.all([
+      prisma.stockMovement.findMany({
+        where,
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { name: true } },
+          item: { select: { name: true } },
+        },
+      }),
+      prisma.stockMovement.count({ where }),
+      prisma.stockMovement.findMany({
+        where: { officeId, userId: { not: null } },
+        distinct: ["userId"],
+        select: { user: { select: { id: true, name: true } } },
+      }),
+      prisma.stockMovement.findMany({
+        where: { officeId },
+        distinct: ["itemId"],
+        select: { item: { select: { id: true, name: true } } },
+      }),
+    ]);
 
+  const byName = (a: { name: string }, b: { name: string }) =>
+    a.name.localeCompare(b.name, locale);
   const users = movementUsers
     .flatMap((m) => (m.user ? [m.user] : []))
-    .sort((a, b) => a.name.localeCompare(b.name, locale));
+    .sort(byName);
+  const items = movementItems.map((m) => m.item).sort(byName);
 
-  if (users.length === 0 && recentMovements.length === 0) return null;
+  if (users.length === 0 && items.length === 0) return null;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">{t('stock.auditLog')}</h2>
-        <StockUserFilter users={users} userId={userId} />
+        <div className="flex flex-wrap items-center gap-2">
+          <TableFilter
+            options={items}
+            selected={itemIds}
+            param="item"
+            icon="item"
+            label={t("stock.filterByItem")}
+            allLabel={t("stock.allItems")}
+          />
+          <TableFilter
+            options={users}
+            selected={userIds}
+            param="user"
+            icon="user"
+            label={t("stock.filterByUser")}
+            allLabel={t("stock.allUsers")}
+          />
+        </div>
       </div>
       <div className="rounded-md border">
         <Table>
@@ -343,7 +379,7 @@ export async function AuditLogSection({ officeId, page, userId }: AuditLogProps)
                   colSpan={6}
                   className="py-6 text-center text-sm text-muted-foreground"
                 >
-                  {t('stock.noMovementsForUser')}
+                  {t('stock.noMovementsForFilter')}
                 </TableCell>
               </TableRow>
             )}

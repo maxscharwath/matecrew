@@ -380,7 +380,9 @@
     "note": "Note",
     "filterByUser": "Filtrer par utilisateur",
     "allUsers": "Tous les utilisateurs",
-    "noMovementsForUser": "Aucun mouvement de stock pour cet utilisateur.",
+    "filterByItem": "Filtrer par article",
+    "allItems": "Tous les articles",
+    "noMovementsForFilter": "Aucun mouvement de stock pour cette sélection.",
     "reasonLabels": {
       "SERVED": "Servi",
       "UNSERVED": "Annulé",
@@ -721,7 +723,7 @@
   },
   "bulkConsumption": {
     "title": "Consommation",
-    "subtitle": "Ajouter des consommations de maté en masse. Idéal pour migrer des données depuis un autre système.",
+    "subtitle": "Consulter toutes les consommations, par personne et par origine, et en ajouter en masse.",
     "formTitle": "Ajout en masse",
     "formDescription": "Ajoutez des consommations pour n'importe quel membre. Les entrées apparaîtront comme impayées dans la période de facturation en cours.",
     "addRow": "Ajouter une ligne",
@@ -729,7 +731,6 @@
     "member": "Membre",
     "date": "Date",
     "qty": "Qté",
-    "createdAt": "Créé le",
     "submit": "Créer les entrées",
     "noRows": "Ajoutez au moins une ligne avec un membre sélectionné.",
     "noRowsHint": "Cliquez sur « Ajouter une ligne » ou « Remplir tous les membres » pour commencer.",
@@ -739,9 +740,16 @@
     "stock": "Stock",
     "deductStock": "Déduire du stock",
     "deductStockHint": "Basculez l'interrupteur principal pour définir toutes les lignes, ou ajustez par ligne dans le tableau.",
-    "recentEntries": "Entrées manuelles récentes",
-    "noEntries": "Aucune entrée de consommation manuelle.",
-    "item": "Article"
+    "noEntries": "Aucune consommation enregistrée.",
+    "item": "Article",
+    "filterByMember": "Filtrer par membre",
+    "allMembers": "Tous les membres",
+    "consumedOn": "consommé le {date}",
+    "allEntries": "Toutes les consommations",
+    "source": "Origine",
+    "filterBySource": "Filtrer par origine",
+    "allSources": "Toutes les origines",
+    "noEntriesForFilter": "Aucune consommation pour cette sélection."
   },
   "slack": {
     "newMessage": "Nouveau message de MateCrew",
