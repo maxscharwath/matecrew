@@ -378,6 +378,9 @@
     "delta": "Delta",
     "user": "User",
     "note": "Note",
+    "filterByUser": "Filter by user",
+    "allUsers": "All users",
+    "noMovementsForUser": "No stock movements for this user.",
     "reasonLabels": {
       "SERVED": "Served",
       "UNSERVED": "Unserved",

@@ -18,6 +18,7 @@ import { getTranslations, getLocale } from "next-intl/server";
 import { predictReorder, type PredictionConfidence } from "@/lib/stock-prediction";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
 import { CalendarClock, TrendingDown, AlertTriangle, Info } from "lucide-react";
+import { StockUserFilter } from "@/components/stock-user-filter";
 
 const PAGE_SIZE = 20;
 
@@ -281,15 +282,20 @@ export async function StockChartSection({ officeId, officeName }: ChartProps) {
 interface AuditLogProps {
   readonly officeId: string;
   readonly page: number;
+  readonly userId?: string;
 }
 
-export async function AuditLogSection({ officeId, page }: AuditLogProps) {
+export async function AuditLogSection({ officeId, page, userId }: AuditLogProps) {
   const t = await getTranslations();
   const locale = await getLocale();
 
-  const [recentMovements, movementCount] = await Promise.all([
+  // The filter only offers users who actually moved stock here, so picking an
+  // option can never land on an empty log.
+  const where = { officeId, ...(userId ? { userId } : {}) };
+
+  const [recentMovements, movementCount, movementUsers] = await Promise.all([
     prisma.stockMovement.findMany({
-      where: { officeId },
+      where,
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       orderBy: { createdAt: "desc" },
@@ -298,14 +304,26 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
         item: { select: { name: true } },
       },
     }),
-    prisma.stockMovement.count({ where: { officeId } }),
+    prisma.stockMovement.count({ where }),
+    prisma.stockMovement.findMany({
+      where: { officeId, userId: { not: null } },
+      distinct: ["userId"],
+      select: { user: { select: { id: true, name: true } } },
+    }),
   ]);
 
-  if (recentMovements.length === 0) return null;
+  const users = movementUsers
+    .flatMap((m) => (m.user ? [m.user] : []))
+    .sort((a, b) => a.name.localeCompare(b.name, locale));
+
+  if (users.length === 0 && recentMovements.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">{t('stock.auditLog')}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">{t('stock.auditLog')}</h2>
+        <StockUserFilter users={users} userId={userId} />
+      </div>
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -319,6 +337,16 @@ export async function AuditLogSection({ officeId, page }: AuditLogProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {recentMovements.length === 0 && (
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className="py-6 text-center text-sm text-muted-foreground"
+                >
+                  {t('stock.noMovementsForUser')}
+                </TableCell>
+              </TableRow>
+            )}
             {recentMovements.map((m) => (
               <TableRow key={m.id}>
                 <TableCell className="text-muted-foreground">

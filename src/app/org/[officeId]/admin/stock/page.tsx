@@ -22,6 +22,7 @@ export default async function StockPage({ params, searchParams }: Props) {
   const { officeId } = await params;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
+  const userId = typeof sp.user === "string" && sp.user ? sp.user : undefined;
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
@@ -70,7 +71,7 @@ export default async function StockPage({ params, searchParams }: Props) {
       </Suspense>
 
       <Suspense fallback={<AuditLogFallback />}>
-        <AuditLogSection officeId={officeId} page={page} />
+        <AuditLogSection officeId={officeId} page={page} userId={userId} />
       </Suspense>
     </div>
   );

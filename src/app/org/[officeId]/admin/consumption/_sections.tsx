@@ -52,6 +52,7 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
       take: PAGE_SIZE,
       include: {
         user: { select: { name: true } },
+        item: { select: { name: true } },
       },
     }),
     prisma.consumptionEntry.count({
@@ -80,6 +81,7 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
             <TableHeader>
               <TableRow>
                 <TableHead>{t("bulkConsumption.member")}</TableHead>
+                <TableHead>{t("bulkConsumption.item")}</TableHead>
                 <TableHead>{t("bulkConsumption.date")}</TableHead>
                 <TableHead>{t("bulkConsumption.qty")}</TableHead>
                 <TableHead>{t("bulkConsumption.createdAt")}</TableHead>
@@ -91,14 +93,29 @@ export async function ConsumptionListSection({ officeId, page }: Props) {
                   <TableCell className="font-medium">
                     {entry.user.name}
                   </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {entry.item.name}
+                  </TableCell>
                   <TableCell>
-                    {entry.date.toLocaleDateString("fr-CH")}
+                    {entry.date.toLocaleDateString("fr-CH", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      timeZone: "UTC",
+                    })}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{entry.qty}</Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.createdAt.toLocaleDateString("fr-CH")}
+                  <TableCell className="text-muted-foreground whitespace-nowrap">
+                    {entry.createdAt.toLocaleString("fr-CH", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Europe/Zurich",
+                    })}
                   </TableCell>
                 </TableRow>
               ))}
