@@ -989,6 +989,7 @@
     "knockLevel": "Niveau {level} · {rows} rangées",
     "knockCleared": "Pyramide à terre ! La suivante est plus grande…",
     "knockFailed": "{down} sur {total} — même pyramide, on recommence",
-    "knockShots": "{shots, plural, =0 {Plus de munitions} one {# tir restant} other {# tirs restants}}"
+    "knockShots": "{shots, plural, =0 {Plus de munitions} one {# tir restant} other {# tirs restants}}",
+    "noFlip": "Posée, pas lancée — la canette doit faire au moins un flip"
   }
 }

@@ -989,6 +989,7 @@
     "knockLevel": "Level {level} · {rows} rows",
     "knockCleared": "Pyramid down! Bigger one coming…",
     "knockFailed": "{down} of {total} — same pyramid, try again",
-    "knockShots": "{shots, plural, =0 {No shots left} one {# shot left} other {# shots left}}"
+    "knockShots": "{shots, plural, =0 {No shots left} one {# shot left} other {# shots left}}",
+    "noFlip": "Set down, not flipped — the can has to turn over at least once"
   }
 }

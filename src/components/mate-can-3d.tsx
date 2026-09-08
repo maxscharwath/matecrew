@@ -152,6 +152,12 @@ const GRIP_DAMPING = 30;
 /** Standing within this angle of upright is a landing; past the fall angle it is down. */
 const STAND_ANGLE = THREE.MathUtils.degToRad(14);
 const FALL_ANGLE = THREE.MathUtils.degToRad(60);
+/**
+ * A landing only counts after a flip: the can's up-vector must have turned
+ * through at least this much between release and rest. Lifting it and setting
+ * it down turns it through nothing.
+ */
+const MIN_FLIP = THREE.MathUtils.degToRad(300);
 /** Still enough, on the floor, for this long: the throw is over. */
 const REST_SPEED = 0.3;
 const REST_SPIN = 0.8;
@@ -856,7 +862,8 @@ interface FlipCanProps {
   readonly labels: readonly { readonly url: string; readonly turn?: number }[];
   /** Where the can is, for the camera to follow. */
   readonly focus: React.RefObject<THREE.Vector3>;
-  readonly onLand?: (upright: boolean) => void;
+  /** Standing at rest, and whether it actually flipped on the way. */
+  readonly onLand?: (upright: boolean, flipped: boolean) => void;
 }
 
 const VERTICAL_PLANE = new THREE.Vector3(0, 0, 1);
@@ -882,9 +889,20 @@ function FlipCan({ state, labels, focus, onLand }: FlipCanProps) {
     planeNormal: VERTICAL_PLANE,
     reach: CAN_HEIGHT / 2,
   });
-  const game = useRef({ thrown: false, thrownFor: 0, restFor: 0, resetIn: 0 });
+  const game = useRef({
+    thrown: false,
+    thrownFor: 0,
+    restFor: 0,
+    resetIn: 0,
+    /** How far the can has turned over since release, in radians. */
+    turned: 0,
+  });
   const scratch = useMemo(
-    () => ({ rotation: new THREE.Quaternion(), up: new THREE.Vector3() }),
+    () => ({
+      rotation: new THREE.Quaternion(),
+      up: new THREE.Vector3(),
+      lastUp: new THREE.Vector3(0, 1, 0),
+    }),
     [],
   );
 
@@ -904,12 +922,20 @@ function FlipCan({ state, labels, focus, onLand }: FlipCanProps) {
       g.thrown = true;
       g.thrownFor = 0;
       g.restFor = 0;
+      g.turned = 0;
+      tiltOf(b, scratch.rotation, scratch.lastUp);
     }
     if (s.dragging) return;
 
     if (g.thrown) {
       // Read the engine: still, on the floor, standing or lying — or out of time.
       const tilt = tiltOf(b, scratch.rotation, scratch.up);
+      // Keep count of how far it has turned over — yaw doesn't move the up-vector,
+      // so spinning on the spot earns nothing; going over does.
+      g.turned += Math.acos(
+        THREE.MathUtils.clamp(scratch.lastUp.dot(scratch.up), -1, 1),
+      );
+      scratch.lastUp.copy(scratch.up);
       const standing = tilt < STAND_ANGLE;
       const lying = tilt > FALL_ANGLE;
       const onFloor = t.y < FLOOR_Y + CAN_HEIGHT / 2 + 0.05;
@@ -919,7 +945,7 @@ function FlipCan({ state, labels, focus, onLand }: FlipCanProps) {
       if (g.restFor >= REST_SECONDS || b.isSleeping() || g.thrownFor > THROW_TIMEOUT) {
         g.thrown = false;
         g.resetIn = RESET_DELAY;
-        onLand?.(standing);
+        onLand?.(standing, g.turned >= MIN_FLIP);
       }
     }
     if (g.resetIn > 0) {
@@ -1253,7 +1279,7 @@ interface RigProps {
 function Rig({ distance, lookAtY, intro, parallax, follow, pose }: RigProps) {
   const camera = useThree((state) => state.camera);
   const startedAt = useRef<number | null>(null);
-  const { start, rest, target, look } = useMemo(
+  const { start, rest, target, look, scratch } = useMemo(
     () => ({
       start: new THREE.Vector3(distance * 0.7, -distance * 0.35, distance * 0.6),
       rest: pose
@@ -1261,6 +1287,7 @@ function Rig({ distance, lookAtY, intro, parallax, follow, pose }: RigProps) {
         : new THREE.Vector3(0, lookAtY + distance * 0.06, distance),
       target: new THREE.Vector3(),
       look: pose ? new THREE.Vector3(...pose.lookAt) : new THREE.Vector3(0, lookAtY, 0),
+      scratch: new THREE.Vector3(),
     }),
     [distance, lookAtY, pose],
   );
@@ -1271,10 +1298,20 @@ function Rig({ distance, lookAtY, intro, parallax, follow, pose }: RigProps) {
 
     target.copy(rest);
     if (follow) {
+      // Keep the can in the sights: look at it, and stand back by as much as it
+      // has wandered — up, sideways or away — so it never leaves the frame.
+      const away = Math.hypot(follow.current.x, follow.current.z);
       const climb = Math.max(0, follow.current.y);
-      target.y += climb * 0.5;
-      target.z += climb * 0.9;
-      target.x += follow.current.x * 0.4;
+      const back = distance + away * 0.9 + climb * 0.8;
+      look.lerp(
+        scratch.set(
+          follow.current.x,
+          Math.max(follow.current.y, FLOOR_Y + 0.3),
+          follow.current.z,
+        ),
+        dampFactor(6, dt),
+      );
+      target.set(look.x * 0.6, look.y + back * 0.12 + 0.2, look.z + back);
     }
     if (parallax) {
       target.x += state.pointer.x * distance * 0.08;
@@ -1289,14 +1326,6 @@ function Rig({ distance, lookAtY, intro, parallax, follow, pose }: RigProps) {
       );
     } else {
       camera.position.lerp(target, dampFactor(5, dt));
-    }
-    if (follow) {
-      look.x = THREE.MathUtils.lerp(look.x, follow.current.x * 0.4, dampFactor(5, dt));
-      look.y = THREE.MathUtils.lerp(
-        look.y,
-        lookAtY + Math.max(0, follow.current.y) * 0.5,
-        dampFactor(5, dt),
-      );
     }
     camera.lookAt(look);
   });
@@ -1416,8 +1445,8 @@ export interface MateCan3DProps {
     readonly small: string;
     readonly turn?: number;
   };
-  /** Flip mode: called when a thrown can comes to rest, standing or not. */
-  readonly onLand?: (upright: boolean) => void;
+  /** Flip mode: called when a thrown can comes to rest — standing or not, flipped or not. */
+  readonly onLand?: (upright: boolean, flipped: boolean) => void;
   /** Knockdown mode: the labels to mix on the pyramid, and progress reports. */
   readonly labels?: readonly { readonly url: string; readonly turn?: number }[];
   readonly onReport?: (report: KnockdownReport) => void;

@@ -29,19 +29,24 @@ export function MateCanFlip({ board: initial, signedIn }: Props) {
   // Local tallies for this session — instant feedback, and all an anonymous
   // player gets.
   const [flip, setFlip] = useState({ landings: 0, throws: 0, streak: 0 });
+  /** The last throw stood without turning over: a lift-and-drop, not a flip. */
+  const [noFlip, setNoFlip] = useState(false);
   const [knock, setKnock] = useState<KnockdownReport | null>(null);
   const [knockTotal, setKnockTotal] = useState(0);
   const [, startSaving] = useTransition();
 
   const onLand = useCallback(
-    (upright: boolean) => {
+    (upright: boolean, flipped: boolean) => {
+      // Standing only counts after a real flip; set down gently, it's a miss.
+      const landed = upright && flipped;
+      setNoFlip(upright && !flipped);
       setFlip((s) => ({
-        landings: s.landings + (upright ? 1 : 0),
+        landings: s.landings + (landed ? 1 : 0),
         throws: s.throws + 1,
-        streak: upright ? s.streak + 1 : 0,
+        streak: landed ? s.streak + 1 : 0,
       }));
       if (signedIn) {
-        startSaving(async () => setBoard(await recordFlip(upright)));
+        startSaving(async () => setBoard(await recordFlip(landed)));
       }
     },
     [signedIn],
@@ -106,7 +111,9 @@ export function MateCanFlip({ board: initial, signedIn }: Props) {
               })}
               {myRank >= 0 && ` · ${t("rank", { rank: myRank + 1 })}`}
             </p>
-            <p>{t("flipHint")}</p>
+            <p className={cn(noFlip && "font-medium text-white")}>
+              {noFlip ? t("noFlip") : t("flipHint")}
+            </p>
           </>
         ) : (
           <>
