@@ -3,20 +3,28 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * OAuth authorization endpoint — Better Auth's `/mcp/authorize`, fronted by a
- * shim that makes loopback redirect URIs port-agnostic (RFC 8252 §7.3).
+ * shim that reconciles loopback redirect URIs with what the client registered.
  *
- * Better Auth matches `redirect_uri` against the registered list byte-for-byte
- * (`plugins/mcp/authorize.mjs`), which native MCP clients routinely fail: they
- * register `http://127.0.0.1:<port>/callback` once and then bind whatever port
- * the OS hands them, or register one loopback spelling and authorize with the
- * other. The spec anticipates exactly this and requires an authorization
- * server to treat the port of a loopback redirect URI as variable.
+ * Two things conspire against a native MCP client here:
  *
- * So before Better Auth sees the request, we reconcile the stored list: if the
- * requested URI is an http loopback URI whose path is already registered for
- * this client, that entry is rewritten to the requested port. Nothing else is
- * touched — a non-loopback URI, or a path that was never registered, still
- * fails the match, so this widens ports rather than accepting new callbacks.
+ * 1. Better Auth compares `redirect_uri` byte-for-byte against the registered
+ *    list (`plugins/mcp/authorize.mjs`), while RFC 8252 §7.3 requires the port
+ *    of a loopback redirect URI to be treated as variable — a client that
+ *    registers one port and then binds another is turned away.
+ * 2. Vercel's edge rewrites `127.0.0.1` (any `127.x`, in fact) to `localhost`
+ *    inside the `redirect_uri` query parameter. Only that parameter, and only
+ *    in the query — the token request carries it in the body, untouched. So
+ *    even a client that never changes ports authorizes as `localhost` and then
+ *    exchanges its code as `127.0.0.1`, and Better Auth rejects the exchange.
+ *
+ * Both are fixed by settling on one spelling: the client's own. If the
+ * requested URI is an http loopback URI whose path the client registered, it is
+ * rewritten to the registered host spelling on the requested port, and the
+ * stored entry is moved to that same value. Better Auth then matches, the
+ * authorization code is bound to the spelling the client will send at the token
+ * endpoint, and the browser is redirected to the port it is really listening
+ * on. Non-loopback URIs and unregistered paths are left alone, so this
+ * reconciles spelling and ports rather than accepting new callbacks.
  *
  * Being the more specific route, this file takes precedence over the
  * `[...all]` catch-all; both hand off to the same `auth.handler`.
@@ -25,15 +33,20 @@ import { prisma } from "@/lib/prisma";
 // Prisma needs Node APIs, so this cannot run on the edge.
 export const runtime = "nodejs";
 
-/** Hosts RFC 8252 §7.3 treats as loopback. `URL` keeps IPv6 in brackets. */
+/** Hosts RFC 8252 §7.3 treats as loopback, plus what Vercel normalises them to. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
-/**
- * Identity of a loopback callback ignoring its port: everything a client keeps
- * stable between registration and authorization. Returns null for anything
- * that is not an http loopback URI, which is what leaves it alone.
- */
-function loopbackPath(raw: string): string | null {
+interface Loopback {
+  /** Host without the port, as spelled — `127.0.0.1`, `localhost`, `[::1]`. */
+  host: string;
+  /** Port as spelled, empty when the URI carries none. */
+  port: string;
+  /** Path and query: what a client keeps stable across attempts. */
+  path: string;
+}
+
+/** Splits an http loopback URI into its parts; null for anything else. */
+function parseLoopback(raw: string): Loopback | null {
   let url: URL;
   try {
     url = new URL(raw);
@@ -41,46 +54,69 @@ function loopbackPath(raw: string): string | null {
     return null;
   }
   if (url.protocol !== "http:") return null;
-  if (!LOOPBACK_HOSTS.has(url.host.replace(/:\d+$/, ""))) return null;
-  return `${url.pathname}${url.search}`;
+  const host = url.host.replace(/:\d+$/, "");
+  if (!LOOPBACK_HOSTS.has(host)) return null;
+  return { host, port: url.port, path: `${url.pathname}${url.search}` };
 }
 
-async function allowLoopbackPort(request: Request): Promise<void> {
-  const params = new URL(request.url).searchParams;
-  const clientId = params.get("client_id");
-  const redirectUri = params.get("redirect_uri");
-  if (!clientId || !redirectUri) return;
+function formatLoopback(host: string, port: string, path: string): string {
+  const authority = port ? `${host}:${port}` : host;
+  return `http://${authority}${path}`;
+}
 
-  const path = loopbackPath(redirectUri);
-  if (!path) return;
+/**
+ * Returns the request Better Auth should see: the same one, unless its
+ * `redirect_uri` needs reconciling with the client's registration.
+ */
+async function reconcileLoopback(request: Request): Promise<Request> {
+  const url = new URL(request.url);
+  const clientId = url.searchParams.get("client_id");
+  const requestedUri = url.searchParams.get("redirect_uri");
+  if (!clientId || !requestedUri) return request;
+
+  const requested = parseLoopback(requestedUri);
+  if (!requested) return request;
 
   const client = await prisma.oauthApplication.findUnique({
     where: { clientId },
     select: { id: true, redirectUrls: true },
   });
-  if (!client) return;
+  if (!client) return request;
 
   const registered = client.redirectUrls.split(",");
-  if (registered.includes(redirectUri)) return;
+  const samePath = (uri: string) => parseLoopback(uri)?.path === requested.path;
 
-  // Only a client that registered this very callback path gets the port
-  // widened; otherwise the requested URI is simply not one of its callbacks.
-  if (!registered.some((url) => loopbackPath(url) === path)) return;
+  // Only a client that registered this very callback path gets reconciled;
+  // otherwise the requested URI is simply not one of its callbacks.
+  const match = registered.find(samePath);
+  if (!match) return request;
 
-  // Replace rather than append, so a client cycling through ephemeral ports
-  // cannot grow the row without bound.
-  const updated = [
-    ...registered.filter((url) => loopbackPath(url) !== path),
-    redirectUri,
-  ];
+  const target = formatLoopback(
+    parseLoopback(match)!.host,
+    requested.port,
+    requested.path,
+  );
 
-  await prisma.oauthApplication.update({
-    where: { id: client.id },
-    data: { redirectUrls: updated.join(",") },
-  });
+  if (!registered.includes(target)) {
+    // Move the entry rather than add one, so a client cycling through
+    // ephemeral ports cannot grow the row without bound.
+    await prisma.oauthApplication.update({
+      where: { id: client.id },
+      data: {
+        redirectUrls: [
+          ...registered.filter((uri) => !samePath(uri)),
+          target,
+        ].join(","),
+      },
+    });
+  }
+
+  if (target === requestedUri) return request;
+
+  url.searchParams.set("redirect_uri", target);
+  return new Request(url, request);
 }
 
 export async function GET(request: Request): Promise<Response> {
-  await allowLoopbackPort(request);
-  return auth.handler(request);
+  return auth.handler(await reconcileLoopback(request));
 }
