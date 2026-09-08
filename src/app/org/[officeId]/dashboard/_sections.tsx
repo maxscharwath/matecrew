@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TodayConsumptionsCard } from "@/components/today-consumptions-card";
+import { MateCan } from "@/components/mate-can";
 import { TakeCanButton } from "@/components/take-can-button";
 import {
   MateActivityHeatmap,
@@ -164,7 +165,9 @@ export async function HeroSection({ officeId }: { officeId: string }) {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Card className="flex flex-col items-center justify-center p-6">
+      <Card className="flex flex-col items-center justify-center gap-2 p-6">
+        {/* The thing being taken, above the button that takes it. */}
+        <MateCan className="h-44 w-full" />
         <TakeCanButton officeId={officeId} items={items} />
       </Card>
       <Card>

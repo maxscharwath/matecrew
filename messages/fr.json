@@ -968,5 +968,27 @@
     "errors": {
       "noItems": "Saisissez au moins un article compté."
     }
+  },
+  "can": {
+    "title": "El Tony Mate",
+    "hint": "Faites glisser pour tourner la canette",
+    "flipHint": "Attrapez la canette vers le haut et balayez vers le haut — un flip, réception debout",
+    "score": "{landed, plural, =0 {Aucune réception} one {# réception} other {# réceptions}} · {throws, plural, one {# lancer} other {# lancers}}",
+    "points": "{points, plural, one {# point} other {# points}}",
+    "streak": "série {streak} · record {best}",
+    "streakShort": "×{streak}",
+    "rank": "n°{rank}",
+    "leaderboard": "Classement",
+    "leaderboardEmpty": "Personne n'a encore réussi. Soyez le premier.",
+    "signInToSave": "Connectez-vous pour enregistrer votre score et entrer au classement.",
+    "gameFlip": "Bottle flip",
+    "gameKnockdown": "Chamboule-tout",
+    "knockHint": "Cliquez pour tirer — visez les canettes",
+    "knockScore": "{down} canettes sur {total} à terre",
+    "knockBest": "record {best} · {throws, plural, one {# lancer} other {# lancers}}",
+    "knockLevel": "Niveau {level} · {rows} rangées",
+    "knockCleared": "Pyramide à terre ! La suivante est plus grande…",
+    "knockFailed": "{down} sur {total} — même pyramide, on recommence",
+    "knockShots": "{shots, plural, =0 {Plus de munitions} one {# tir restant} other {# tirs restants}}"
   }
 }

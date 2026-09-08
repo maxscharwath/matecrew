@@ -968,5 +968,27 @@
     "errors": {
       "noItems": "Enter at least one counted item."
     }
+  },
+  "can": {
+    "title": "El Tony Mate",
+    "hint": "Drag to turn the can",
+    "flipHint": "Grab the can near the top and swipe up — one flip, land it standing",
+    "score": "{landed, plural, =0 {No landings yet} one {# landing} other {# landings}} · {throws, plural, one {# throw} other {# throws}}",
+    "points": "{points, plural, one {# point} other {# points}}",
+    "streak": "streak {streak} · best {best}",
+    "streakShort": "×{streak}",
+    "rank": "#{rank}",
+    "leaderboard": "Leaderboard",
+    "leaderboardEmpty": "Nobody has landed one yet. Be first.",
+    "signInToSave": "Sign in to save your score and join the leaderboard.",
+    "gameFlip": "Bottle flip",
+    "gameKnockdown": "Knock 'em down",
+    "knockHint": "Click to shoot — aim at the cans",
+    "knockScore": "{down} of {total} cans down",
+    "knockBest": "best {best} · {throws, plural, one {# throw} other {# throws}}",
+    "knockLevel": "Level {level} · {rows} rows",
+    "knockCleared": "Pyramid down! Bigger one coming…",
+    "knockFailed": "{down} of {total} — same pyramid, try again",
+    "knockShots": "{shots, plural, =0 {No shots left} one {# shot left} other {# shots left}}"
   }
 }

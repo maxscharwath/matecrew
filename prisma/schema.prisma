@@ -67,6 +67,7 @@ model User {
   defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id], onDelete: SetNull)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  flipScore       FlipScore?
 
   sessions      Session[]
   accounts      Account[]
@@ -501,4 +502,21 @@ model ReimbursementLine {
 
   // The unpaid-invoices banner queries this on every signed-in page render.
   @@index([fromUserId, status])
+}
+
+// ─── Bottle-flip game ───────────────────────────────────
+//
+// One row per player, totals since they first played. A landing is a throw
+// that came to rest standing; the streak counts landings in a row.
+model FlipScore {
+  userId        String   @id
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  landings      Int      @default(0)
+  throws        Int      @default(0)
+  currentStreak Int      @default(0)
+  bestStreak    Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([landings, bestStreak])
 }

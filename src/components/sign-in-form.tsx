@@ -16,11 +16,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { OAuthButtons } from "@/components/oauth-buttons";
+import { MateCan } from "@/components/mate-can";
+import { MATE_LABELS } from "@/lib/mate-label";
 import type { OAuthProvider } from "@/lib/oauth-providers";
 
 export function SignInForm({ oauthProviders, allowedDomain, passwordEnabled, redirectTo }: { oauthProviders: OAuthProvider[]; allowedDomain: string | null; passwordEnabled: boolean; redirectTo?: string }) {
   const router = useRouter();
   const t = useTranslations();
+  // A different can each visit: whichever label chance hands out.
+  const [label] = useState(
+    () => MATE_LABELS[Math.floor(Math.random() * MATE_LABELS.length)],
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -49,7 +55,14 @@ export function SignInForm({ oauthProviders, allowedDomain, passwordEnabled, red
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      {/* The can gets its own stage: a strip above the form on phones, the
+          whole left half on a laptop. One canvas either way — CSS moves it,
+          so the WebGL context is not paid for twice. */}
+      <div className="stage-gradient relative h-56 shrink-0 lg:h-auto lg:flex-1">
+        <MateCan className="absolute inset-0" label={label} />
+      </div>
+      <div className="flex flex-1 items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>{t('auth.signInTitle')}</CardTitle>
@@ -111,6 +124,7 @@ export function SignInForm({ oauthProviders, allowedDomain, passwordEnabled, red
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
