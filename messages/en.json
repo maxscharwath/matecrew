@@ -749,7 +749,15 @@
     "source": "Source",
     "filterBySource": "Filter by source",
     "allSources": "All sources",
-    "noEntriesForFilter": "No consumption for this selection."
+    "noEntriesForFilter": "No consumption for this selection.",
+    "swap": "Swap item",
+    "swapTitle": "Swap the item drunk",
+    "swapDescription": "{member} · {qty} × {item} on {date}. Stock follows: the {item} goes back on the shelf and the item you pick leaves it.",
+    "swapTo": "New item",
+    "swapConfirm": "Swap item",
+    "swapped": "Swapped: {from} → {to}",
+    "swapSameItem": "That is already the item.",
+    "swapNoOther": "No other item in this office."
   },
   "slack": {
     "newMessage": "New message from MateCrew",

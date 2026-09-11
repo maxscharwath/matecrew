@@ -749,7 +749,15 @@
     "source": "Origine",
     "filterBySource": "Filtrer par origine",
     "allSources": "Toutes les origines",
-    "noEntriesForFilter": "Aucune consommation pour cette sélection."
+    "noEntriesForFilter": "Aucune consommation pour cette sélection.",
+    "swap": "Changer l'article",
+    "swapTitle": "Changer l'article consommé",
+    "swapDescription": "{member} · {qty} × {item} le {date}. Le stock suit : le {item} retourne sur l'étagère et l'article choisi en sort.",
+    "swapTo": "Nouvel article",
+    "swapConfirm": "Changer l'article",
+    "swapped": "Changé : {from} → {to}",
+    "swapSameItem": "C'est déjà cet article.",
+    "swapNoOther": "Aucun autre article dans ce bureau."
   },
   "slack": {
     "newMessage": "Nouveau message de MateCrew",

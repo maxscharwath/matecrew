@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { TableFilter } from "@/components/table-filter";
+import { ConsumptionSwapButton } from "@/components/consumption-swap-button";
+import { getActiveItems } from "@/lib/items";
 import { toISODateString } from "@/lib/date";
 
 const PAGE_SIZE = 20;
@@ -85,7 +87,7 @@ export async function ConsumptionListSection({
     ...(picked.length > 0 ? { source: { in: picked } } : {}),
   };
 
-  const [entries, total, listedMembers, listedSources] = await Promise.all([
+  const [entries, total, listedMembers, listedSources, items] = await Promise.all([
     prisma.consumptionEntry.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -109,7 +111,16 @@ export async function ConsumptionListSection({
       distinct: ["source"],
       select: { source: true },
     }),
+    // The items a consumption can be re-pointed at. Archived ones are left out:
+    // a correction should not resurrect a de-listed product.
+    getActiveItems(officeId),
   ]);
+
+  const swapItems = items.map((i) => ({
+    id: i.id,
+    name: i.name,
+    stockQty: i.stockQty,
+  }));
 
   const members = listedMembers
     .map((e) => e.user)
@@ -161,13 +172,14 @@ export async function ConsumptionListSection({
                 <TableHead>{t("bulkConsumption.source")}</TableHead>
                 <TableHead>{t("bulkConsumption.date")}</TableHead>
                 <TableHead>{t("bulkConsumption.qty")}</TableHead>
+                <TableHead className="w-[60px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {entries.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="py-6 text-center text-sm text-muted-foreground"
                   >
                     {t("bulkConsumption.noEntriesForFilter")}
@@ -215,6 +227,25 @@ export async function ConsumptionListSection({
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{entry.qty}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <ConsumptionSwapButton
+                      officeId={officeId}
+                      entry={{
+                        id: entry.id,
+                        itemId: entry.itemId,
+                        itemName: entry.item.name,
+                        memberName: entry.user.name,
+                        qty: entry.qty,
+                        date: entry.date.toLocaleDateString("fr-CH", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          timeZone: "UTC",
+                        }),
+                      }}
+                      items={swapItems}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
