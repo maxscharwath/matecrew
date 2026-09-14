@@ -834,9 +834,29 @@
       "shareLabel": "Your share",
       "attachmentNote": "The attached PDF breaks down the prices, the missing cans and the payments to make.",
       "button": "See my settlements",
-      "footer": "You receive this email every month as a member of {office} on MateCrew."
+      "footer": "You receive this email every month as a member of {office} on MateCrew.",
+      "priceLabel": "Average price / can",
+      "lossLabel": "Share of the missing cans",
+      "paymentsTitle": "To settle",
+      "payTo": "Pay {name}",
+      "receiveFrom": "{name} owes you"
     },
-    "copyLink": "Or copy this link:"
+    "copyLink": "Or copy this link:",
+    "footer": "You received this email from <strong>MateCrew</strong>.",
+    "passwordReset": {
+      "subject": "Reset your MateCrew password",
+      "title": "Reset your password",
+      "intro": "We received a request to reset the password for your MateCrew account. Click the button below to choose a new one.",
+      "expiry": "This link expires in <strong>1 hour</strong>. If you did not request a password reset, no action is needed.",
+      "button": "Reset my password"
+    },
+    "verification": {
+      "subject": "Verify your MateCrew email",
+      "title": "Verify your email",
+      "intro": "Thanks for signing up for MateCrew! Verify your email address to secure your account.",
+      "body": "Click the button below to confirm your address.",
+      "button": "Verify my email"
+    }
   },
   "slackLink": {
     "invalidTitle": "Link unavailable",

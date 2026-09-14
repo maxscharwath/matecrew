@@ -834,9 +834,29 @@
       "shareLabel": "Votre part",
       "attachmentNote": "Le PDF joint détaille les prix, les canettes manquantes et les paiements à faire.",
       "button": "Voir mes règlements",
-      "footer": "Vous recevez cet email chaque mois en tant que membre du bureau {office} sur MateCrew."
+      "footer": "Vous recevez cet email chaque mois en tant que membre du bureau {office} sur MateCrew.",
+      "priceLabel": "Prix moyen / canette",
+      "lossLabel": "Part des canettes manquantes",
+      "paymentsTitle": "À régler",
+      "payTo": "Payer {name}",
+      "receiveFrom": "{name} vous doit"
     },
-    "copyLink": "Ou copiez ce lien :"
+    "copyLink": "Ou copiez ce lien :",
+    "footer": "Vous recevez cet email de la part de <strong>MateCrew</strong>.",
+    "passwordReset": {
+      "subject": "Réinitialiser votre mot de passe MateCrew",
+      "title": "Réinitialiser votre mot de passe",
+      "intro": "Nous avons reçu une demande de réinitialisation du mot de passe de votre compte MateCrew. Cliquez sur le bouton ci-dessous pour en choisir un nouveau.",
+      "expiry": "Ce lien expire dans <strong>1 heure</strong>. Si vous n'êtes pas à l'origine de cette demande, il n'y a rien à faire.",
+      "button": "Réinitialiser mon mot de passe"
+    },
+    "verification": {
+      "subject": "Vérifiez votre adresse email MateCrew",
+      "title": "Vérifiez votre adresse email",
+      "intro": "Merci d'avoir créé un compte MateCrew ! Vérifiez votre adresse email pour sécuriser votre compte.",
+      "body": "Cliquez sur le bouton ci-dessous pour confirmer votre adresse.",
+      "button": "Vérifier mon adresse"
+    }
   },
   "slackLink": {
     "invalidTitle": "Lien indisponible",

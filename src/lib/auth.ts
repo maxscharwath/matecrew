@@ -6,6 +6,19 @@ import { prisma } from "@/lib/prisma";
 import { getBaseUrl } from "@/lib/base-url";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "@/lib/email";
 
+/**
+ * The language MateCrew writes to this person in. Better Auth's callbacks
+ * carry its own user shape, so the preference is read from the row; a user
+ * that is somehow not there yet falls back to the column's own default.
+ */
+async function localeOf(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { locale: true },
+  });
+  return user?.locale ?? "fr";
+}
+
 const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
   .split(",")
   .map((d) => d.trim().toLowerCase())
@@ -46,14 +59,14 @@ export const auth = betterAuth({
     minPasswordLength: 8,
     autoSignIn: true,
     sendResetPassword: async ({ user, url }) => {
-      await sendPasswordResetEmail(user.email, url);
+      await sendPasswordResetEmail(user.email, url, await localeOf(user.id));
     },
   },
 
   emailVerification: {
     sendOnSignUp: passwordAuthEnabled,
     sendVerificationEmail: async ({ user, url }) => {
-      await sendEmailVerificationEmail(user.email, url);
+      await sendEmailVerificationEmail(user.email, url, await localeOf(user.id));
     },
   },
 

@@ -1,11 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { verifyQStashSignature } from "@/lib/qstash";
+import { enqueueTask, verifyQStashSignature } from "@/lib/qstash";
 import { calculateReimbursements, type ReimbursementResult } from "@/lib/reimbursement-calc";
 import { sendSlackMessage, buildMonthlyBillMessage } from "@/lib/slack";
 import { sendPeriodStatements } from "@/lib/settlement-mail";
 
-// Rendering and mailing one PDF per member is the slow part of this route;
-// the default serverless window is not built for it.
+// The statements are queued rather than mailed here, so this route stays a
+// loop over offices; the window is generous only because closing a month also
+// replays each office's whole costing ledger.
 export const maxDuration = 60;
 
 async function notifySlack(
@@ -59,8 +60,8 @@ export async function POST(request: Request) {
   const results: {
     office: string;
     created: boolean;
-    /** Statements emailed for this office's new period. */
-    mailed?: number;
+    /** How this office's statements were dispatched. */
+    statements?: "queued" | "inline" | "failed";
     error?: string;
   }[] = [];
 
@@ -106,18 +107,27 @@ export async function POST(request: Request) {
         },
       });
 
-      // Each member gets their own bill by mail. Best-effort: the period is
-      // already written, and a mail server having a bad day must not make the
-      // cron look like it failed to close the month.
-      let mailed = 0;
+      // Each member gets their own bill by mail — as a queued task per office,
+      // so one slow mail provider cannot eat the window every other office is
+      // waiting for, and QStash retries the ones that fail. Without QStash
+      // configured (local, self-host) it falls back to sending inline rather
+      // than dropping the mail.
+      let statements: "queued" | "inline" | "failed" = "queued";
       try {
-        const statements = await sendPeriodStatements(period.id);
-        if (statements.kind === "sent") mailed = statements.sent;
+        const queued = await enqueueTask("/api/cron/period-statements", {
+          periodId: period.id,
+        });
+        if (!queued) {
+          await sendPeriodStatements(period.id);
+          statements = "inline";
+        }
       } catch {
-        // Reported as `mailed: 0`; an admin can re-send from the period card.
+        // The period is written and the deliveries are recorded per person,
+        // so an admin can re-send from the period card without double-billing.
+        statements = "failed";
       }
 
-      results.push({ office: office.name, created: true, mailed });
+      results.push({ office: office.name, created: true, statements });
 
       if (office.slackChannelId) {
         await notifySlack(office as typeof office & { slackChannelId: string }, month, year, result, appUrl);
@@ -136,7 +146,7 @@ export async function POST(request: Request) {
     year,
     offices: results.length,
     created: results.filter((r) => r.created).length,
-    mailed: results.reduce((sum, r) => sum + (r.mailed ?? 0), 0),
+    queued: results.filter((r) => r.statements === "queued").length,
     results,
   });
 }

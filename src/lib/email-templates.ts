@@ -84,19 +84,25 @@ function divider(): string {
   </table>`;
 }
 
-export function passwordResetTemplate(resetUrl: string): string {
-  return layout(`
-    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">Reset your password</h1>
-    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">
-      We received a request to reset the password for your MateCrew account.
-      Click the button below to choose a new password.
-    </p>
+export function passwordResetTemplate(opts: {
+  title: string;
+  intro: string;
+  expiry: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  copyLinkLabel: string;
+  footer: string;
+}): string {
+  return layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
+    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
     ${divider()}
-    <p style="margin:0;font-size:14px;color:${colors.foreground};line-height:1.6;">
-      This link will expire in <strong>1 hour</strong>. If you did not request a password reset, no action is needed.
-    </p>
-    ${button("Reset my password", resetUrl)}
-  `);
+    <p style="margin:0;font-size:14px;color:${colors.foreground};line-height:1.6;">${opts.expiry}</p>
+    ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
+  `,
+    { footer: opts.footer },
+  );
 }
 
 export function joinRequestTemplate(opts: {
@@ -109,13 +115,16 @@ export function joinRequestTemplate(opts: {
   officeName: string;
   buttonLabel: string;
   buttonUrl: string;
+  copyLinkLabel: string;
+  footer: string;
 }): string {
   const row = (label: string, value: string) => `
     <tr>
       <td style="padding:6px 0;font-size:13px;color:${colors.mutedForeground};width:120px;">${label}</td>
       <td style="padding:6px 0;font-size:14px;color:${colors.foreground};">${value}</td>
     </tr>`;
-  return layout(`
+  return layout(
+    `
     <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
     <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
     ${divider()}
@@ -123,8 +132,10 @@ export function joinRequestTemplate(opts: {
       ${row(opts.requesterLabel, `${opts.requesterName} &lt;${opts.requesterEmail}&gt;`)}
       ${row(opts.officeLabel, opts.officeName)}
     </table>
-    ${button(opts.buttonLabel, opts.buttonUrl)}
-  `);
+    ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
+  `,
+    { footer: opts.footer },
+  );
 }
 
 /**
@@ -144,6 +155,9 @@ export function settlementTemplate(opts: {
   /** Which way the money goes — decides the accent colour. */
   direction: "pay" | "receive" | "settled";
   rows: { label: string; value: string }[];
+  /** Null hides the block — a settled month has nobody to pay. */
+  paymentsTitle: string | null;
+  payments: { label: string; value: string; direction: "pay" | "receive" }[];
   attachmentNote: string;
   buttonLabel: string;
   buttonUrl: string;
@@ -177,21 +191,45 @@ export function settlementTemplate(opts: {
     <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
       ${opts.rows.map((r) => row(r.label, r.value)).join("")}
     </table>
+    ${
+      opts.paymentsTitle && opts.payments.length > 0
+        ? `${divider()}
+    <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${colors.foreground};">${opts.paymentsTitle}</p>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+      ${opts.payments
+        .map(
+          (p) => `
+      <tr>
+        <td style="padding:6px 0;font-size:13px;color:${colors.mutedForeground};">${p.label}</td>
+        <td style="padding:6px 0;font-size:14px;font-weight:600;color:${p.direction === "pay" ? "#dc2626" : "#16a34a"};text-align:right;">${p.value}</td>
+      </tr>`,
+        )
+        .join("")}
+    </table>`
+        : ""
+    }
     <p style="margin:20px 0 0;font-size:13px;color:${colors.mutedForeground};line-height:1.6;">${opts.attachmentNote}</p>
     ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
   `, { footer: opts.footer });
 }
 
-export function emailVerificationTemplate(verifyUrl: string): string {
-  return layout(`
-    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">Verify your email</h1>
-    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">
-      Thanks for signing up for MateCrew! Please verify your email address to secure your account.
-    </p>
+export function emailVerificationTemplate(opts: {
+  title: string;
+  intro: string;
+  body: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  copyLinkLabel: string;
+  footer: string;
+}): string {
+  return layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
+    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
     ${divider()}
-    <p style="margin:0;font-size:14px;color:${colors.foreground};line-height:1.6;">
-      Click the button below to confirm your email address.
-    </p>
-    ${button("Verify my email", verifyUrl)}
-  `);
+    <p style="margin:0;font-size:14px;color:${colors.foreground};line-height:1.6;">${opts.body}</p>
+    ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
+  `,
+    { footer: opts.footer },
+  );
 }

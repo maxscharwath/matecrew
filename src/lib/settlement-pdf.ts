@@ -22,6 +22,13 @@ import {
  * only reason to re-render a statement that is already stored.
  */
 
+/** One payment this person has to make, or to expect. */
+export interface SettlementPaymentLine {
+  direction: "pay" | "receive";
+  otherUserName: string;
+  amount: number;
+}
+
 export interface UserSettlement {
   key: string;
   url: string;
@@ -30,8 +37,14 @@ export interface UserSettlement {
   /** Cans drunk in the period, and the francs that follow from them. */
   qty: number;
   costShare: number;
+  /** What one can cost them on average, their share of the losses aside. */
+  avgUnitPrice: number;
+  /** Their share of the cans that went missing at inventory. */
+  lossShare: number;
   /** Positive = they owe, negative = they are owed, 0 = settled. */
   netOwed: number;
+  /** Who to settle with — the same lines the PDF lists. */
+  lines: SettlementPaymentLine[];
 }
 
 export async function buildUserSettlement(opts: {
@@ -76,18 +89,6 @@ export async function buildUserSettlement(opts: {
     ));
   const share = result.shares.find((s) => s.userId === userId);
 
-  const cached = await fileExists(key);
-  if (cached && !wantBytes) {
-    return {
-      key,
-      url,
-      buffer: null,
-      qty: share?.qty ?? 0,
-      costShare: share?.costShare ?? 0,
-      netOwed: share?.netOwed ?? 0,
-    };
-  }
-
   // The person's average price across what they drank. Their share of the
   // missing cans is left out — it is a loss, not a price — and shown apart.
   const avgUnitPrice =
@@ -109,6 +110,20 @@ export async function buildUserSettlement(opts: {
         },
   );
 
+  const figures = {
+    qty: share?.qty ?? 0,
+    costShare: share?.costShare ?? 0,
+    avgUnitPrice,
+    lossShare: share?.lossShare ?? 0,
+    netOwed: share?.netOwed ?? 0,
+    lines,
+  };
+
+  const cached = await fileExists(key);
+  if (cached && !wantBytes) {
+    return { key, url, buffer: null, ...figures };
+  }
+
   const buffer = await generateUserSettlementPdf({
     officeName: period.office.name,
     userName: user.name,
@@ -128,12 +143,5 @@ export async function buildUserSettlement(opts: {
     await uploadFile({ key, body: buffer, contentType: "application/pdf" });
   }
 
-  return {
-    key,
-    url,
-    buffer,
-    qty: share?.qty ?? 0,
-    costShare: share?.costShare ?? 0,
-    netOwed: share?.netOwed ?? 0,
-  };
+  return { key, url, buffer, ...figures };
 }
