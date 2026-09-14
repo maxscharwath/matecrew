@@ -200,6 +200,7 @@ export async function StockChartSection({ officeId, officeName }: ChartProps) {
       select: {
         id: true,
         name: true,
+        color: true,
         stock: { select: { currentQty: true } },
       },
     }),
@@ -223,7 +224,9 @@ export async function StockChartSection({ officeId, officeName }: ChartProps) {
     key: `item${idx}`,
     itemId: item.id,
     name: item.name,
-    color: CHART_COLORS[idx % CHART_COLORS.length],
+    // A colour pinned in Items wins here too, so an item wears one hue across
+    // the whole app rather than a different one per chart.
+    color: item.color ?? CHART_COLORS[idx % CHART_COLORS.length],
   }));
   // Back-solve each item's starting quantity from its current qty minus the
   // deltas inside the window, then walk forward day by day.

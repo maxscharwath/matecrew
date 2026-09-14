@@ -257,6 +257,10 @@ model Item {
   active    Boolean  @default(true)
   isDefault Boolean  @default(false)
   sortOrder Int      @default(0)
+  /// Hex colour ("#3987e5") an admin picked for this item's charts. Null lets
+  /// the chart palette assign one by rank, which is what every item does until
+  /// someone insists that the ginger one be orange.
+  color             String?
   /// When this item's own pool dips to or below this, the low-stock alert
   /// fires for it. Null means the item follows the office's threshold, which
   /// is what every item does until someone gives it a number of its own — a

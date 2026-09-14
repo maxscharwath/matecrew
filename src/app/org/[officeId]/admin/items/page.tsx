@@ -32,6 +32,7 @@ export default async function ItemsPage({ params }: Props) {
         sugarGrams: true,
         caffeineMg: true,
         lowStockThreshold: true,
+        color: true,
         stock: { select: { currentQty: true } },
         _count: { select: { consumptionEntries: true } },
       },
@@ -50,6 +51,7 @@ export default async function ItemsPage({ params }: Props) {
     stockQty: sumStockQty(i.stock),
     consumptionCount: i._count.consumptionEntries,
     lowStockThreshold: i.lowStockThreshold,
+    color: i.color,
   }));
 
   return (

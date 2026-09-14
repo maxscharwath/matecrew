@@ -10,9 +10,11 @@ import {
   Users,
 } from "lucide-react";
 import { requireMembership } from "@/lib/auth-utils";
+import { getTodayDate } from "@/lib/date";
 import {
   getOfficeStats,
   parseStatsPeriod,
+  parseStatsRange,
   SUGAR_IDEAL_G_PER_DAY,
   SUGAR_MAX_G_PER_DAY,
   CAFFEINE_MODERATE_MG_PER_DAY,
@@ -41,6 +43,7 @@ import { TimelineChart } from "@/components/stats/timeline-chart";
 import { ItemsChart } from "@/components/stats/items-chart";
 import { UsersChart } from "@/components/stats/users-chart";
 import { PeriodFilter } from "@/components/stats/period-filter";
+import { StatsRangePicker } from "@/components/stats/range-picker";
 import { PreferencesList } from "@/components/stats/preferences-list";
 import { cn } from "@/lib/utils";
 
@@ -55,11 +58,19 @@ export default async function StatsPage({ params, searchParams }: Props) {
   const { officeId } = await params;
   const sp = await searchParams;
   const period = parseStatsPeriod(sp.period);
+  // A picked range overrides the preset — see StatsRangePicker, which drops
+  // `period` from the URL when it applies one.
+  const custom = parseStatsRange(sp.from, sp.to, getTodayDate());
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
   const locale = await getLocale();
 
-  const stats = await getOfficeStats(officeId, session.user.id, period);
+  const stats = await getOfficeStats(
+    officeId,
+    session.user.id,
+    period,
+    custom,
+  );
   const hasData = stats.totals.officeQty > 0;
 
   const dateFmt = new Intl.DateTimeFormat(locale, {
@@ -77,7 +88,7 @@ export default async function StatsPage({ params, searchParams }: Props) {
           <h1 className="text-2xl font-bold">{t("stats.title")}</h1>
           <p className="mt-1 text-muted-foreground">
             {/* "All time" over an empty office has no range to speak of. */}
-            {hasData || period !== "all"
+            {hasData || custom || period !== "all"
               ? t("stats.rangeSummary", {
                   range: rangeLabel,
                   days: stats.range.days,
@@ -85,8 +96,12 @@ export default async function StatsPage({ params, searchParams }: Props) {
               : t("stats.subtitle")}
           </p>
         </div>
-        <div className="overflow-x-auto">
-          <PeriodFilter period={period} />
+        <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
+          <PeriodFilter period={custom ? "custom" : period} />
+          <StatsRangePicker
+            from={custom ? stats.range.start : undefined}
+            to={custom ? stats.range.end : undefined}
+          />
         </div>
       </div>
 
@@ -98,10 +113,12 @@ export default async function StatsPage({ params, searchParams }: Props) {
             </div>
             <div className="space-y-1">
               <p className="font-medium">
-                {period === "all" ? t("stats.empty") : t("stats.emptyPeriod")}
+                {period === "all" && !custom
+                  ? t("stats.empty")
+                  : t("stats.emptyPeriod")}
               </p>
               <p className="text-sm text-muted-foreground">
-                {period === "all"
+                {period === "all" && !custom
                   ? t("stats.emptyDescription")
                   : t("stats.emptyPeriodDescription")}
               </p>

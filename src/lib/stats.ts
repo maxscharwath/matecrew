@@ -3,13 +3,20 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { getTodayDate } from "@/lib/date";
-import { DEFAULT_STATS_PERIOD, type StatsPeriod } from "@/lib/stats-period";
+import {
+  DEFAULT_STATS_PERIOD,
+  type StatsPeriod,
+  type StatsRange,
+} from "@/lib/stats-period";
 
 export {
   STATS_PERIODS,
   DEFAULT_STATS_PERIOD,
   parseStatsPeriod,
+  parseStatsRange,
+  toIsoDay,
   type StatsPeriod,
+  type StatsRange,
 } from "@/lib/stats-period";
 
 /**
@@ -150,10 +157,13 @@ export interface ItemStats {
   itemId: string;
   name: string;
   qty: number;
+  /** Colour pinned by an admin, or null to let the chart palette decide. */
+  color: string | null;
 }
 
 export interface OfficeStats {
-  period: StatsPeriod;
+  /** The preset in force, or "custom" when the range came from the picker. */
+  period: StatsPeriod | "custom";
   range: {
     /** "YYYY-MM-DD", inclusive. Resolved: for "all" this is the first entry. */
     start: string;
@@ -184,16 +194,21 @@ export async function getOfficeStats(
   officeId: string,
   userId: string,
   period: StatsPeriod = DEFAULT_STATS_PERIOD,
+  /** An explicit range from the date picker; it overrides `period`. */
+  custom?: StatsRange | null,
 ): Promise<OfficeStats> {
   const today = getTodayDate();
-  const start = periodStart(period, today);
+  // A custom range also moves the *end* of the window, which no preset does:
+  // presets always run up to today.
+  const start = custom ? custom.start : periodStart(period, today);
+  const end = custom ? custom.end : today;
 
   const [entries, items, memberships] = await Promise.all([
     prisma.consumptionEntry.findMany({
       where: {
         officeId,
         cancelledAt: null,
-        date: { ...(start ? { gte: start } : {}), lte: today },
+        date: { ...(start ? { gte: start } : {}), lte: end },
       },
       select: { date: true, qty: true, itemId: true, userId: true },
     }),
@@ -202,6 +217,7 @@ export async function getOfficeStats(
       select: {
         id: true,
         name: true,
+        color: true,
         volumeMl: true,
         sugarGrams: true,
         caffeineMg: true,
@@ -221,12 +237,12 @@ export async function getOfficeStats(
     (min, e) => (min === null || e.date < min ? e.date : min),
     null,
   );
-  const rangeStart = start ?? firstEntry ?? today;
+  const rangeStart = start ?? firstEntry ?? end;
   const days =
-    Math.floor((today.getTime() - rangeStart.getTime()) / MS_PER_DAY) + 1;
+    Math.floor((end.getTime() - rangeStart.getTime()) / MS_PER_DAY) + 1;
   const granularity = pickGranularity(days);
 
-  const keys = bucketKeys(rangeStart, today, granularity);
+  const keys = bucketKeys(rangeStart, end, granularity);
   const mineByBucket = new Map(keys.map((k) => [k, 0]));
   const othersByBucket = new Map(keys.map((k) => [k, 0]));
 
@@ -306,12 +322,13 @@ export async function getOfficeStats(
       itemId,
       name: itemById.get(itemId)?.name ?? "?",
       qty,
+      color: itemById.get(itemId)?.color ?? null,
     }))
     .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
 
   return {
-    period,
-    range: { start: dayKey(rangeStart), end: dayKey(today), days },
+    period: custom ? "custom" : period,
+    range: { start: dayKey(rangeStart), end: dayKey(end), days },
     totals: {
       officeQty,
       officeLiters,

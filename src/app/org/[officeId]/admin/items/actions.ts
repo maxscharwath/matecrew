@@ -266,6 +266,45 @@ export async function setItemLowStockThreshold(
   return { success: true };
 }
 
+/** `#rrggbb`, lowercase or upper — the shape an `<input type="color">` emits. */
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Pins an item's chart colour, or clears it back to the palette. Null rather
+ * than a copy of the palette hue, so an item left on "automatic" keeps
+ * following its rank as the office's mix changes.
+ */
+export async function setItemColor(
+  officeId: string,
+  itemId: string,
+  color: string | null,
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const parsed = z
+    .object({ color: z.string().regex(HEX_COLOR).nullable() })
+    .safeParse({ color });
+  if (!parsed.success) {
+    return { success: false, error: t("items.colorInvalid") };
+  }
+
+  const item = await prisma.item.findFirst({
+    where: { id: itemId, officeId },
+    select: { id: true },
+  });
+  if (!item) return { success: false, error: t("errors.itemNotFound") };
+
+  await prisma.item.update({
+    where: { id: itemId },
+    data: { color: parsed.data.color?.toLowerCase() ?? null },
+  });
+
+  revalidateItemPages(officeId);
+  revalidatePath(`/org/${officeId}/stats`);
+  return { success: true };
+}
+
 export async function setDefaultItem(
   officeId: string,
   itemId: string,

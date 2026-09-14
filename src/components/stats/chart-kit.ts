@@ -10,6 +10,7 @@ import {
   LinearScale,
   Tooltip,
 } from "chart.js";
+import { ITEM_COLOR_PRESETS } from "@/lib/item-colors";
 
 ChartJS.register(
   ArcElement,
@@ -29,15 +30,8 @@ ChartJS.defaults.font.size = 11;
  * against the app's card surfaces (light #ffffff / dark #171717).
  * Fixed slot order — never cycle or reshuffle.
  */
-const SERIES_LIGHT = [
-  "#2a78d6", // blue
-  "#008300", // green
-  "#e87ba4", // magenta
-  "#eda100", // yellow
-  "#1baf7a", // aqua
-  "#eb6834", // orange
-];
-const SERIES_DARK = [
+const SERIES_LIGHT: readonly string[] = ITEM_COLOR_PRESETS;
+const SERIES_DARK: readonly string[] = [
   "#3987e5",
   "#008300",
   "#d55181",
@@ -47,7 +41,7 @@ const SERIES_DARK = [
 ];
 
 export interface ChartTheme {
-  series: string[];
+  series: readonly string[];
   /** De-emphasis gray for "context" series. */
   deemphasis: string;
   /** Card surface — used for the 2px gaps between touching marks. */
@@ -107,6 +101,8 @@ export interface ItemDatum {
   itemId: string;
   name: string;
   qty: number;
+  /** Colour pinned by an admin; null leaves the slot to the palette. */
+  color?: string | null;
 }
 
 export interface ItemSlot {
@@ -115,6 +111,8 @@ export interface ItemSlot {
   /** Every item folded into this slot ("Other" holds the long tail). */
   itemIds: string[];
   isOther: boolean;
+  /** The pinned colour of the single item in this slot, if it has one. */
+  color?: string | null;
 }
 
 /**
@@ -128,6 +126,7 @@ export function itemSlots(items: ItemDatum[], otherLabel: string): ItemSlot[] {
     name: i.name,
     itemIds: [i.itemId],
     isOther: false,
+    color: i.color ?? null,
   }));
   const tail = items.slice(MAX_ITEM_SLICES);
   if (tail.length === 0) return head;
@@ -142,11 +141,17 @@ export function itemSlots(items: ItemDatum[], otherLabel: string): ItemSlot[] {
   ];
 }
 
+/**
+ * A pinned colour wins over the palette, in both themes — that is the whole
+ * point of pinning one. Everything unpinned keeps its rank-based slot, and
+ * "Other" stays the de-emphasis gray whatever the tail contains.
+ */
 export function slotColor(
   theme: ChartTheme,
   slot: ItemSlot,
   index: number,
 ): string {
+  if (slot.color) return slot.color;
   return slot.isOther
     ? theme.deemphasis
     : theme.series[index % theme.series.length];

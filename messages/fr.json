@@ -214,7 +214,10 @@
     "empty": "Pas encore de consommation enregistrée",
     "emptyDescription": "Les statistiques apparaîtront après les premiers matés servis.",
     "emptyPeriod": "Aucune consommation sur cette période",
-    "emptyPeriodDescription": "Choisissez une période plus large pour voir des statistiques."
+    "emptyPeriodDescription": "Choisissez une période plus large pour voir des statistiques.",
+    "customRange": "Période personnalisée",
+    "rangeApply": "Appliquer",
+    "rangeReset": "Réinitialiser"
   },
   "request": {
     "mateOfTheDay": "Maté du jour",
@@ -889,7 +892,11 @@
     "thresholdHint": "Laissez vide pour suivre le seuil du bureau ({qty}). Une saveur peu bue mérite un seuil plus bas que le maté de la maison.",
     "thresholdInherited": "seuil {qty} (bureau)",
     "thresholdOwn": "seuil {qty}",
-    "thresholdInvalid": "Seuil invalide : un entier positif, ou vide pour suivre le bureau."
+    "thresholdInvalid": "Seuil invalide : un entier positif, ou vide pour suivre le bureau.",
+    "color": "Couleur des graphiques",
+    "colorAuto": "Auto",
+    "colorCustom": "Couleur personnalisée",
+    "colorInvalid": "Couleur invalide : utilisez un code hexadécimal (#3987e5)."
   },
   "oauthConsent": {
     "title": "Connecter {client} à MateCrew",

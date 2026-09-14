@@ -214,7 +214,10 @@
     "empty": "No consumption recorded yet",
     "emptyDescription": "Statistics will appear after the first matés are served.",
     "emptyPeriod": "No consumption in this period",
-    "emptyPeriodDescription": "Pick a wider period to see statistics."
+    "emptyPeriodDescription": "Pick a wider period to see statistics.",
+    "customRange": "Custom range",
+    "rangeApply": "Apply",
+    "rangeReset": "Reset"
   },
   "request": {
     "mateOfTheDay": "Maté of the Day",
@@ -889,7 +892,11 @@
     "thresholdHint": "Leave empty to follow the office threshold ({qty}). A rarely-drunk flavour deserves a lower floor than the house maté.",
     "thresholdInherited": "threshold {qty} (office)",
     "thresholdOwn": "threshold {qty}",
-    "thresholdInvalid": "Invalid threshold: a positive whole number, or empty to follow the office."
+    "thresholdInvalid": "Invalid threshold: a positive whole number, or empty to follow the office.",
+    "color": "Chart colour",
+    "colorAuto": "Auto",
+    "colorCustom": "Custom colour",
+    "colorInvalid": "Invalid colour: use a hex code (#3987e5)."
   },
   "oauthConsent": {
     "title": "Connect {client} to MateCrew",

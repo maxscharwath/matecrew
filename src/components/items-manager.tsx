@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BellRing, Boxes, Candy, Check, Droplets, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff, Zap } from "lucide-react";
+import { BellRing, Boxes, Candy, Check, Droplets, Palette, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -15,12 +15,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ItemThumb } from "@/components/item-thumb";
+import { ITEM_COLOR_PRESETS } from "@/lib/item-colors";
+import { cn } from "@/lib/utils";
 import {
   createItem,
   renameItem,
   removeItemImage,
   setDefaultItem,
   setItemActive,
+  setItemColor,
   setItemImage,
   setItemLowStockThreshold,
   setItemNutrition,
@@ -39,6 +42,8 @@ interface ItemRow {
   consumptionCount: number;
   /** Null when the item follows the office threshold. */
   lowStockThreshold: number | null;
+  /** Null when the charts pick this item's colour by rank. */
+  color: string | null;
 }
 
 interface ItemsManagerProps {
@@ -62,6 +67,7 @@ export function ItemsManager({
   const [editSugar, setEditSugar] = useState("");
   const [editCaffeine, setEditCaffeine] = useState("");
   const [editThreshold, setEditThreshold] = useState("");
+  const [editColor, setEditColor] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageTargetId = useRef<string | null>(null);
 
@@ -119,6 +125,7 @@ export function ItemsManager({
     setEditThreshold(
       item.lowStockThreshold === null ? "" : String(item.lowStockThreshold),
     );
+    setEditColor(item.color);
   }
 
   function handleSaveEdit(item: ItemRow) {
@@ -137,6 +144,14 @@ export function ItemsManager({
       const threshold = editThreshold.trim() === "" ? null : Number(editThreshold);
       if (threshold !== item.lowStockThreshold) {
         const saved = await setItemLowStockThreshold(officeId, item.id, threshold);
+        if (!saved.success) {
+          toast.error(saved.error);
+          return;
+        }
+      }
+
+      if (editColor !== item.color) {
+        const saved = await setItemColor(officeId, item.id, editColor);
         if (!saved.success) {
           toast.error(saved.error);
           return;
@@ -330,10 +345,87 @@ export function ItemsManager({
                         qty: officeLowStockThreshold,
                       })}
                     </p>
+                    <div className="space-y-1">
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Palette className="size-3" />
+                        {t("items.color")}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {/* Automatic first: it is the state to come back to,
+                            and the one most items should stay in. */}
+                        <button
+                          type="button"
+                          onClick={() => setEditColor(null)}
+                          className={cn(
+                            "h-7 rounded-md border px-2 text-xs",
+                            editColor === null
+                              ? "border-ring ring-2 ring-ring/40"
+                              : "text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          {t("items.colorAuto")}
+                        </button>
+                        {ITEM_COLOR_PRESETS.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            aria-label={preset}
+                            title={preset}
+                            onClick={() => setEditColor(preset)}
+                            style={{ backgroundColor: preset }}
+                            className={cn(
+                              "size-7 rounded-md border border-black/10",
+                              editColor === preset &&
+                                "ring-2 ring-ring/60 ring-offset-1 ring-offset-background",
+                            )}
+                          />
+                        ))}
+                        {/* Anything outside the six: the native picker keeps
+                            the custom hue visible as its own swatch. */}
+                        <label
+                          className={cn(
+                            "flex size-7 cursor-pointer items-center justify-center rounded-md border",
+                            editColor && !ITEM_COLOR_PRESETS.includes(
+                              editColor as (typeof ITEM_COLOR_PRESETS)[number],
+                            )
+                              ? "ring-2 ring-ring/60 ring-offset-1 ring-offset-background"
+                              : "text-muted-foreground hover:bg-accent",
+                          )}
+                          style={
+                            editColor &&
+                            !ITEM_COLOR_PRESETS.includes(
+                              editColor as (typeof ITEM_COLOR_PRESETS)[number],
+                            )
+                              ? { backgroundColor: editColor }
+                              : undefined
+                          }
+                          title={t("items.colorCustom")}
+                        >
+                          <Palette className="size-3.5" />
+                          <input
+                            type="color"
+                            className="sr-only"
+                            value={editColor ?? "#2a78d6"}
+                            onChange={(e) => setEditColor(e.target.value)}
+                          />
+                          <span className="sr-only">
+                            {t("items.colorCustom")}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      {item.color && (
+                        <span
+                          className="size-2.5 shrink-0 rounded-[3px]"
+                          style={{ backgroundColor: item.color }}
+                          title={item.color}
+                          aria-hidden
+                        />
+                      )}
                       <span className="font-medium">{item.name}</span>
                       {item.isDefault && (
                         <Badge className="gap-1 bg-amber-100 text-amber-700 text-[10px] hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300">
