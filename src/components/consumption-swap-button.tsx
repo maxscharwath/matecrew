@@ -49,6 +49,12 @@ interface ConsumptionSwapButtonProps {
  * the settlement all follow. Lives on the row rather than behind a bulk form
  * because the correction is always about one can you can point at.
  *
+ * The trigger *is* the item cell — the name you want to change, drawn as a
+ * button with the swap arrows beside it. An icon parked in a trailing column
+ * was the first attempt and nobody found it: at the far edge of a five-column
+ * table it reads as decoration, and nothing connects it to the item. Clicking
+ * the thing you want to edit needs no discovery.
+ *
  * The candidates carry their current stock, so an admin sees before clicking
  * whether the shelf can absorb the swap — the action refuses a count that
  * cannot, and that is the number they need to fix first.
@@ -83,12 +89,18 @@ export function ConsumptionSwapButton({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon"
+          variant="outline"
+          size="sm"
+          className="h-8 max-w-full justify-start gap-1.5 px-2 font-normal"
           disabled={candidates.length === 0}
-          title={candidates.length === 0 ? t("bulkConsumption.swapNoOther") : t("bulkConsumption.swap")}
+          title={
+            candidates.length === 0
+              ? t("bulkConsumption.swapNoOther")
+              : t("bulkConsumption.swap")
+          }
         >
-          <ArrowLeftRight className="size-4 text-muted-foreground" />
+          <span className="truncate">{entry.itemName}</span>
+          <ArrowLeftRight className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="sr-only">{t("bulkConsumption.swap")}</span>
         </Button>
       </DialogTrigger>

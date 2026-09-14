@@ -172,14 +172,13 @@ export async function ConsumptionListSection({
                 <TableHead>{t("bulkConsumption.source")}</TableHead>
                 <TableHead>{t("bulkConsumption.date")}</TableHead>
                 <TableHead>{t("bulkConsumption.qty")}</TableHead>
-                <TableHead className="w-[60px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {entries.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={5}
                     className="py-6 text-center text-sm text-muted-foreground"
                   >
                     {t("bulkConsumption.noEntriesForFilter")}
@@ -191,8 +190,24 @@ export async function ConsumptionListSection({
                   <TableCell className="font-medium">
                     {entry.user.name}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.item.name}
+                  <TableCell>
+                    <ConsumptionSwapButton
+                      officeId={officeId}
+                      entry={{
+                        id: entry.id,
+                        itemId: entry.itemId,
+                        itemName: entry.item.name,
+                        memberName: entry.user.name,
+                        qty: entry.qty,
+                        date: entry.date.toLocaleDateString("fr-CH", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          timeZone: "UTC",
+                        }),
+                      }}
+                      items={swapItems}
+                    />
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="font-normal">
@@ -227,25 +242,6 @@ export async function ConsumptionListSection({
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{entry.qty}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <ConsumptionSwapButton
-                      officeId={officeId}
-                      entry={{
-                        id: entry.id,
-                        itemId: entry.itemId,
-                        itemName: entry.item.name,
-                        memberName: entry.user.name,
-                        qty: entry.qty,
-                        date: entry.date.toLocaleDateString("fr-CH", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          timeZone: "UTC",
-                        }),
-                      }}
-                      items={swapItems}
-                    />
                   </TableCell>
                 </TableRow>
               ))}
