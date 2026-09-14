@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TodayConsumptionsCard } from "@/components/today-consumptions-card";
-import { MateCan } from "@/components/mate-can";
+import { MateCrewLogo } from "@/components/matecrew-logo";
 import { TakeCanButton } from "@/components/take-can-button";
 import {
   MateActivityHeatmap,
@@ -175,9 +175,14 @@ export async function HeroSection({ officeId }: { officeId: string }) {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Card className="flex flex-col items-center justify-center gap-2 p-6">
-        {/* The thing being taken, above the button that takes it. */}
-        <MateCan className="h-44 w-full" />
+      <Card className="flex flex-col items-center justify-center gap-4 p-6">
+        {/* The mark stands in for the thing being taken, above the button that
+            takes it. A flat tile rather than the 3D can: the dashboard is the
+            first screen of every session and does not need a WebGL renderer to
+            show a button. */}
+        <div className="brand-gradient flex size-28 items-center justify-center rounded-3xl text-white shadow-sm">
+          <MateCrewLogo className="size-14" />
+        </div>
         <TakeCanButton officeId={officeId} items={items} />
       </Card>
       <Card>
