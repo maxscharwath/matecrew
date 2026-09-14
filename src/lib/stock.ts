@@ -54,3 +54,19 @@ export function stockDeltaOps(opts: {
     }),
   ];
 }
+
+/**
+ * The threshold that decides whether an item counts as low: its own when it
+ * has one, the office's otherwise.
+ *
+ * One function rather than `?? office.lowStockThreshold` sprinkled around,
+ * because the fallback has to read the same way everywhere — an alert that
+ * fires on the item's number while a screen still paints "ok" from the
+ * office's is worse than having no per-item threshold at all.
+ */
+export function effectiveLowStockThreshold(
+  itemThreshold: number | null | undefined,
+  officeThreshold: number,
+): number {
+  return itemThreshold ?? officeThreshold;
+}

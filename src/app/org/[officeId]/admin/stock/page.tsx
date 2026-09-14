@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { getActiveItems } from "@/lib/items";
+import { effectiveLowStockThreshold } from "@/lib/stock";
 import { toIdList } from "@/lib/search-params";
 import { StockCard } from "@/components/stock-card";
 import { getTranslations } from "next-intl/server";
@@ -37,6 +38,14 @@ export default async function StockPage({ params, searchParams }: Props) {
   ]);
 
   const currentQty = items.reduce((sum, i) => sum + i.stockQty, 0);
+  // The office-wide forecast reorders when the shelf as a whole reaches what
+  // its items each want to keep in reserve, so the floor is the sum of the
+  // per-item thresholds rather than the office number on its own.
+  const thresholdTotal = items.reduce(
+    (sum, i) =>
+      sum + effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold),
+    0,
+  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -55,7 +64,10 @@ export default async function StockPage({ params, searchParams }: Props) {
             itemId={item.id}
             itemName={item.name}
             currentQty={item.stockQty}
-            lowStockThreshold={office.lowStockThreshold}
+            lowStockThreshold={effectiveLowStockThreshold(
+              item.lowStockThreshold,
+              office.lowStockThreshold,
+            )}
           />
         ))}
       </div>
@@ -64,7 +76,7 @@ export default async function StockPage({ params, searchParams }: Props) {
         <StockPredictionSection
           officeId={officeId}
           currentQty={currentQty}
-          lowStockThreshold={office.lowStockThreshold}
+          lowStockThreshold={thresholdTotal}
         />
       </Suspense>
 

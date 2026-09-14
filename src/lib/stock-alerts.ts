@@ -1,12 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { sendSlackMessage, buildLowStockMessage } from "@/lib/slack";
+import { effectiveLowStockThreshold } from "@/lib/stock";
 
 const ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
  * Checks a single item's stock pool and sends a low-stock Slack alert when it
- * dips to/below the office threshold (with a 24h cooldown per item). Resets the
- * alert flag once stock recovers.
+ * dips to/below its threshold — its own when set, the office's otherwise —
+ * with a 24h cooldown per item. Resets the alert flag once stock recovers.
  */
 export async function checkAndAlertLowStock(
   officeId: string,
@@ -14,7 +15,10 @@ export async function checkAndAlertLowStock(
 ): Promise<void> {
   const stock = await prisma.stock.findUnique({
     where: { officeId_itemId: { officeId, itemId } },
-    include: { office: true, item: { select: { name: true } } },
+    include: {
+      office: true,
+      item: { select: { name: true, lowStockThreshold: true } },
+    },
   });
 
   if (!stock) return;
@@ -22,7 +26,12 @@ export async function checkAndAlertLowStock(
   const { office } = stock;
   if (!office.slackChannelId) return;
 
-  if (stock.currentQty <= office.lowStockThreshold) {
+  const threshold = effectiveLowStockThreshold(
+    stock.item.lowStockThreshold,
+    office.lowStockThreshold,
+  );
+
+  if (stock.currentQty <= threshold) {
     // Check cooldown — don't spam
     if (
       stock.lowStockAlertSentAt &&
@@ -34,7 +43,7 @@ export async function checkAndAlertLowStock(
     const { blocks, fallback } = await buildLowStockMessage(
       office.name,
       stock.currentQty,
-      office.lowStockThreshold,
+      threshold,
       office.locale,
       stock.item.name,
     );

@@ -64,7 +64,8 @@ interface RunnerViewProps {
   readonly nextHref: string | null;
   readonly currentSessionHref: string | null;
   readonly stockQty: number;
-  readonly lowStockThreshold: number;
+  /** True when any single item sits at or below its own alert threshold. */
+  readonly stockLow: boolean;
   readonly forgottenOrders: ForgottenOrder[];
 }
 
@@ -208,15 +209,19 @@ function RequestRow({
   );
 }
 
+/**
+ * The whole shelf in one badge. It turns red as soon as *one* item runs low,
+ * rather than on the total: with per-item thresholds a fridge full of Classic
+ * can still be out of Ginger, and the total would happily call that fine.
+ */
 function StockBadge({
   qty,
-  threshold,
+  low,
 }: {
   readonly qty: number;
-  readonly threshold: number;
+  readonly low: boolean;
 }) {
   const t = useTranslations("runner");
-  const low = qty <= threshold;
   return (
     <Badge
       variant={low ? "destructive" : "secondary"}
@@ -238,7 +243,7 @@ export function RunnerView({
   nextHref,
   currentSessionHref,
   stockQty,
-  lowStockThreshold,
+  stockLow,
   forgottenOrders,
 }: RunnerViewProps) {
   const [isPending, startTransition] = useTransition();
@@ -351,7 +356,7 @@ export function RunnerView({
           <h1 className="text-2xl font-bold">
             {isToday ? t("runner.title") : t("runner.titlePast")}
           </h1>
-          <StockBadge qty={stockQty} threshold={lowStockThreshold} />
+          <StockBadge qty={stockQty} low={stockLow} />
         </div>
         <SessionNavigator
           date={date}

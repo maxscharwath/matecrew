@@ -140,6 +140,9 @@ export function OfficeSettingsForm({ office }: OfficeSettingsFormProps) {
               min={0}
               defaultValue={office.lowStockThreshold}
             />
+            <p className="text-xs text-muted-foreground">
+              {t('settings.lowStockThresholdHint')}
+            </p>
           </div>
 
           <div className="flex justify-end pt-2">

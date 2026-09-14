@@ -14,22 +14,29 @@ export default async function ItemsPage({ params }: Props) {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
-  const items = await prisma.item.findMany({
-    where: { officeId },
-    orderBy: ITEM_DISPLAY_ORDER,
-    select: {
-      id: true,
-      name: true,
-      imageKey: true,
-      active: true,
-      isDefault: true,
-      volumeMl: true,
-      sugarGrams: true,
-      caffeineMg: true,
-      stock: { select: { currentQty: true } },
-      _count: { select: { consumptionEntries: true } },
-    },
-  });
+  const [office, items] = await Promise.all([
+    prisma.office.findUniqueOrThrow({
+      where: { id: officeId },
+      select: { lowStockThreshold: true },
+    }),
+    prisma.item.findMany({
+      where: { officeId },
+      orderBy: ITEM_DISPLAY_ORDER,
+      select: {
+        id: true,
+        name: true,
+        imageKey: true,
+        active: true,
+        isDefault: true,
+        volumeMl: true,
+        sugarGrams: true,
+        caffeineMg: true,
+        lowStockThreshold: true,
+        stock: { select: { currentQty: true } },
+        _count: { select: { consumptionEntries: true } },
+      },
+    }),
+  ]);
 
   const rows = items.map((i) => ({
     id: i.id,
@@ -42,6 +49,7 @@ export default async function ItemsPage({ params }: Props) {
     caffeineMg: i.caffeineMg,
     stockQty: sumStockQty(i.stock),
     consumptionCount: i._count.consumptionEntries,
+    lowStockThreshold: i.lowStockThreshold,
   }));
 
   return (
@@ -50,7 +58,11 @@ export default async function ItemsPage({ params }: Props) {
         <h1 className="text-2xl font-bold">{t("items.title")}</h1>
         <p className="mt-1 text-muted-foreground">{t("items.subtitle")}</p>
       </div>
-      <ItemsManager officeId={officeId} items={rows} />
+      <ItemsManager
+        officeId={officeId}
+        items={rows}
+        officeLowStockThreshold={office.lowStockThreshold}
+      />
     </div>
   );
 }

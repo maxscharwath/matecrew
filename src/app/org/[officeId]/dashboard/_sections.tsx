@@ -37,6 +37,7 @@ import {
 import { getTodayDate } from "@/lib/date";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { getActiveItems } from "@/lib/items";
+import { effectiveLowStockThreshold } from "@/lib/stock";
 import { cn } from "@/lib/utils";
 
 interface SectionProps {
@@ -161,7 +162,16 @@ export async function HeroSection({ officeId }: { officeId: string }) {
   ]);
 
   const stockQty = stockAgg._sum.currentQty ?? 0;
-  const lowStockThreshold = membership.office.lowStockThreshold;
+  // A shelf is low as soon as one item is: the office total hides an item that
+  // has run out behind the pile of whatever sells less well.
+  const stockLow = items.some(
+    (i) =>
+      i.stockQty <=
+      effectiveLowStockThreshold(
+        i.lowStockThreshold,
+        membership.office.lowStockThreshold,
+      ),
+  );
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -176,15 +186,13 @@ export async function HeroSection({ officeId }: { officeId: string }) {
             <Package className="size-4 text-muted-foreground" />
             <CardDescription>{t('dashboard.stockLevel')}</CardDescription>
           </div>
-          <CardTitle className={`text-3xl ${stockQty <= lowStockThreshold ? "text-amber-600 dark:text-amber-400" : ""}`}>
+          <CardTitle className={`text-3xl ${stockLow ? "text-amber-600 dark:text-amber-400" : ""}`}>
             {stockQty}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground">
-            {stockQty <= lowStockThreshold
-              ? t('dashboard.stockLow')
-              : t('dashboard.stockOk')}
+            {stockLow ? t('dashboard.stockLow') : t('dashboard.stockOk')}
           </p>
         </CardContent>
       </Card>

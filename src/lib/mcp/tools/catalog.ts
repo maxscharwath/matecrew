@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentTimeInTimezone, getDayOfWeek } from "@/lib/date";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
+import { effectiveLowStockThreshold } from "@/lib/stock";
 import { resolveOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { DAY_NAMES, officeArg } from "@/lib/mcp/schemas";
@@ -42,20 +43,27 @@ export function registerCatalogTools(server: McpServer): void {
           volumeMl: true,
           sugarGrams: true,
           caffeineMg: true,
+          lowStockThreshold: true,
           stock: { select: { currentQty: true } },
         },
       });
 
       return {
         office: scope.officeName,
+        // The office default: an item without a threshold of its own uses it.
         lowStockThreshold: scope.lowStockThreshold,
         items: items.map((i) => {
           const stockQty = sumStockQty(i.stock);
+          const threshold = effectiveLowStockThreshold(
+            i.lowStockThreshold,
+            scope.lowStockThreshold,
+          );
           return {
             id: i.id,
             name: i.name,
             stockQty,
-            lowStock: stockQty <= scope.lowStockThreshold,
+            lowStockThreshold: threshold,
+            lowStock: stockQty <= threshold,
             isDefault: i.isDefault,
             active: i.active,
             sortOrder: i.sortOrder,

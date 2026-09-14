@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Boxes, Candy, Check, Droplets, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff, Zap } from "lucide-react";
+import { BellRing, Boxes, Candy, Check, Droplets, Pencil, Plus, Star, Archive, ArchiveRestore, X, PackageOpen, CupSoda, ImagePlus, ImageOff, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import {
   setDefaultItem,
   setItemActive,
   setItemImage,
+  setItemLowStockThreshold,
   setItemNutrition,
 } from "@/app/org/[officeId]/admin/items/actions";
 
@@ -36,14 +37,22 @@ interface ItemRow {
   caffeineMg: number;
   stockQty: number;
   consumptionCount: number;
+  /** Null when the item follows the office threshold. */
+  lowStockThreshold: number | null;
 }
 
 interface ItemsManagerProps {
   readonly officeId: string;
   readonly items: ItemRow[];
+  /** Used by every item that has no threshold of its own. */
+  readonly officeLowStockThreshold: number;
 }
 
-export function ItemsManager({ officeId, items }: ItemsManagerProps) {
+export function ItemsManager({
+  officeId,
+  items,
+  officeLowStockThreshold,
+}: ItemsManagerProps) {
   const t = useTranslations();
   const [isPending, startTransition] = useTransition();
   const [newName, setNewName] = useState("");
@@ -52,6 +61,7 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
   const [editVolume, setEditVolume] = useState("");
   const [editSugar, setEditSugar] = useState("");
   const [editCaffeine, setEditCaffeine] = useState("");
+  const [editThreshold, setEditThreshold] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageTargetId = useRef<string | null>(null);
 
@@ -104,6 +114,11 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
     setEditVolume(String(item.volumeMl));
     setEditSugar(String(item.sugarGrams));
     setEditCaffeine(String(item.caffeineMg));
+    // Empty means "follow the office", so a null threshold shows as a blank
+    // field with the office number as its placeholder.
+    setEditThreshold(
+      item.lowStockThreshold === null ? "" : String(item.lowStockThreshold),
+    );
   }
 
   function handleSaveEdit(item: ItemRow) {
@@ -119,6 +134,15 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
           return;
         }
       }
+      const threshold = editThreshold.trim() === "" ? null : Number(editThreshold);
+      if (threshold !== item.lowStockThreshold) {
+        const saved = await setItemLowStockThreshold(officeId, item.id, threshold);
+        if (!saved.success) {
+          toast.error(saved.error);
+          return;
+        }
+      }
+
       const nutritionData = new FormData();
       nutritionData.set("volumeMl", editVolume);
       nutritionData.set("sugarGrams", editSugar);
@@ -248,7 +272,7 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
                         <X className="size-4" />
                       </Button>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <label className="space-y-1 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1">
                           <Droplets className="size-3" />
@@ -287,7 +311,25 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
                           onChange={(e) => setEditCaffeine(e.target.value)}
                         />
                       </label>
+                      <label className="space-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <BellRing className="size-3" />
+                          {t("items.lowStockThreshold")}
+                        </span>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={editThreshold}
+                          placeholder={String(officeLowStockThreshold)}
+                          onChange={(e) => setEditThreshold(e.target.value)}
+                        />
+                      </label>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      {t("items.thresholdHint", {
+                        qty: officeLowStockThreshold,
+                      })}
+                    </p>
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -325,6 +367,16 @@ export function ItemsManager({ officeId, items }: ItemsManagerProps) {
                       <span className="inline-flex items-center gap-1 tabular-nums">
                         <Zap className="size-3" />
                         {item.caffeineMg} mg
+                      </span>
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <BellRing className="size-3" />
+                        {item.lowStockThreshold === null
+                          ? t("items.thresholdInherited", {
+                              qty: officeLowStockThreshold,
+                            })
+                          : t("items.thresholdOwn", {
+                              qty: item.lowStockThreshold,
+                            })}
                       </span>
                     </div>
                   </div>

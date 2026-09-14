@@ -9,7 +9,7 @@ import {
   checkAndAlertLowStock,
   checkAndAlertLowStockMany,
 } from "@/lib/stock-alerts";
-import { stockDeltaOps } from "@/lib/stock";
+import { effectiveLowStockThreshold, stockDeltaOps } from "@/lib/stock";
 import { recordStockCount } from "@/lib/stock-count";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { notifyQuietly } from "@/lib/mcp/notify";
@@ -54,6 +54,7 @@ export function registerAdminStockTools(server: McpServer): void {
           select: {
             id: true,
             name: true,
+            lowStockThreshold: true,
             stock: { select: { currentQty: true } },
           },
         }),
@@ -79,18 +80,19 @@ export function registerAdminStockTools(server: McpServer): void {
       const report = items.map((item) => {
         const itemMovements = movements.filter((m) => m.itemId === item.id);
         const currentQty = sumStockQty(item.stock);
-        // Per-item forecast: only this item's own movements drive its rate.
-        const prediction = predictReorder(
-          currentQty,
+        const threshold = effectiveLowStockThreshold(
+          item.lowStockThreshold,
           scope.lowStockThreshold,
-          itemMovements,
         );
+        // Per-item forecast: only this item's own movements drive its rate.
+        const prediction = predictReorder(currentQty, threshold, itemMovements);
 
         return {
           itemId: item.id,
           item: item.name,
           currentQty,
-          lowStock: currentQty <= scope.lowStockThreshold,
+          lowStockThreshold: threshold,
+          lowStock: currentQty <= threshold,
           forecast: {
             avgCansPerDay: roundCents(prediction.avgDailyConsumption),
             daysUntilThreshold:
@@ -121,6 +123,7 @@ export function registerAdminStockTools(server: McpServer): void {
 
       return {
         office: scope.officeName,
+        // The office default; an item with its own number reports it on its row.
         lowStockThreshold: scope.lowStockThreshold,
         totalCans: report.reduce((sum, r) => sum + r.currentQty, 0),
         itemsBelowThreshold: report
@@ -171,7 +174,7 @@ export function registerAdminStockTools(server: McpServer): void {
             { name: { equals: item.trim(), mode: "insensitive" } },
           ],
         },
-        select: { id: true, name: true },
+        select: { id: true, name: true, lowStockThreshold: true },
       });
       if (!target) {
         throw new McpToolError(
@@ -211,7 +214,12 @@ export function registerAdminStockTools(server: McpServer): void {
         item: target.name,
         previousQty: currentQty,
         newQty,
-        lowStock: newQty <= scope.lowStockThreshold,
+        lowStock:
+          newQty <=
+          effectiveLowStockThreshold(
+            target.lowStockThreshold,
+            scope.lowStockThreshold,
+          ),
         message: `${target.name}: ${currentQty} → ${newQty} cans.`,
       };
     },

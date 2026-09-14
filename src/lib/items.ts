@@ -16,6 +16,8 @@ export interface ItemSummary {
   isDefault: boolean;
   sortOrder: number;
   stockQty: number;
+  /** Null when the item follows the office's low-stock threshold. */
+  lowStockThreshold: number | null;
 }
 
 /** Canonical display order for an office's items (default first). */
@@ -41,6 +43,7 @@ export async function getActiveItems(officeId: string): Promise<ItemSummary[]> {
       imageKey: true,
       isDefault: true,
       sortOrder: true,
+      lowStockThreshold: true,
       stock: { select: { currentQty: true } },
     },
   });
@@ -51,6 +54,7 @@ export async function getActiveItems(officeId: string): Promise<ItemSummary[]> {
     isDefault: i.isDefault,
     sortOrder: i.sortOrder,
     stockQty: sumStockQty(i.stock),
+    lowStockThreshold: i.lowStockThreshold,
   }));
 }
 

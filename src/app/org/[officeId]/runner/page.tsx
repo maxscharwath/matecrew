@@ -4,6 +4,8 @@ import { resolveAvatarUrl, resolveItemImageUrl } from "@/lib/storage";
 import { getTodayDate, getDayOfWeek, toISODateString } from "@/lib/date";
 import { getActiveSession, getMostRecentSession, isSessionOpen } from "@/lib/session-utils";
 import { getForgottenOrders } from "@/lib/forgotten-orders";
+import { getActiveItems } from "@/lib/items";
+import { effectiveLowStockThreshold } from "@/lib/stock";
 import { RunnerView } from "@/components/runner-view";
 
 interface Props {
@@ -114,15 +116,25 @@ export default async function RunnerPage({ params, searchParams }: Props) {
   const { date: dateParam, session: sessionParam } = await searchParams;
   await requireMembership(officeId);
 
-  const office = await prisma.office.findUniqueOrThrow({
-    where: { id: officeId },
-    select: { timezone: true, lowStockThreshold: true },
-  });
+  const [office, stockAgg, stockItems] = await Promise.all([
+    prisma.office.findUniqueOrThrow({
+      where: { id: officeId },
+      select: { timezone: true, lowStockThreshold: true },
+    }),
+    prisma.stock.aggregate({
+      where: { officeId },
+      _sum: { currentQty: true },
+    }),
+    getActiveItems(officeId),
+  ]);
 
-  const stockAgg = await prisma.stock.aggregate({
-    where: { officeId },
-    _sum: { currentQty: true },
-  });
+  // One item under its own threshold is enough to call the shelf low — see
+  // StockBadge.
+  const stockLow = stockItems.some(
+    (i) =>
+      i.stockQty <=
+      effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold),
+  );
 
   const today = getTodayDate();
   const selectedDate = parseDate(dateParam) ?? today;
@@ -213,7 +225,7 @@ export default async function RunnerPage({ params, searchParams }: Props) {
         nextHref={nav.next ? `?date=${nav.next.date}&session=${nav.next.session}` : null}
         currentSessionHref={currentSessionHref}
         stockQty={stockAgg._sum.currentQty ?? 0}
-        lowStockThreshold={office.lowStockThreshold}
+        stockLow={stockLow}
         forgottenOrders={forgottenOrders}
       />
     </div>

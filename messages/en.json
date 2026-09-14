@@ -350,7 +350,7 @@
     "slackChannelIdPlaceholder": "C01234ABCDE",
     "slackChannelLabel": "Slack Channel Label",
     "slackChannelPlaceholder": "#maté-lausanne",
-    "lowStockThreshold": "Low Stock Threshold",
+    "lowStockThreshold": "Default low-stock threshold",
     "test": "Test",
     "saving": "Saving...",
     "saveChanges": "Save Changes",
@@ -360,7 +360,8 @@
     "deleteDescription": "Permanently delete this office and all its data including memberships, requests, stock, purchases, invoices, consumption history, and reimbursements. This action cannot be undone.",
     "deleteOffice": "Delete Office",
     "deleteConfirmTitle": "Delete this office?",
-    "deleteConfirmDescription": "This will permanently delete \"{name}\" and all associated data. This action is irreversible."
+    "deleteConfirmDescription": "This will permanently delete \"{name}\" and all associated data. This action is irreversible.",
+    "lowStockThresholdHint": "Used by every item without a threshold of its own, set per item under Items."
   },
   "stock": {
     "title": "Stock · {office}",
@@ -883,7 +884,12 @@
     "nutritionInvalid": "Invalid nutrition values",
     "volumeMl": "Volume (ml)",
     "sugarGrams": "Sugar (g)",
-    "caffeineMg": "Caffeine (mg)"
+    "caffeineMg": "Caffeine (mg)",
+    "lowStockThreshold": "Low threshold",
+    "thresholdHint": "Leave empty to follow the office threshold ({qty}). A rarely-drunk flavour deserves a lower floor than the house maté.",
+    "thresholdInherited": "threshold {qty} (office)",
+    "thresholdOwn": "threshold {qty}",
+    "thresholdInvalid": "Invalid threshold: a positive whole number, or empty to follow the office."
   },
   "oauthConsent": {
     "title": "Connect {client} to MateCrew",

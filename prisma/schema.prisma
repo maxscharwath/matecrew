@@ -257,6 +257,11 @@ model Item {
   active    Boolean  @default(true)
   isDefault Boolean  @default(false)
   sortOrder Int      @default(0)
+  /// When this item's own pool dips to or below this, the low-stock alert
+  /// fires for it. Null means the item follows the office's threshold, which
+  /// is what every item does until someone gives it a number of its own — a
+  /// rarely-drunk flavour needs a far lower floor than the house maté.
+  lowStockThreshold Int?
   // Per-unit nutrition facts, used by the stats screen (defaults ≈ a 50cl maté).
   volumeMl   Int   @default(500)
   sugarGrams Float @default(25)

@@ -350,7 +350,7 @@
     "slackChannelIdPlaceholder": "C01234ABCDE",
     "slackChannelLabel": "Libellé du canal Slack",
     "slackChannelPlaceholder": "#maté-lausanne",
-    "lowStockThreshold": "Seuil de stock bas",
+    "lowStockThreshold": "Seuil de stock bas par défaut",
     "test": "Test",
     "saving": "Enregistrement...",
     "saveChanges": "Enregistrer les modifications",
@@ -360,7 +360,8 @@
     "deleteDescription": "Supprimer définitivement ce bureau et toutes ses données : membres, demandes, stock, achats, factures, historique de consommation et remboursements. Cette action est irréversible.",
     "deleteOffice": "Supprimer le bureau",
     "deleteConfirmTitle": "Supprimer ce bureau ?",
-    "deleteConfirmDescription": "Cela supprimera définitivement « {name} » et toutes les données associées. Cette action est irréversible."
+    "deleteConfirmDescription": "Cela supprimera définitivement « {name} » et toutes les données associées. Cette action est irréversible.",
+    "lowStockThresholdHint": "Utilisé par tout article qui n'a pas son propre seuil, réglable dans Articles."
   },
   "stock": {
     "title": "Stock · {office}",
@@ -883,7 +884,12 @@
     "nutritionInvalid": "Valeurs nutritionnelles invalides",
     "volumeMl": "Volume (ml)",
     "sugarGrams": "Sucre (g)",
-    "caffeineMg": "Caféine (mg)"
+    "caffeineMg": "Caféine (mg)",
+    "lowStockThreshold": "Seuil bas",
+    "thresholdHint": "Laissez vide pour suivre le seuil du bureau ({qty}). Une saveur peu bue mérite un seuil plus bas que le maté de la maison.",
+    "thresholdInherited": "seuil {qty} (bureau)",
+    "thresholdOwn": "seuil {qty}",
+    "thresholdInvalid": "Seuil invalide : un entier positif, ou vide pour suivre le bureau."
   },
   "oauthConsent": {
     "title": "Connecter {client} à MateCrew",
