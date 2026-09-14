@@ -537,7 +537,14 @@
     "shrinkage": "{qty} cans missing at inventory (CHF {amount}), shared out across the period's drinkers in proportion to what they drank.",
     "surplus": "{qty} more cans than expected at inventory (CHF {amount}), credited back to the period's drinkers.",
     "shrinkageUnallocated": "CHF {amount} could not be billed to anyone (nothing was drunk in this period) and stays on the buyer.",
-    "ofWhichLoss": "incl. {amount} shrinkage"
+    "ofWhichLoss": "incl. {amount} shrinkage",
+    "sendStatements": "Email statements",
+    "resendStatements": "Re-send statements",
+    "resendStatementsDescription": "Statements for this period were already sent on {date}. Every member concerned will get a new email with their PDF.",
+    "statementsSent": "{count} statement(s) emailed",
+    "statementsSentOn": "Sent on {date}",
+    "statementsAlreadySent": "Statements for this period have already been sent.",
+    "statementsNoRecipients": "Nobody to send a statement to for this period."
   },
   "members": {
     "title": "Members",
@@ -815,7 +822,21 @@
       "requesterLabel": "Requester",
       "officeLabel": "Office",
       "button": "Review request"
-    }
+    },
+    "settlement": {
+      "subject": "Your maté statement · {period} — {office}",
+      "title": "{period} statement",
+      "intro": "Here is your maté statement for {period} at {office}. The details are in the attached PDF.",
+      "amountLabel_pay": "You owe",
+      "amountLabel_receive": "You are owed",
+      "amountLabel_settled": "Balance",
+      "cansLabel": "Matés drunk",
+      "shareLabel": "Your share",
+      "attachmentNote": "The attached PDF breaks down the prices, the missing cans and the payments to make.",
+      "button": "See my settlements",
+      "footer": "You receive this email every month as a member of {office} on MateCrew."
+    },
+    "copyLink": "Or copy this link:"
   },
   "slackLink": {
     "invalidTitle": "Link unavailable",

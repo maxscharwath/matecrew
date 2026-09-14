@@ -4,15 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireMembership, requireOrgRoles } from "@/lib/auth-utils";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
-import { generateUserSettlementPdf } from "@/lib/pdf-export";
-import { roundCents } from "@/lib/money";
-import {
-  buildUserSettlementKey,
-  fileExists,
-  uploadFile,
-  internalFileUrl,
-} from "@/lib/storage";
+import { buildUserSettlement } from "@/lib/settlement-pdf";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -92,88 +84,23 @@ export async function exportUserPeriodPdf(
   periodId: string
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   const { session } = await requireMembership(officeId);
-  const userId = session.user.id;
-  const userName = session.user.name;
   const t = await getTranslations();
-
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: userId },
-    select: { locale: true },
-  });
 
   const period = await prisma.reimbursementPeriod.findUnique({
     where: { id: periodId },
-    include: {
-      office: { select: { name: true } },
-      lines: {
-        where: { OR: [{ fromUserId: userId }, { toUserId: userId }] },
-        include: {
-          fromUser: { select: { name: true } },
-          toUser: { select: { name: true } },
-        },
-      },
-    },
+    select: { officeId: true },
   });
-
   if (!period || period.officeId !== officeId) {
     return { success: false, error: t('errors.periodNotFound') };
   }
 
-  const key = buildUserSettlementKey(periodId, userId);
-
-  // Serve cached PDF if available
-  if (await fileExists(key)) {
-    const url = internalFileUrl(key);
-    return { success: true, url };
+  const statement = await buildUserSettlement({
+    periodId,
+    userId: session.user.id,
+  });
+  if (!statement) {
+    return { success: false, error: t('errors.periodNotFound') };
   }
 
-  // Calculate user's share
-  const result = await calculateReimbursements(
-    officeId,
-    period.startDate,
-    period.endDate
-  );
-
-  const userShare = result.shares.find((s) => s.userId === userId);
-
-  // The user's average price across the items they drank. Their share of the
-  // missing cans is left out — it is a loss, not a price — and shown separately.
-  const userAvgPrice =
-    userShare && userShare.qty > 0
-      ? roundCents((userShare.costShare - userShare.lossShare) / userShare.qty)
-      : result.avgUnitPrice;
-
-  const userLines = period.lines.map((l) => {
-    if (l.fromUserId === userId) {
-      return {
-        direction: "pay" as const,
-        otherUserName: l.toUser.name,
-        amount: l.amount.toNumber(),
-      };
-    }
-    return {
-      direction: "receive" as const,
-      otherUserName: l.fromUser.name,
-      amount: l.amount.toNumber(),
-    };
-  });
-
-  const pdfBuffer = await generateUserSettlementPdf({
-    officeName: period.office.name,
-    userName,
-    startDate: period.startDate,
-    endDate: period.endDate,
-    avgUnitPrice: userAvgPrice,
-    qty: userShare?.qty ?? 0,
-    costShare: userShare?.costShare ?? 0,
-    lossShare: userShare?.lossShare ?? 0,
-    amountPaid: userShare?.amountPaid ?? 0,
-    netOwed: userShare?.netOwed ?? 0,
-    lines: userLines,
-    locale: user.locale,
-  });
-
-  await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
-  const url = internalFileUrl(key);
-  return { success: true, url };
+  return { success: true, url: statement.url };
 }

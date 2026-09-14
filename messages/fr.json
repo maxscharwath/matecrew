@@ -537,7 +537,14 @@
     "shrinkage": "{qty} canettes manquantes à l'inventaire (CHF {amount}), réparties entre les consommateurs de la période au prorata de ce qu'ils ont bu.",
     "surplus": "{qty} canettes de plus qu'attendu à l'inventaire (CHF {amount}), créditées aux consommateurs de la période.",
     "shrinkageUnallocated": "CHF {amount} n'ont pu être imputés à personne (aucune consommation sur la période) et restent à la charge de l'acheteur.",
-    "ofWhichLoss": "dont {amount} de coulage"
+    "ofWhichLoss": "dont {amount} de coulage",
+    "sendStatements": "Envoyer les décomptes",
+    "resendStatements": "Renvoyer les décomptes",
+    "resendStatementsDescription": "Les décomptes de cette période ont déjà été envoyés le {date}. Chaque membre concerné recevra un nouvel email avec son PDF.",
+    "statementsSent": "{count} décompte(s) envoyé(s) par email",
+    "statementsSentOn": "Envoyés le {date}",
+    "statementsAlreadySent": "Les décomptes de cette période ont déjà été envoyés.",
+    "statementsNoRecipients": "Personne à qui envoyer un décompte pour cette période."
   },
   "members": {
     "title": "Membres",
@@ -815,7 +822,21 @@
       "requesterLabel": "Demandeur",
       "officeLabel": "Office",
       "button": "Examiner la demande"
-    }
+    },
+    "settlement": {
+      "subject": "Votre décompte maté · {period} — {office}",
+      "title": "Décompte de {period}",
+      "intro": "Voici votre décompte maté pour {period} au bureau {office}. Le détail est dans le PDF joint.",
+      "amountLabel_pay": "Vous devez",
+      "amountLabel_receive": "On vous doit",
+      "amountLabel_settled": "Solde",
+      "cansLabel": "Matés bus",
+      "shareLabel": "Votre part",
+      "attachmentNote": "Le PDF joint détaille les prix, les canettes manquantes et les paiements à faire.",
+      "button": "Voir mes règlements",
+      "footer": "Vous recevez cet email chaque mois en tant que membre du bureau {office} sur MateCrew."
+    },
+    "copyLink": "Ou copiez ce lien :"
   },
   "slackLink": {
     "invalidTitle": "Lien indisponible",

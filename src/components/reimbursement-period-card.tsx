@@ -17,6 +17,7 @@ import {
   Undo2,
   RefreshCw,
   AlertTriangle,
+  Mail,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ import {
   deletePeriod,
   exportPeriodCsv,
   exportPeriodPdf,
+  sendStatements,
   syncPeriod,
 } from "@/app/org/[officeId]/admin/reimbursements/actions";
 import {
@@ -74,6 +76,8 @@ interface ReimbursementPeriodCardProps {
     startDate: string;
     endDate: string;
     lines: Line[];
+    /** ISO instant the statements were last mailed, or null if never. */
+    statementsSentAt: string | null;
   };
   readonly shares: Share[];
   readonly totalConsumption: number;
@@ -125,6 +129,7 @@ export function ReimbursementPeriodCard({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [resendOpen, setResendOpen] = useState(false);
   const t = useTranslations();
 
   const paidCount = period.lines.filter((l) => l.status === "PAID").length;
@@ -137,6 +142,24 @@ export function ReimbursementPeriodCard({
       if (result.success) {
         toast.success(t('reimbursements.periodDeleted'));
         setDeleteOpen(false);
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  /** `force` re-sends a period whose statements already went out once. */
+  function handleSendStatements(force = false) {
+    startTransition(async () => {
+      const result = await sendStatements(officeId, period.id, force);
+      if (result.success) {
+        toast.success(
+          t("reimbursements.statementsSent", { count: result.sent }),
+        );
+        setResendOpen(false);
+      } else if (result.alreadySentAt) {
+        // Already sent is not a failure — it is the confirmation step.
+        setResendOpen(true);
       } else {
         toast.error(result.error);
       }
@@ -505,6 +528,30 @@ export function ReimbursementPeriodCard({
                   <RefreshCw className="mr-1 size-4" />
                   {t('reimbursements.sync')}
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() =>
+                    period.statementsSentAt
+                      ? setResendOpen(true)
+                      : handleSendStatements()
+                  }
+                  title={
+                    period.statementsSentAt
+                      ? t("reimbursements.statementsSentOn", {
+                          date: new Date(
+                            period.statementsSentAt,
+                          ).toLocaleDateString("fr-CH"),
+                        })
+                      : undefined
+                  }
+                >
+                  <Mail className="mr-1 size-4" />
+                  {period.statementsSentAt
+                    ? t("reimbursements.resendStatements")
+                    : t("reimbursements.sendStatements")}
+                </Button>
               </div>
               <Button
                 variant="destructive"
@@ -519,6 +566,22 @@ export function ReimbursementPeriodCard({
           </CardContent>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={resendOpen}
+        onOpenChange={setResendOpen}
+        onConfirm={() => handleSendStatements(true)}
+        title={t("reimbursements.resendStatements")}
+        description={t("reimbursements.resendStatementsDescription", {
+          date: period.statementsSentAt
+            ? new Date(period.statementsSentAt).toLocaleDateString("fr-CH")
+            : "",
+          count: period.lines.length,
+        })}
+        confirmLabel={t("reimbursements.resendStatements")}
+        confirmVariant="default"
+        isPending={isPending}
+      />
 
       <ConfirmDialog
         open={deleteOpen}

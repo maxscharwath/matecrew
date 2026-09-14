@@ -2,6 +2,11 @@ import { prisma } from "@/lib/prisma";
 import { verifyQStashSignature } from "@/lib/qstash";
 import { calculateReimbursements, type ReimbursementResult } from "@/lib/reimbursement-calc";
 import { sendSlackMessage, buildMonthlyBillMessage } from "@/lib/slack";
+import { sendPeriodStatements } from "@/lib/settlement-mail";
+
+// Rendering and mailing one PDF per member is the slow part of this route;
+// the default serverless window is not built for it.
+export const maxDuration = 60;
 
 async function notifySlack(
   office: { id: string; name: string; slackChannelId: string; locale: string },
@@ -30,7 +35,8 @@ async function notifySlack(
 
 /**
  * Monthly reimbursement cron — triggered by Upstash QStash on the 1st of each month.
- * Generates reimbursement periods for the previous month across all offices.
+ * Generates reimbursement periods for the previous month across all offices,
+ * then mails every member their own statement for it.
  */
 export async function POST(request: Request) {
   if (!(await verifyQStashSignature(request))) {
@@ -50,7 +56,13 @@ export async function POST(request: Request) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  const results: { office: string; created: boolean; error?: string }[] = [];
+  const results: {
+    office: string;
+    created: boolean;
+    /** Statements emailed for this office's new period. */
+    mailed?: number;
+    error?: string;
+  }[] = [];
 
   for (const office of offices) {
     try {
@@ -76,7 +88,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      await prisma.reimbursementPeriod.create({
+      const period = await prisma.reimbursementPeriod.create({
         data: {
           officeId: office.id,
           month,
@@ -94,7 +106,18 @@ export async function POST(request: Request) {
         },
       });
 
-      results.push({ office: office.name, created: true });
+      // Each member gets their own bill by mail. Best-effort: the period is
+      // already written, and a mail server having a bad day must not make the
+      // cron look like it failed to close the month.
+      let mailed = 0;
+      try {
+        const statements = await sendPeriodStatements(period.id);
+        if (statements.kind === "sent") mailed = statements.sent;
+      } catch {
+        // Reported as `mailed: 0`; an admin can re-send from the period card.
+      }
+
+      results.push({ office: office.name, created: true, mailed });
 
       if (office.slackChannelId) {
         await notifySlack(office as typeof office & { slackChannelId: string }, month, year, result, appUrl);
@@ -113,6 +136,7 @@ export async function POST(request: Request) {
     year,
     offices: results.length,
     created: results.filter((r) => r.created).length,
+    mailed: results.reduce((sum, r) => sum + (r.mailed ?? 0), 0),
     results,
   });
 }

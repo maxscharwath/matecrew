@@ -63,6 +63,7 @@ export async function PeriodsSection({ officeId }: { readonly officeId: string }
           id: period.id,
           startDate: period.startDate.toISOString(),
           endDate: period.endDate.toISOString(),
+          statementsSentAt: period.statementsSentAt?.toISOString() ?? null,
           lines: await Promise.all(
             period.lines.map(async (l) => ({
               id: l.id,

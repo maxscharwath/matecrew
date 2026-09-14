@@ -11,7 +11,12 @@ const colors = {
   border: "#e5e5e5",
 };
 
-function layout(content: string): string {
+interface LayoutChrome {
+  /** Footer line under the card. Defaults to the English wording. */
+  footer?: string;
+}
+
+function layout(content: string, chrome: LayoutChrome = {}): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -47,8 +52,7 @@ function layout(content: string): string {
           <tr>
             <td align="center">
               <p style="margin:0;font-size:12px;color:${colors.mutedForeground};line-height:1.6;">
-                You received this email from <strong>MateCrew</strong>.<br/>
-                If you did not request this, you can safely ignore it.
+                ${chrome.footer ?? `You received this email from <strong>MateCrew</strong>.<br/>If you did not request this, you can safely ignore it.`}
               </p>
             </td>
           </tr>
@@ -61,7 +65,7 @@ function layout(content: string): string {
 </html>`;
 }
 
-function button(label: string, href: string): string {
+function button(label: string, href: string, copyLabel = "Or copy this link:"): string {
   return `<table cellpadding="0" cellspacing="0" role="presentation" style="margin:28px 0 0;">
     <tr>
       <td>
@@ -70,7 +74,7 @@ function button(label: string, href: string): string {
     </tr>
   </table>
   <p style="margin:16px 0 0;font-size:12px;color:${colors.mutedForeground};">
-    Or copy this link: <a href="${href}" style="color:${colors.foreground};word-break:break-all;">${href}</a>
+    ${copyLabel} <a href="${href}" style="color:${colors.foreground};word-break:break-all;">${href}</a>
   </p>`;
 }
 
@@ -121,6 +125,61 @@ export function joinRequestTemplate(opts: {
     </table>
     ${button(opts.buttonLabel, opts.buttonUrl)}
   `);
+}
+
+/**
+ * The monthly statement mail: what you drank, what it comes to, and who to
+ * settle with. The PDF rides along as an attachment; the button goes to the
+ * reimbursements page where the payment can be marked.
+ *
+ * The amount is the headline because it is the only line most people read —
+ * and it is coloured by direction, so "you owe" and "you are owed" cannot be
+ * confused at a glance.
+ */
+export function settlementTemplate(opts: {
+  title: string;
+  intro: string;
+  amountLabel: string;
+  amountValue: string;
+  /** Which way the money goes — decides the accent colour. */
+  direction: "pay" | "receive" | "settled";
+  rows: { label: string; value: string }[];
+  attachmentNote: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  /** Localised chrome — this mail goes out monthly, in the reader's language. */
+  copyLinkLabel: string;
+  footer: string;
+}): string {
+  const accent =
+    opts.direction === "pay"
+      ? "#dc2626"
+      : opts.direction === "receive"
+        ? "#16a34a"
+        : colors.foreground;
+  const row = (label: string, value: string) => `
+    <tr>
+      <td style="padding:6px 0;font-size:13px;color:${colors.mutedForeground};">${label}</td>
+      <td style="padding:6px 0;font-size:14px;color:${colors.foreground};text-align:right;">${value}</td>
+    </tr>`;
+  return layout(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
+    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 0;background-color:${colors.muted};border-radius:8px;">
+      <tr>
+        <td style="padding:16px 20px;">
+          <p style="margin:0 0 4px;font-size:12px;color:${colors.mutedForeground};text-transform:uppercase;letter-spacing:0.04em;">${opts.amountLabel}</p>
+          <p style="margin:0;font-size:26px;font-weight:700;color:${accent};">${opts.amountValue}</p>
+        </td>
+      </tr>
+    </table>
+    ${divider()}
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+      ${opts.rows.map((r) => row(r.label, r.value)).join("")}
+    </table>
+    <p style="margin:20px 0 0;font-size:13px;color:${colors.mutedForeground};line-height:1.6;">${opts.attachmentNote}</p>
+    ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
+  `, { footer: opts.footer });
 }
 
 export function emailVerificationTemplate(verifyUrl: string): string {

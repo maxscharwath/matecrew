@@ -11,6 +11,7 @@ import {
 } from "@/lib/reimbursement-periods";
 import { generateReimbursementCsv } from "@/lib/csv-export";
 import { generateSettlementPdf } from "@/lib/pdf-export";
+import { sendPeriodStatements } from "@/lib/settlement-mail";
 import {
   buildSettlementKey,
   fileExists,
@@ -172,4 +173,52 @@ export async function syncPeriod(
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
   revalidatePath(`/org/${officeId}/reimbursements`);
   return { success: true };
+}
+
+/**
+ * Mails every member of the period their own statement.
+ *
+ * Refuses a period that already went out unless `force` is set, which the UI
+ * only offers behind a confirmation: the cost of a double send is everyone's
+ * inbox, and the cost of asking is one click.
+ */
+export async function sendStatements(
+  officeId: string,
+  periodId: string,
+  force = false,
+): Promise<
+  | { success: true; sent: number; skipped: number; failed: number }
+  | { success: false; error: string; alreadySentAt?: string }
+> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const period = await prisma.reimbursementPeriod.findUnique({
+    where: { id: periodId },
+    select: { officeId: true },
+  });
+  if (!period || period.officeId !== officeId) {
+    return { success: false, error: t("errors.periodNotFound") };
+  }
+
+  const result = await sendPeriodStatements(periodId, { force });
+
+  if (result.kind === "already_sent") {
+    return {
+      success: false,
+      error: t("reimbursements.statementsAlreadySent"),
+      alreadySentAt: result.at.toISOString(),
+    };
+  }
+  if (result.kind === "no_recipients") {
+    return { success: false, error: t("reimbursements.statementsNoRecipients") };
+  }
+
+  revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  return {
+    success: true,
+    sent: result.sent,
+    skipped: result.skipped,
+    failed: result.failed.length,
+  };
 }

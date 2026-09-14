@@ -490,6 +490,11 @@ model ReimbursementPeriod {
   startDate DateTime  @db.Date
   endDate   DateTime  @db.Date
   createdAt DateTime  @default(now())
+  /// When each member was last emailed their own statement for this period.
+  /// Null means never: both the monthly cron and the admin button read it
+  /// before sending, so a re-run of either does not bill everybody twice by
+  /// mail.
+  statementsSentAt DateTime?
 
   lines ReimbursementLine[]
 
