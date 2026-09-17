@@ -208,7 +208,10 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
     // is what decides the period it is billed to, while the movement only
     // carries when the row was written.
     prisma.stockCountLine.findMany({
-      where: { count: { officeId }, delta: { not: 0 } },
+      // A cancelled count is skipped rather than deleted: it happened, and the
+      // movements that reversed it still point at it, but nobody is billed for
+      // a gap the office decided was not real.
+      where: { count: { is: { officeId, cancelledAt: null } }, delta: { not: 0 } },
       orderBy: { id: "asc" },
       select: {
         id: true,

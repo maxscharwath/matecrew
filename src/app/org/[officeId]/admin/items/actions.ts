@@ -229,43 +229,6 @@ export async function setItemNutrition(
   return { success: true };
 }
 
-/**
- * Sets — or clears — an item's own low-stock threshold. An empty field means
- * "follow the office", which is stored as null rather than as a copy of the
- * office number: a copy would silently stop tracking the office setting the
- * moment someone changed it.
- */
-export async function setItemLowStockThreshold(
-  officeId: string,
-  itemId: string,
-  threshold: number | null,
-): Promise<ActionResult> {
-  await requireOrgRoles(officeId, "ADMIN");
-  const t = await getTranslations();
-
-  const parsed = z
-    .object({ threshold: z.number().int().min(0).max(100000).nullable() })
-    .safeParse({ threshold });
-  if (!parsed.success) {
-    return { success: false, error: t("items.thresholdInvalid") };
-  }
-
-  const item = await prisma.item.findFirst({
-    where: { id: itemId, officeId },
-    select: { id: true },
-  });
-  if (!item) return { success: false, error: t("errors.itemNotFound") };
-
-  await prisma.item.update({
-    where: { id: itemId },
-    data: { lowStockThreshold: parsed.data.threshold },
-  });
-
-  revalidateItemPages(officeId);
-  revalidatePath(`/org/${officeId}/runner`);
-  return { success: true };
-}
-
 /** `#rrggbb`, lowercase or upper — the shape an `<input type="color">` emits. */
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 

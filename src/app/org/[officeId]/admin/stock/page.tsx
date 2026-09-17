@@ -4,13 +4,15 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import { getActiveItems } from "@/lib/items";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { toIdList } from "@/lib/search-params";
-import { StockCard } from "@/components/stock-card";
+import { StockManager } from "@/components/stock-manager";
 import { getTranslations } from "next-intl/server";
 import {
   StockChartSection,
   StockChartFallback,
   StockPredictionSection,
   StockPredictionFallback,
+  CountHistorySection,
+  CountHistoryFallback,
   AuditLogSection,
   AuditLogFallback,
 } from "./_sections";
@@ -24,6 +26,8 @@ export default async function StockPage({ params, searchParams }: Props) {
   const { officeId } = await params;
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);
+  // The two history tables share this screen, so each paginates on its own key.
+  const countPage = Math.max(1, Number(sp.count) || 1);
   const userIds = toIdList(sp.user);
   const itemIds = toIdList(sp.item);
   await requireOrgRoles(officeId, "ADMIN");
@@ -37,16 +41,6 @@ export default async function StockPage({ params, searchParams }: Props) {
     getActiveItems(officeId),
   ]);
 
-  const currentQty = items.reduce((sum, i) => sum + i.stockQty, 0);
-  // The office-wide forecast reorders when the shelf as a whole reaches what
-  // its items each want to keep in reserve, so the floor is the sum of the
-  // per-item thresholds rather than the office number on its own.
-  const thresholdTotal = items.reduce(
-    (sum, i) =>
-      sum + effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold),
-    0,
-  );
-
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -56,32 +50,31 @@ export default async function StockPage({ params, searchParams }: Props) {
         </p>
       </div>
 
-      <div className="space-y-4">
-        {items.map((item) => (
-          <StockCard
-            key={item.id}
-            officeId={officeId}
-            itemId={item.id}
-            itemName={item.name}
-            currentQty={item.stockQty}
-            lowStockThreshold={effectiveLowStockThreshold(
-              item.lowStockThreshold,
-              office.lowStockThreshold,
-            )}
-          />
-        ))}
-      </div>
+      <StockManager
+        officeId={officeId}
+        officeThreshold={office.lowStockThreshold}
+        items={items.map((i) => ({
+          id: i.id,
+          name: i.name,
+          currentQty: i.stockQty,
+          lowStockThreshold: effectiveLowStockThreshold(
+            i.lowStockThreshold,
+            office.lowStockThreshold,
+          ),
+          ownThreshold: i.lowStockThreshold,
+        }))}
+      />
 
       <Suspense fallback={<StockPredictionFallback />}>
-        <StockPredictionSection
-          officeId={officeId}
-          currentQty={currentQty}
-          lowStockThreshold={thresholdTotal}
-        />
+        <StockPredictionSection officeId={officeId} />
       </Suspense>
 
       <Suspense fallback={<StockChartFallback />}>
-        <StockChartSection officeId={officeId} officeName={office.name} />
+        <StockChartSection officeId={officeId} />
+      </Suspense>
+
+      <Suspense fallback={<CountHistoryFallback />}>
+        <CountHistorySection officeId={officeId} page={countPage} />
       </Suspense>
 
       <Suspense fallback={<AuditLogFallback />}>

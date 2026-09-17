@@ -394,6 +394,10 @@ model StockCount {
   countedBy       User     @relation("CountedBy", fields: [countedByUserId], references: [id])
   note            String?
   createdAt       DateTime @default(now())
+  /// When the count was undone. A cancelled count is kept — it happened, and
+  /// the stock movements that reversed it point back at it — but `@/lib/costing`
+  /// skips its lines, so its shrinkage stops being billed to anybody.
+  cancelledAt     DateTime?
 
   lines StockCountLine[]
 

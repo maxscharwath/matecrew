@@ -25,7 +25,6 @@ import {
   setItemActive,
   setItemColor,
   setItemImage,
-  setItemLowStockThreshold,
   setItemNutrition,
 } from "@/app/org/[officeId]/admin/items/actions";
 
@@ -66,7 +65,6 @@ export function ItemsManager({
   const [editVolume, setEditVolume] = useState("");
   const [editSugar, setEditSugar] = useState("");
   const [editCaffeine, setEditCaffeine] = useState("");
-  const [editThreshold, setEditThreshold] = useState("");
   const [editColor, setEditColor] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageTargetId = useRef<string | null>(null);
@@ -120,11 +118,6 @@ export function ItemsManager({
     setEditVolume(String(item.volumeMl));
     setEditSugar(String(item.sugarGrams));
     setEditCaffeine(String(item.caffeineMg));
-    // Empty means "follow the office", so a null threshold shows as a blank
-    // field with the office number as its placeholder.
-    setEditThreshold(
-      item.lowStockThreshold === null ? "" : String(item.lowStockThreshold),
-    );
     setEditColor(item.color);
   }
 
@@ -141,15 +134,6 @@ export function ItemsManager({
           return;
         }
       }
-      const threshold = editThreshold.trim() === "" ? null : Number(editThreshold);
-      if (threshold !== item.lowStockThreshold) {
-        const saved = await setItemLowStockThreshold(officeId, item.id, threshold);
-        if (!saved.success) {
-          toast.error(saved.error);
-          return;
-        }
-      }
-
       if (editColor !== item.color) {
         const saved = await setItemColor(officeId, item.id, editColor);
         if (!saved.success) {
@@ -326,25 +310,7 @@ export function ItemsManager({
                           onChange={(e) => setEditCaffeine(e.target.value)}
                         />
                       </label>
-                      <label className="space-y-1 text-xs text-muted-foreground">
-                        <span className="inline-flex items-center gap-1">
-                          <BellRing className="size-3" />
-                          {t("items.lowStockThreshold")}
-                        </span>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={editThreshold}
-                          placeholder={String(officeLowStockThreshold)}
-                          onChange={(e) => setEditThreshold(e.target.value)}
-                        />
-                      </label>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {t("items.thresholdHint", {
-                        qty: officeLowStockThreshold,
-                      })}
-                    </p>
                     <div className="space-y-1">
                       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <Palette className="size-3" />

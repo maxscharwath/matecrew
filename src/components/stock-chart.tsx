@@ -1,6 +1,14 @@
 "use client";
 
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useTranslations, useLocale } from "next-intl";
 import {
   ChartContainer,
@@ -20,36 +28,65 @@ import {
 
 interface StockSeries {
   key: string;
+  /** Companion key holding the projected half of the same item's curve. */
+  forecastKey: string;
   name: string;
   color: string;
 }
 
 interface StockChartProps {
-  // One row per day; each row carries `date` plus a numeric value per series key.
-  data: Record<string, string | number>[];
+  // One row per day; each row carries `date` plus a value per series key —
+  // null on the side of today the key does not cover.
+  data: Record<string, string | number | null>[];
   series: StockSeries[];
   officeName: string;
+  historyDays: number;
+  /** 0 when nothing is moving and there is no projection worth drawing. */
+  forecastDays: number;
+  /** ISO day the solid lines stop and the dashed ones take over. */
+  todayDate?: string;
 }
 
-export function StockChart({ data, series, officeName }: StockChartProps) {
+export function StockChart({
+  data,
+  series,
+  officeName,
+  historyDays,
+  forecastDays,
+  todayDate,
+}: StockChartProps) {
   const t = useTranslations();
   const locale = useLocale();
 
   const chartConfig = Object.fromEntries(
-    series.map((s) => [s.key, { label: s.name, color: s.color }]),
+    series.flatMap((s) => [
+      [s.key, { label: s.name, color: s.color }],
+      [
+        s.forecastKey,
+        { label: t("stock.forecastSeries", { name: s.name }), color: s.color },
+      ],
+    ]),
   ) satisfies ChartConfig;
 
   const multi = series.length > 1;
+  const hasForecast = forecastDays > 0;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('stock.chartTitle', { office: officeName })}</CardTitle>
-        <CardDescription>{t('stock.chartSubtitle')}</CardDescription>
+        <CardTitle>{t("stock.chartTitle", { office: officeName })}</CardTitle>
+        <CardDescription>
+          {hasForecast
+            ? t("stock.chartSubtitleWithForecast", {
+                history: historyDays,
+                forecast: forecastDays,
+              })
+            : t("stock.chartSubtitle", { history: historyDays })}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-[3/1] w-full">
-          <AreaChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
+          <ComposedChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
             <defs>
               {series.map((s) => (
                 <linearGradient
@@ -110,10 +147,43 @@ export function StockChart({ data, series, officeName }: StockChartProps) {
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 3 }}
+                connectNulls={false}
                 stackId={undefined}
               />
             ))}
-          </AreaChart>
+            {/* The projection rides on the same hue, dashed and unfilled: it is
+                the same item, but a guess rather than a reading. */}
+            {hasForecast &&
+              series.map((s) => (
+                <Line
+                  key={s.forecastKey}
+                  dataKey={s.forecastKey}
+                  name={t("stock.forecastSeries", { name: s.name })}
+                  type="monotone"
+                  stroke={`var(--color-${s.key})`}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.85}
+                  dot={false}
+                  activeDot={{ r: 3 }}
+                  connectNulls={false}
+                  legendType="none"
+                />
+              ))}
+            {hasForecast && todayDate && (
+              <ReferenceLine
+                x={todayDate}
+                stroke="var(--muted-foreground)"
+                strokeDasharray="3 3"
+                label={{
+                  value: t("stock.chartToday"),
+                  position: "insideTopLeft",
+                  fill: "var(--muted-foreground)",
+                  fontSize: 11,
+                }}
+              />
+            )}
+          </ComposedChart>
         </ChartContainer>
       </CardContent>
     </Card>

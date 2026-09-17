@@ -72,8 +72,10 @@ export function predictReorder(
   const confidence = computeConfidence(dataPointDays);
 
   if (avgDailyConsumption <= 0 || currentQty <= threshold) {
+    // The rate is still reported: a shelf already under its threshold keeps
+    // draining, and the chart's forward line needs a slope to draw.
     return {
-      avgDailyConsumption: 0,
+      avgDailyConsumption,
       predictedDepletionDate: null,
       daysUntilThreshold: null,
       confidence,
@@ -103,4 +105,66 @@ function computeConfidence(dataPointDays: number): PredictionConfidence {
 
 function toISODateString(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The same forecast, run once per item.
+ *
+ * An office-wide average hides the flavour that runs out next: two hundred
+ * cans on the shelf read as comfortable right up to the morning the only mint
+ * one is gone. Each item is fitted on its own movements and compared to its
+ * own threshold.
+ */
+export function predictReorderByItem<
+  T extends { id: string; currentQty: number; threshold: number },
+>(
+  items: readonly T[],
+  movements: readonly (Movement & { itemId: string })[],
+  referenceDate = new Date(),
+): (T & { prediction: StockPrediction })[] {
+  const byItem = new Map<string, Movement[]>();
+  for (const m of movements) {
+    const list = byItem.get(m.itemId);
+    if (list) list.push(m);
+    else byItem.set(m.itemId, [m]);
+  }
+  return items.map((item) => ({
+    ...item,
+    prediction: predictReorder(
+      item.currentQty,
+      item.threshold,
+      byItem.get(item.id) ?? [],
+      referenceDate,
+    ),
+  }));
+}
+
+/**
+ * Straight-line continuation of a stock pool: one point per day from tomorrow
+ * to `days` ahead, draining at `avgDailyConsumption`.
+ *
+ * Floored at zero, because a shelf cannot go negative — a line that dipped
+ * under would read as a forecast of debt rather than of an empty fridge.
+ */
+export function projectStockLevels(
+  currentQty: number,
+  avgDailyConsumption: number,
+  days: number,
+  referenceDate = new Date(),
+): { date: string; qty: number }[] {
+  // Anchored on the UTC day the reference date falls in, the same day key the
+  // history line is bucketed under, so the two halves of the chart meet on one
+  // shared date whatever timezone the server runs in.
+  const start = new Date(`${toISODateString(referenceDate)}T00:00:00Z`);
+
+  const points: { date: string; qty: number }[] = [];
+  for (let d = 1; d <= days; d++) {
+    const cursor = new Date(start);
+    cursor.setUTCDate(cursor.getUTCDate() + d);
+    points.push({
+      date: toISODateString(cursor),
+      qty: Math.max(0, Math.round((currentQty - avgDailyConsumption * d) * 10) / 10),
+    });
+  }
+  return points;
 }
