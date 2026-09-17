@@ -5,6 +5,8 @@ import { getBaseUrl } from "@/lib/base-url";
 import { sendSettlementEmail } from "@/lib/email";
 import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { buildUserSettlement } from "@/lib/settlement-pdf";
+import { formatMonthLabel } from "@/lib/date";
+import { formatMoney as money } from "@/lib/money";
 
 /**
  * Mails every member of an office their own statement for one period.
@@ -36,22 +38,6 @@ export type StatementsResult =
 
 /** Resend allows a couple of requests a second; offices are small, so wait. */
 const SEND_INTERVAL_MS = 600;
-
-function periodLabel(start: Date, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(start);
-}
-
-function money(amount: number, locale: string, currency = "CHF"): string {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
 
 export async function sendPeriodStatements(
   periodId: string,
@@ -143,7 +129,7 @@ export async function sendPeriodStatements(
         continue;
       }
 
-      const label = periodLabel(period.startDate, user.locale);
+      const label = formatMonthLabel(period.startDate, user.locale);
       await sendSettlementEmail({
         to: user.email,
         locale: user.locale,

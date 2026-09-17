@@ -427,10 +427,8 @@ export function ReimbursementPeriodCard({
                   {period.lines.map((l) => (
                     <div
                       key={l.id}
-                      className={`flex items-center justify-between rounded-lg border px-4 py-3 border-l-2 ${
-                        l.status === "PAID"
-                          ? "border-l-green-400 opacity-60 dark:border-l-green-600"
-                          : "border-l-amber-400 dark:border-l-amber-600"
+                      className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                        l.status === "PAID" ? "opacity-60" : ""
                       }`}
                     >
                       <div className="flex items-center gap-2.5">

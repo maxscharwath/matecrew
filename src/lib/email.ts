@@ -4,6 +4,7 @@ import {
   emailVerificationTemplate,
   joinRequestTemplate,
   settlementTemplate,
+  paymentReminderTemplate,
 } from "@/lib/email-templates";
 import { getTranslator } from "@/lib/slack";
 
@@ -188,5 +189,81 @@ export async function sendSettlementEmail(opts: {
       footer: t("email.settlement.footer", { office: opts.officeName }),
     }),
     attachments: [{ filename: opts.pdfFilename, content: opts.pdf }],
+  });
+}
+
+/**
+ * One reminder for everything a member still owes an office.
+ *
+ * Deliberately not one mail per unpaid period: three mails landing together
+ * read as a system malfunctioning, while one mail listing three months reads
+ * as a bill. Every listed period rides along as its own PDF, so the detail is
+ * there without the mail having to reproduce it.
+ */
+export async function sendPaymentReminderEmail(opts: {
+  to: string;
+  locale: string;
+  officeName: string;
+  /** How many periods are still open — drives the singular/plural wording. */
+  periodCount: number;
+  attachmentCount: number;
+  /** Formatted totals, one per currency. */
+  totals: string[];
+  periods: {
+    label: string;
+    amount: string;
+    /** Matés they drank that month, or null when the figure is unknown. */
+    qty: number | null;
+    /** Their share of the period's missing cans, or null when there was none. */
+    lossShare: string | null;
+    creditors: { name: string; amount: string }[];
+  }[];
+  reimbursementsUrl: string;
+  attachments: { filename: string; content: Buffer }[];
+}) {
+  const t = await getTranslator(opts.locale);
+  await send({
+    from,
+    to: opts.to,
+    subject: t("email.reminder.subject", { office: opts.officeName }),
+    html: paymentReminderTemplate({
+      title: t("email.reminder.title"),
+      intro: t("email.reminder.intro", {
+        office: opts.officeName,
+        count: opts.periodCount,
+      }),
+      amountLabel: t("email.reminder.amountLabel"),
+      amountValues: opts.totals,
+      periodsTitle: t("email.reminder.periodsTitle"),
+      periods: opts.periods.map((p) => ({
+        label: p.label,
+        amount: p.amount,
+        // What the amount is *for*: the cans, and the shrinkage inside it.
+        detail:
+          [
+            p.qty === null
+              ? null
+              : t("email.reminder.cansLabel", { count: p.qty }),
+            p.lossShare
+              ? t("email.reminder.lossLabel", { amount: p.lossShare })
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || null,
+        // Who to actually send the money to — the question a reminder exists
+        // to answer, and the one a bare creditor name left implicit.
+        payTo: p.creditors.map(
+          (c) => `${t("email.reminder.payTo", { name: c.name })} · ${c.amount}`,
+        ),
+      })),
+      attachmentNote: t("email.reminder.attachmentNote", {
+        count: opts.attachmentCount,
+      }),
+      buttonLabel: t("email.reminder.button"),
+      buttonUrl: opts.reimbursementsUrl,
+      copyLinkLabel: t("email.copyLink"),
+      footer: t("email.reminder.footer", { office: opts.officeName }),
+    }),
+    attachments: opts.attachments,
   });
 }

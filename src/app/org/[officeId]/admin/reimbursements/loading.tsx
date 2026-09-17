@@ -13,6 +13,19 @@ export default function AdminReimbursementsLoading() {
         <Skeleton className="h-10 w-36 rounded-md" />
       </div>
 
+      {/* Outstanding balances */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="mt-1 h-4 w-72" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-lg" />
+          ))}
+        </CardContent>
+      </Card>
+
       {/* Period cards */}
       {Array.from({ length: 3 }).map((_, i) => (
         <Card key={i}>

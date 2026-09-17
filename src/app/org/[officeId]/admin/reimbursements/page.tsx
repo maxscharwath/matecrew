@@ -1,21 +1,26 @@
 import { Suspense } from "react";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { GenerateMissingPeriodsButton } from "./generate-button";
-import { PeriodsSection, PeriodsSectionFallback } from "./_sections";
+import {
+  OutstandingSection,
+  OutstandingSectionFallback,
+  PeriodsSection,
+  PeriodsSectionFallback,
+} from "./_sections";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
 }
 
-// The manual statement send runs inside this segment's request, and one PDF
-// per member takes longer than the default window allows.
+// The manual statement send and the reminder run inside this segment's
+// request, and a PDF per member takes longer than the default window allows.
 export const maxDuration = 60;
 
 export default async function ReimbursementsPage({ params }: Props) {
   const { officeId } = await params;
   await requireOrgRoles(officeId, "ADMIN");
-  const t = await getTranslations();
+  const [t, locale] = await Promise.all([getTranslations(), getLocale()]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -28,6 +33,10 @@ export default async function ReimbursementsPage({ params }: Props) {
         </div>
         <GenerateMissingPeriodsButton officeId={officeId} />
       </div>
+
+      <Suspense fallback={<OutstandingSectionFallback />}>
+        <OutstandingSection officeId={officeId} locale={locale} />
+      </Suspense>
 
       <Suspense fallback={<PeriodsSectionFallback />}>
         <PeriodsSection officeId={officeId} />

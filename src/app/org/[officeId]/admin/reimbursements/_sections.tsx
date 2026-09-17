@@ -2,7 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { buildCostingLedger } from "@/lib/costing";
 import { sliceLedger } from "@/lib/reimbursement-calc";
+import { getOfficeDebtors } from "@/lib/payment-reminder";
+import { formatMonthLabel } from "@/lib/date";
 import { ReimbursementPeriodCard } from "@/components/reimbursement-period-card";
+import { OutstandingBalancesCard } from "./outstanding-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTranslations } from "next-intl/server";
@@ -29,7 +32,62 @@ export function PeriodsSectionFallback() {
   );
 }
 
-// ── Async section ────────────────────────────────────────
+export function OutstandingSectionFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <Skeleton className="h-5 w-44" />
+        <Skeleton className="mt-1 h-4 w-72" />
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Skeleton key={i} className="h-14 w-full rounded-lg" />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Async sections ───────────────────────────────────────
+
+/**
+ * Who has not paid, across every period at once.
+ *
+ * Kept out of `PeriodsSection` so the debt list — the cheap query — paints
+ * without waiting on the costing replay the period cards need.
+ */
+export async function OutstandingSection({
+  officeId,
+  locale,
+}: {
+  readonly officeId: string;
+  readonly locale: string;
+}) {
+  const debtors = await getOfficeDebtors(officeId);
+
+  return (
+    <OutstandingBalancesCard
+      officeId={officeId}
+      debtors={debtors.map((d) => ({
+        userId: d.userId,
+        name: d.name,
+        email: d.email,
+        image: resolveAvatarUrl(d.image),
+        totals: d.totals,
+        periods: d.periods.map((p) => ({
+          periodId: p.periodId,
+          // Named in the admin's language: this screen is theirs, unlike the
+          // reminder mail, which is written in the recipient's.
+          label: formatMonthLabel(p.startDate, locale),
+          amount: p.amount,
+          currency: p.currency,
+          creditors: p.creditors,
+        })),
+      }))}
+    />
+  );
+}
+
 
 export async function PeriodsSection({ officeId }: { readonly officeId: string }) {
   const t = await getTranslations();

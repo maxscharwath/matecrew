@@ -12,6 +12,7 @@ import {
 import { generateReimbursementCsv } from "@/lib/csv-export";
 import { generateSettlementPdf } from "@/lib/pdf-export";
 import { sendPeriodStatements } from "@/lib/settlement-mail";
+import { sendPaymentReminders } from "@/lib/payment-reminder";
 import {
   buildSettlementKey,
   fileExists,
@@ -215,6 +216,41 @@ export async function sendStatements(
   }
 
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  return {
+    success: true,
+    sent: result.sent,
+    skipped: result.skipped,
+    failed: result.failed.length,
+  };
+}
+
+/**
+ * Nudges the people whose invoices are still not marked paid.
+ *
+ * `userId` picks one debtor; omitting it reminds every one of them. Only
+ * PENDING lines are ever chased — a period the payer has already settled is
+ * not in their reminder, and somebody who has paid everything gets no mail at
+ * all, however the button is pressed.
+ */
+export async function sendPaymentReminder(
+  officeId: string,
+  userId?: string,
+): Promise<
+  | { success: true; sent: number; skipped: number; failed: number }
+  | { success: false; error: string }
+> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+
+  const result = await sendPaymentReminders(
+    officeId,
+    userId ? { userIds: [userId] } : {},
+  );
+
+  if (result.sent === 0 && result.skipped === 0 && result.failed.length === 0) {
+    return { success: false, error: t("reimbursements.remindNobody") };
+  }
+
   return {
     success: true,
     sent: result.sent,

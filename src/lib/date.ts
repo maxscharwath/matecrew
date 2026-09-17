@@ -88,3 +88,17 @@ export function timeToMinutes(hhmm: string): number {
  * right session.
  */
 export const SCHEDULE_STEP_MINUTES = 5;
+
+/**
+ * A settlement period as a month: "juillet 2026", "July 2026".
+ *
+ * UTC because period bounds are `@db.Date` values at UTC midnight — reading
+ * them in a local timezone west of London would name the month before.
+ */
+export function formatMonthLabel(date: Date, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}

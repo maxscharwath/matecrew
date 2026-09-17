@@ -213,6 +213,83 @@ export function settlementTemplate(opts: {
   `, { footer: opts.footer });
 }
 
+/**
+ * The unpaid-invoice nudge: every period they still owe for, in one mail.
+ *
+ * Built around the list rather than a single figure — the point of a reminder
+ * is that the debt has a history, and a member who sees "March, April, May"
+ * understands the total in a way one number never makes them.
+ */
+export function paymentReminderTemplate(opts: {
+  title: string;
+  intro: string;
+  amountLabel: string;
+  /** One formatted total per currency; several is the rare mixed case. */
+  amountValues: string[];
+  periodsTitle: string;
+  /** Oldest first, each with who its money goes to. */
+  periods: {
+    label: string;
+    amount: string;
+    /** Already-worded "19 matés drunk · incl. X of shrinkage", or null. */
+    detail: string | null;
+    /** Already-worded "Pay Admin · CHF 30.45", one per creditor. */
+    payTo: string[];
+  }[];
+  attachmentNote: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  copyLinkLabel: string;
+  footer: string;
+}): string {
+  const accent = "#dc2626";
+  return layout(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:${colors.foreground};">${opts.title}</h1>
+    <p style="margin:0;font-size:14px;color:${colors.mutedForeground};line-height:1.6;">${opts.intro}</p>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:24px 0 0;background-color:${colors.muted};border-radius:8px;">
+      <tr>
+        <td style="padding:16px 20px;">
+          <p style="margin:0 0 4px;font-size:12px;color:${colors.mutedForeground};text-transform:uppercase;letter-spacing:0.04em;">${opts.amountLabel}</p>
+          ${opts.amountValues
+            .map(
+              (v) =>
+                `<p style="margin:0;font-size:26px;font-weight:700;color:${accent};">${v}</p>`,
+            )
+            .join("")}
+        </td>
+      </tr>
+    </table>
+    ${divider()}
+    <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${colors.foreground};">${opts.periodsTitle}</p>
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+      ${opts.periods
+        .map(
+          (p) => `
+      <tr>
+        <td style="padding:8px 0;border-top:1px solid ${colors.border};">
+          <p style="margin:0;font-size:14px;color:${colors.foreground};text-transform:capitalize;">${p.label}</p>${
+            p.detail
+              ? `
+          <p style="margin:2px 0 0;font-size:12px;color:${colors.mutedForeground};">${p.detail}</p>`
+              : ""
+          }
+          ${p.payTo
+            .map(
+              (line) =>
+                `<p style="margin:2px 0 0;font-size:12px;color:${colors.foreground};">${line}</p>`,
+            )
+            .join("")}
+        </td>
+        <td style="padding:8px 0;border-top:1px solid ${colors.border};font-size:14px;font-weight:600;color:${accent};text-align:right;vertical-align:top;">${p.amount}</td>
+      </tr>`,
+        )
+        .join("")}
+    </table>
+    <p style="margin:20px 0 0;font-size:13px;color:${colors.mutedForeground};line-height:1.6;">${opts.attachmentNote}</p>
+    ${button(opts.buttonLabel, opts.buttonUrl, opts.copyLinkLabel)}
+  `, { footer: opts.footer });
+}
+
 export function emailVerificationTemplate(opts: {
   title: string;
   intro: string;

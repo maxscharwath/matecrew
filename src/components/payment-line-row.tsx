@@ -61,10 +61,7 @@ export function PaymentLineRow({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-l-4 bg-card p-3",
-        isPay
-          ? "border-l-red-500 dark:border-l-red-600"
-          : "border-l-emerald-500 dark:border-l-emerald-600",
+        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-card p-3",
         isPaid && "opacity-60",
       )}
     >

@@ -544,7 +544,23 @@
     "statementsSent": "{count} décompte(s) envoyé(s) par email",
     "statementsSentOn": "Envoyés le {date}",
     "statementsAlreadySent": "Les décomptes de cette période ont déjà été envoyés.",
-    "statementsNoRecipients": "Personne à qui envoyer un décompte pour cette période."
+    "statementsNoRecipients": "Personne à qui envoyer un décompte pour cette période.",
+    "outstandingTitle": "Soldes ouverts",
+    "outstandingSubtitle": "Membres dont les factures ne sont pas marquées payées. Un rappel reprend toutes les périodes impayées, PDF joints.",
+    "outstandingEmpty": "Personne ne doit rien — toutes les factures sont marquées payées.",
+    "remind": "Relancer",
+    "remindAll": "Relancer tout le monde",
+    "reminding": "Envoi...",
+    "remindUnpaidPeriods": "{count, plural, one {# période impayée} other {# périodes impayées}}",
+    "remindNoEmail": "Aucune adresse email enregistrée",
+    "remindConfirmAllTitle": "Relancer tout le monde ?",
+    "remindConfirmAllDescription": "{count, plural, one {# membre recevra} other {# membres recevront}} un email listant chaque facture non payée, avec un PDF par période.",
+    "remindConfirmOneTitle": "Envoyer un rappel à {name} ?",
+    "remindConfirmOneDescription": "Cette personne recevra un email listant {count, plural, one {sa période impayée} other {ses # périodes impayées}}, avec un PDF par période.",
+    "remindSent": "{count} rappel(s) envoyé(s)",
+    "remindNobody": "Personne à relancer — toutes les factures sont marquées payées.",
+    "remindSkipped": "{count} ignoré(s) (pas d'adresse email)",
+    "remindFailed": "{count} échec(s)"
   },
   "members": {
     "title": "Membres",
@@ -856,6 +872,19 @@
       "intro": "Merci d'avoir créé un compte MateCrew ! Vérifiez votre adresse email pour sécuriser votre compte.",
       "body": "Cliquez sur le bouton ci-dessous pour confirmer votre adresse.",
       "button": "Vérifier mon adresse"
+    },
+    "reminder": {
+      "subject": "Rappel : factures maté impayées — {office}",
+      "title": "Vous avez des factures impayées",
+      "intro": "{count, plural, one {Un décompte est toujours impayé} other {# décomptes sont toujours impayés}} au bureau {office}. Rien ici n'a encore été marqué comme payé.",
+      "amountLabel": "Reste à payer",
+      "periodsTitle": "Périodes impayées",
+      "attachmentNote": "{count, plural, one {Le PDF joint est le décompte de cette période} other {Les # PDF joints sont les décomptes de ces périodes}}. Une fois payé, demandez à la personne payée de marquer le paiement comme reçu.",
+      "button": "Régler",
+      "footer": "Vous recevez cet email car vous avez des factures impayées au bureau {office} sur MateCrew.",
+      "lossLabel": "dont {amount} de coulage",
+      "cansLabel": "{count, plural, one {# maté bu} other {# matés bus}}",
+      "payTo": "Payer {name}"
     }
   },
   "slackLink": {

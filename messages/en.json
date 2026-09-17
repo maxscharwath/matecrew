@@ -544,7 +544,23 @@
     "statementsSent": "{count} statement(s) emailed",
     "statementsSentOn": "Sent on {date}",
     "statementsAlreadySent": "Statements for this period have already been sent.",
-    "statementsNoRecipients": "Nobody to send a statement to for this period."
+    "statementsNoRecipients": "Nobody to send a statement to for this period.",
+    "outstandingTitle": "Outstanding balances",
+    "outstandingSubtitle": "Members with invoices that are not marked paid. A reminder carries every unpaid period, PDFs attached.",
+    "outstandingEmpty": "Nobody owes anything — every invoice is marked paid.",
+    "remind": "Remind",
+    "remindAll": "Remind everyone",
+    "reminding": "Sending...",
+    "remindUnpaidPeriods": "{count} unpaid {count, plural, one {period} other {periods}}",
+    "remindNoEmail": "No email address on file",
+    "remindConfirmAllTitle": "Remind everyone?",
+    "remindConfirmAllDescription": "{count} {count, plural, one {member} other {members}} will each get one email listing every invoice they have not paid, with a PDF per period.",
+    "remindConfirmOneTitle": "Send a reminder to {name}?",
+    "remindConfirmOneDescription": "They will get one email listing their {count} unpaid {count, plural, one {period} other {periods}}, with a PDF per period.",
+    "remindSent": "{count} reminder(s) sent",
+    "remindNobody": "Nobody to remind — every invoice is marked paid.",
+    "remindSkipped": "{count} skipped (no email address)",
+    "remindFailed": "{count} failed"
   },
   "members": {
     "title": "Members",
@@ -856,6 +872,19 @@
       "intro": "Thanks for signing up for MateCrew! Verify your email address to secure your account.",
       "body": "Click the button below to confirm your address.",
       "button": "Verify my email"
+    },
+    "reminder": {
+      "subject": "Reminder: unpaid maté invoices — {office}",
+      "title": "You have unpaid invoices",
+      "intro": "{count, plural, one {One statement} other {# statements}} at {office} {count, plural, one {is} other {are}} still unpaid. Nothing here has been marked as paid yet.",
+      "amountLabel": "Still to pay",
+      "periodsTitle": "Unpaid periods",
+      "attachmentNote": "{count, plural, one {The attached PDF is the statement} other {The # attached PDFs are the statements}} for {count, plural, one {this period} other {these periods}}. Once you have paid, ask the person you paid to mark it as received.",
+      "button": "Settle up",
+      "footer": "You receive this email because you have unpaid invoices in {office} on MateCrew.",
+      "lossLabel": "incl. {amount} for cans that went missing",
+      "cansLabel": "{count, plural, one {# maté drunk} other {# matés drunk}}",
+      "payTo": "Pay {name}"
     }
   },
   "slackLink": {
