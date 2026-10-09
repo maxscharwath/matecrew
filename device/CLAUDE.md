@@ -95,11 +95,14 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 - Écran : mettre le contrôleur en veille après chaque affichage. Rafraîchissement partiel (environ 0,3 s) pour les confirmations, complet une fois par jour contre les images fantômes.
 - Wi-Fi groupé : se connecter à chaque prise diviserait l'autonomie par deux environ.
 
-## API matécrew : encore à définir
+## API de l'appareil (côté site)
 
-Il faut ces endpoints : lecture du stock, liste des badges (UID → nom), envoi groupé des prises, configuration de l'appareil, dernière version du firmware, état de l'appareil (version, batterie).
-L'appareil s'authentifie avec sa clé.
-Avant de coder le client, proposer un contrat JSON qui s'appuie sur le schéma Prisma de ce dépôt, puis l'implémenter côté app sous `src/app/api/device/`.
+- Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `screen`).
+- Liaison façon RFC 8628 : `/api/device/link` renvoie `device_code` (secret, gardé par l'appareil) et `user_code` (affiché) ; un admin valide sur `/link` ; l'appareil interroge `/api/device/link/token` toutes les 5 s et reçoit son jeton `mcd_…` une seule fois.
+- Ensuite : `Authorization: Bearer mcd_…`. Le serveur ne garde que le SHA-256 du jeton. Un 401 veut dire « appareil délié » : effacer le jeton et recommencer la liaison.
+- `POST /api/device/takes` est idempotent par `id` de prise : renvoyer toute la file tant qu'elle n'est pas acquittée, puis retirer les ids de `done`.
+- `GET /api/device/screen` : 48 000 octets, lignes de haut en bas, 8 pixels par octet, bit de poids fort d'abord, 1 = encre. Envoyer `If-None-Match` avec le dernier ETag pour recevoir `304`.
+- En local : `just api`, puis compiler le firmware avec `MATECREW_URL=http://<ip-du-mac>:3000`. Comptes de test dans `prisma/seed.ts`.
 
 ## Outils
 

@@ -12,6 +12,22 @@ export function getTodayDate(): Date {
  * Use this instead of `new Date(year, month, day)` when comparing
  * against Prisma @db.Date columns to avoid timezone drift.
  */
+/**
+ * The calendar day `at` falls on in `timezone`, as a UTC-midnight Date like
+ * `getTodayDate()` returns. A terminal can sync a take hours after it happened,
+ * and the take belongs to the day it was made in the office.
+ */
+export function getDateInTimezone(at: Date, timezone: string): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return new Date(Date.UTC(part("year"), part("month") - 1, part("day")));
+}
+
 export function utcDate(year: number, month: number, day: number = 1): Date {
   return new Date(Date.UTC(year, month, day));
 }

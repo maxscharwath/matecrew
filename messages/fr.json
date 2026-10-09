@@ -77,7 +77,8 @@
     "members": "Membres",
     "accounts": "Comptes",
     "switchOffice": "Changer de bureau",
-    "items": "Articles"
+    "items": "Articles",
+    "devices": "Appareils"
   },
   "home": {
     "noOfficeTitle": "Pas de bureau",
@@ -150,7 +151,8 @@
     "legendLess": "Moins",
     "legendMore": "Plus",
     "heatmapCellTooltip": "{count, plural, =0 {Aucun maté le {date}} one {# maté le {date}} other {# matés le {date}}}",
-    "takeCanConfirmItem": "Prendre un {item} et l'enregistrer comme consommé ?"
+    "takeCanConfirmItem": "Prendre un {item} et l'enregistrer comme consommé ?",
+    "terminal": "Terminal"
   },
   "stats": {
     "title": "Statistiques",
@@ -1105,5 +1107,81 @@
     "knockFailed": "{down} sur {total} — même pyramide, on recommence",
     "knockShots": "{shots, plural, =0 {Plus de munitions} one {# tir restant} other {# tirs restants}}",
     "noFlip": "Posée, pas lancée — la canette doit faire au moins un flip"
+  },
+  "devices": {
+    "keys": {
+      "take": "Prendre",
+      "return": "Rendre"
+    },
+    "screen": {
+      "updated": "Mis à jour à {time}",
+      "batteryLow": "Batterie faible",
+      "lowStock": "stock bas",
+      "inStock": "en stock"
+    },
+    "title": "Appareils",
+    "subtitle": "Les terminaux à badge de ce bureau : ce qu'ils affichent, ce que font leurs touches, et les badges qu'ils ont vus.",
+    "linkHintTitle": "Lier un nouvel appareil",
+    "linkHint": "Allume l'appareil et connecte-le au Wi-Fi : il affiche un code et un QR. Scanne le QR ou saisis le code sur {url}.",
+    "empty": "Aucun appareil lié pour l'instant.",
+    "lastSeen": "Dernière synchro : {when}",
+    "neverSeen": "Jamais synchronisé",
+    "battery": "Batterie : {volts} V",
+    "batteryLow": "Batterie faible : {volts} V",
+    "firmware": "Firmware {version}",
+    "preview": "Aperçu de l'écran",
+    "previewHint": "Exactement ce que l'appareil affichera à sa prochaine synchro.",
+    "name": "Nom",
+    "leftKey": "Touche gauche",
+    "rightKey": "Touche droite",
+    "action": "Action",
+    "actionTake": "Prendre",
+    "actionReturn": "Rendre",
+    "item": "Article",
+    "label": "Libellé affiché",
+    "labelPlaceholder": "Automatique : « {example} »",
+    "syncTimes": "Horaires de synchro",
+    "syncTimesHint": "Heures du bureau, séparées par des virgules (ex. 08:00, 12:00, 15:00, 18:00).",
+    "saved": "Appareil enregistré",
+    "revoke": "Délier",
+    "revokeConfirm": "Délier « {name} » ? Il perdra son accès et affichera de nouveau un code de liaison.",
+    "revoked": "Appareil délié",
+    "invalidSyncTimes": "Horaires invalides : utilise le format HH:MM.",
+    "nameRequired": "Un nom est requis",
+    "notFound": "Appareil introuvable",
+    "badgesTitle": "Badges",
+    "badgesSubtitle": "Les badges inconnus apparaissent ici dès qu'un appareil les lit. Attribue-les à un membre.",
+    "badgesEmpty": "Aucun badge lu pour l'instant.",
+    "badgeUnassigned": "Non attribué",
+    "badgeSeen": "Vu le {when}",
+    "assignTo": "Attribuer à…",
+    "unassign": "Retirer",
+    "badgeAssigned": "Badge attribué",
+    "badgeUnassignedToast": "Badge retiré",
+    "recentTakes": "Dernières actions",
+    "takeRejected": "refusée : {reason}"
+  },
+  "deviceLink": {
+    "title": "Lier un appareil",
+    "subtitle": "Saisis le code affiché sur l'écran du terminal.",
+    "codeLabel": "Code",
+    "codePlaceholder": "ABCD-2345",
+    "continue": "Continuer",
+    "invalidCode": "Ce code n'existe pas ou a expiré. L'appareil en affiche un nouveau toutes les 10 minutes.",
+    "requestTitle": "Demande de liaison",
+    "hardwareId": "Identifiant matériel : {id}",
+    "requestedAt": "Demandé à {time}",
+    "checkScreen": "Vérifie que ce code est bien celui affiché sur l'appareil que tu as devant toi.",
+    "office": "Bureau",
+    "name": "Nom de l'appareil",
+    "defaultName": "Terminal {office}",
+    "approve": "Lier l'appareil",
+    "deny": "Refuser",
+    "noAdminOffice": "Il faut être admin d'un bureau pour y lier un appareil.",
+    "approvedTitle": "Appareil lié",
+    "approved": "L'appareil va afficher « Lié à {office} » d'ici quelques secondes. Règle ses touches dans Admin > Appareils.",
+    "goToDevices": "Voir les appareils",
+    "deniedTitle": "Demande refusée",
+    "denied": "L'appareil n'a reçu aucun accès."
   }
 }

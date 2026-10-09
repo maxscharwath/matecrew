@@ -444,7 +444,7 @@ export async function HistorySection({ officeId, userId, page }: HistorySectionP
           id: c.id,
           date: c.date.toISOString(),
           createdAt: c.createdAt.toISOString(),
-          source: c.source as "DAILY_REQUEST" | "MANUAL",
+          source: c.source,
           qty: c.qty,
           cancelledAt: c.cancelledAt?.toISOString() ?? null,
         }))}

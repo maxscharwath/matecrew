@@ -77,7 +77,8 @@
     "members": "Members",
     "accounts": "Accounts",
     "switchOffice": "Switch office",
-    "items": "Items"
+    "items": "Items",
+    "devices": "Devices"
   },
   "home": {
     "noOfficeTitle": "No Office",
@@ -150,7 +151,8 @@
     "legendLess": "Less",
     "legendMore": "More",
     "heatmapCellTooltip": "{count, plural, =0 {No matés on {date}} one {# maté on {date}} other {# matés on {date}}}",
-    "takeCanConfirmItem": "Take one {item} and log it as consumed?"
+    "takeCanConfirmItem": "Take one {item} and log it as consumed?",
+    "terminal": "Terminal"
   },
   "stats": {
     "title": "Statistics",
@@ -1105,5 +1107,81 @@
     "knockFailed": "{down} of {total} — same pyramid, try again",
     "knockShots": "{shots, plural, =0 {No shots left} one {# shot left} other {# shots left}}",
     "noFlip": "Set down, not flipped — the can has to turn over at least once"
+  },
+  "devices": {
+    "keys": {
+      "take": "Take",
+      "return": "Return"
+    },
+    "screen": {
+      "updated": "Updated at {time}",
+      "batteryLow": "Battery low",
+      "lowStock": "low stock",
+      "inStock": "in stock"
+    },
+    "title": "Devices",
+    "subtitle": "This office's badge terminals: what they show, what their keys do, and the badges they have read.",
+    "linkHintTitle": "Link a new device",
+    "linkHint": "Turn the device on and connect it to Wi-Fi: it shows a code and a QR. Scan the QR or enter the code at {url}.",
+    "empty": "No device linked yet.",
+    "lastSeen": "Last sync: {when}",
+    "neverSeen": "Never synced",
+    "battery": "Battery: {volts} V",
+    "batteryLow": "Battery low: {volts} V",
+    "firmware": "Firmware {version}",
+    "preview": "Screen preview",
+    "previewHint": "Exactly what the device will show at its next sync.",
+    "name": "Name",
+    "leftKey": "Left key",
+    "rightKey": "Right key",
+    "action": "Action",
+    "actionTake": "Take",
+    "actionReturn": "Return",
+    "item": "Item",
+    "label": "Displayed label",
+    "labelPlaceholder": "Automatic: “{example}”",
+    "syncTimes": "Sync times",
+    "syncTimesHint": "Office times, comma separated (e.g. 08:00, 12:00, 15:00, 18:00).",
+    "saved": "Device saved",
+    "revoke": "Unlink",
+    "revokeConfirm": "Unlink “{name}”? It loses its access and shows a link code again.",
+    "revoked": "Device unlinked",
+    "invalidSyncTimes": "Invalid times: use the HH:MM format.",
+    "nameRequired": "A name is required",
+    "notFound": "Device not found",
+    "badgesTitle": "Badges",
+    "badgesSubtitle": "Unknown badges show up here as soon as a device reads them. Assign them to a member.",
+    "badgesEmpty": "No badge read yet.",
+    "badgeUnassigned": "Unassigned",
+    "badgeSeen": "Seen on {when}",
+    "assignTo": "Assign to…",
+    "unassign": "Remove",
+    "badgeAssigned": "Badge assigned",
+    "badgeUnassignedToast": "Badge removed",
+    "recentTakes": "Recent actions",
+    "takeRejected": "rejected: {reason}"
+  },
+  "deviceLink": {
+    "title": "Link a device",
+    "subtitle": "Enter the code shown on the terminal's screen.",
+    "codeLabel": "Code",
+    "codePlaceholder": "ABCD-2345",
+    "continue": "Continue",
+    "invalidCode": "This code does not exist or has expired. The device shows a new one every 10 minutes.",
+    "requestTitle": "Link request",
+    "hardwareId": "Hardware id: {id}",
+    "requestedAt": "Requested at {time}",
+    "checkScreen": "Check that this code is the one shown on the device in front of you.",
+    "office": "Office",
+    "name": "Device name",
+    "defaultName": "{office} terminal",
+    "approve": "Link the device",
+    "deny": "Deny",
+    "noAdminOffice": "You need to be an admin of an office to link a device to it.",
+    "approvedTitle": "Device linked",
+    "approved": "The device will show “Linked to {office}” within a few seconds. Set up its keys in Admin > Devices.",
+    "goToDevices": "See devices",
+    "deniedTitle": "Request denied",
+    "denied": "The device got no access."
   }
 }

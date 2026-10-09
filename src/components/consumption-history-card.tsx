@@ -16,11 +16,17 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { cancelConsumption } from "@/app/org/[officeId]/dashboard/actions";
 
+const SOURCE_LABEL_KEYS = {
+  DAILY_REQUEST: "dashboard.dailyRequest",
+  MANUAL: "dashboard.selfServe",
+  DEVICE: "dashboard.terminal",
+} as const;
+
 interface ConsumptionItem {
   id: string;
   date: string;
   createdAt: string;
-  source: "DAILY_REQUEST" | "MANUAL";
+  source: "DAILY_REQUEST" | "MANUAL" | "DEVICE";
   qty: number;
   cancelledAt: string | null;
 }
@@ -86,9 +92,7 @@ export function ConsumptionHistoryCard({
                       })}
                     </span>
                     <Badge variant="secondary" className="text-xs">
-                      {c.source === "MANUAL"
-                        ? t("dashboard.selfServe")
-                        : t("dashboard.dailyRequest")}
+                      {t(SOURCE_LABEL_KEYS[c.source])}
                     </Badge>
                     {c.cancelledAt && (
                       <Badge variant="destructive" className="text-xs">

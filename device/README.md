@@ -51,8 +51,17 @@ Le principe est celui du « device authorization grant » (RFC 8628), le même q
 | `GET` | `/api/device/state` | jeton | Stock, libellés, badges, réglages, firmware attendu |
 | `POST` | `/api/device/takes` | jeton | Envoyer les prises en attente (idempotent) |
 | `POST` | `/api/device/status` | jeton | Batterie, version, signal Wi-Fi, badges inconnus |
+| `GET` | `/api/device/screen` | jeton | Écran principal en bitmap 1 bit, `304` s'il n'a pas changé |
 
-Le contrat est écrit une seule fois en Zod côté app. Les types Rust du firmware en sont générés, et la CI échoue si les deux divergent.
+Le contrat est écrit en Zod dans `src/lib/device/contract.ts` ; le firmware reprend les mêmes formes.
+
+## L'écran principal est en React
+
+Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `next/og`, puis le réduit en 800 × 480 pixels noir et blanc, soit 48 000 octets. L'appareil le télécharge à chaque synchro et l'affiche tel quel.
+
+- Aperçu exact dans Admin > Appareils. Avec `just api`, une modification de `screen.tsx` se voit en rechargeant la page.
+- Changer le design ne demande pas de reflasher l'appareil.
+- Les écrans qui doivent apparaître tout de suite et hors ligne (badge, confirmation, Wi-Fi, code de liaison, erreurs) restent dessinés par l'appareil, dans `device/ui`.
 
 ## Développement
 

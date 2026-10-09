@@ -22,6 +22,7 @@ import {
   Receipt,
   Settings,
   Sparkles,
+  Tablet,
   Timer,
   User,
   Users,
@@ -104,6 +105,7 @@ export function AppSidebar({
     { path: "/admin/cron", label: t("nav.cronJobs"), icon: Timer },
     { path: "/admin/items", label: t("nav.items"), icon: Boxes },
     { path: "/admin/stock", label: t("nav.stock"), icon: Package },
+    { path: "/admin/devices", label: t("nav.devices"), icon: Tablet },
     { path: "/admin/consumption", label: t("nav.consumption"), icon: ClipboardList },
     { path: "/admin/purchases", label: t("nav.purchases"), icon: Receipt },
     {

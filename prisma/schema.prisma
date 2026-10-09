@@ -23,6 +23,16 @@ enum RequestStatus {
 enum ConsumptionSource {
   DAILY_REQUEST
   MANUAL
+  /// Recorded by a badge terminal (see `Device`).
+  DEVICE
+}
+
+/// What a badge terminal key does with its item.
+enum DeviceKeyAction {
+  /// Take one can: a consumption entry and one unit out of stock.
+  TAKE
+  /// Give one back: cancels the badge holder's latest take of that item today.
+  RETURN
 }
 
 enum StockMovementReason {
@@ -56,41 +66,44 @@ enum JoinRequestStatus {
 // ─── Better Auth models ─────────────────────────────────
 
 model User {
-  id              String    @id @default(cuid())
+  id              String     @id @default(cuid())
   name            String
-  email           String    @unique
-  emailVerified   Boolean   @default(false)
+  email           String     @unique
+  emailVerified   Boolean    @default(false)
   image           String?
-  locale          String    @default("fr")
-  slackUserId     String?   @unique
+  locale          String     @default("fr")
+  slackUserId     String?    @unique
   defaultOfficeId String?
-  defaultOffice   Office?   @relation("DefaultOffice", fields: [defaultOfficeId], references: [id], onDelete: SetNull)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  defaultOffice   Office?    @relation("DefaultOffice", fields: [defaultOfficeId], references: [id], onDelete: SetNull)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
   flipScore       FlipScore?
 
-  sessions      Session[]
-  accounts      Account[]
+  sessions Session[]
+  accounts Account[]
 
   // OAuth provider relations (MCP connectors)
   oauthApplications OauthApplication[]
   oauthAccessTokens OauthAccessToken[]
   oauthConsents     OauthConsent[]
 
-  articleReads      ArticleRead[]
+  articleReads ArticleRead[]
 
   // App relations
-  memberships        Membership[]
-  joinRequests       JoinRequest[]
-  dailyRequests      DailyRequest[]
-  consumptionEntries ConsumptionEntry[]
-  orderedBatches     PurchaseBatch[]    @relation("OrderedBy")
-  paidBatches        PurchaseBatch[]    @relation("PaidBy")
-  reimbursementsFrom ReimbursementLine[] @relation("ReimbursementFrom")
-  reimbursementsTo   ReimbursementLine[] @relation("ReimbursementTo")
-  stockMovements     StockMovement[]
-  stockCounts        StockCount[]        @relation("CountedBy")
+  memberships         Membership[]
+  joinRequests        JoinRequest[]
+  dailyRequests       DailyRequest[]
+  consumptionEntries  ConsumptionEntry[]
+  orderedBatches      PurchaseBatch[]     @relation("OrderedBy")
+  paidBatches         PurchaseBatch[]     @relation("PaidBy")
+  reimbursementsFrom  ReimbursementLine[] @relation("ReimbursementFrom")
+  reimbursementsTo    ReimbursementLine[] @relation("ReimbursementTo")
+  stockMovements      StockMovement[]
+  stockCounts         StockCount[]        @relation("CountedBy")
   statementDeliveries StatementDelivery[]
+  badges              Badge[]
+  devicesLinked       Device[]            @relation("DeviceLinkedBy")
+  deviceLinksApproved DeviceLink[]        @relation("DeviceLinkApprovedBy")
 }
 
 model Session {
@@ -212,7 +225,7 @@ model OauthConsent {
 /// unread count is computed against the current catalogue.
 model ArticleRead {
   userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   slug   String
   readAt DateTime @default(now())
 
@@ -236,7 +249,7 @@ model Office {
 
   memberships          Membership[]
   joinRequests         JoinRequest[]
-  defaultForUsers      User[]               @relation("DefaultOffice")
+  defaultForUsers      User[]                @relation("DefaultOffice")
   dailyRequests        DailyRequest[]
   items                Item[]
   stock                Stock[]
@@ -245,19 +258,22 @@ model Office {
   reimbursementPeriods ReimbursementPeriod[]
   mateSessions         MateSession[]
   stockCounts          StockCount[]
+  devices              Device[]
+  badges               Badge[]
+  deviceLinks          DeviceLink[]
 }
 
 /// A consumable managed per office (e.g. "Maté Classic", "Maté Zero", "Ginger").
 /// Stock, requests, consumption and purchases are all scoped to an item.
 model Item {
-  id        String   @id @default(cuid())
-  officeId  String
-  office    Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  name      String
-  imageKey  String?
-  active    Boolean  @default(true)
-  isDefault Boolean  @default(false)
-  sortOrder Int      @default(0)
+  id                String   @id @default(cuid())
+  officeId          String
+  office            Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  name              String
+  imageKey          String?
+  active            Boolean  @default(true)
+  isDefault         Boolean  @default(false)
+  sortOrder         Int      @default(0)
   /// Hex colour ("#3987e5") an admin picked for this item's charts. Null lets
   /// the chart palette assign one by rank, which is what every item does until
   /// someone insists that the ginger one be orange.
@@ -268,11 +284,11 @@ model Item {
   /// rarely-drunk flavour needs a far lower floor than the house maté.
   lowStockThreshold Int?
   // Per-unit nutrition facts, used by the stats screen (defaults ≈ a 50cl maté).
-  volumeMl   Int   @default(500)
-  sugarGrams Float @default(25)
-  caffeineMg Float @default(100)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  volumeMl          Int      @default(500)
+  sugarGrams        Float    @default(25)
+  caffeineMg        Float    @default(100)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   stock              Stock[]
   stockMovements     StockMovement[]
@@ -280,18 +296,20 @@ model Item {
   consumptionEntries ConsumptionEntry[]
   purchaseLines      PurchaseLine[]
   stockCountLines    StockCountLine[]
+  devicesLeftKey     Device[]           @relation("DeviceLeftItem")
+  devicesRightKey    Device[]           @relation("DeviceRightItem")
 
   @@unique([officeId, name])
   @@index([officeId])
 }
 
 model Membership {
-  id       String   @id @default(cuid())
-  userId   String
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  officeId String
-  office   Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  roles    Role[]   @default([USER])
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  officeId  String
+  office    Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  roles     Role[]   @default([USER])
   createdAt DateTime @default(now())
 
   @@unique([userId, officeId])
@@ -310,16 +328,16 @@ model JoinRequest {
 }
 
 model MateSession {
-  id                String    @id @default(cuid())
-  officeId          String
-  office            Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  dayOfWeek         Int       // 0=Sun, 1=Mon ... 6=Sat
-  startTime         String    // HH:mm — session opens & notification sent
-  cutoffTime        String    // HH:mm — requests close
-  label             String?   // e.g. "Matin", "Après-midi"
-  lastNotifiedDate      DateTime? @db.Date // idempotency: skip if already notified today
-  lastNotifiedMessageTs String?   // Slack message ts, used to chat.update the live message when requests change
-  lastNotifiedChannelId String?
+  id                      String    @id @default(cuid())
+  officeId                String
+  office                  Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  dayOfWeek               Int // 0=Sun, 1=Mon ... 6=Sat
+  startTime               String // HH:mm — session opens & notification sent
+  cutoffTime              String // HH:mm — requests close
+  label                   String? // e.g. "Matin", "Après-midi"
+  lastNotifiedDate        DateTime? @db.Date // idempotency: skip if already notified today
+  lastNotifiedMessageTs   String? // Slack message ts, used to chat.update the live message when requests change
+  lastNotifiedChannelId   String?
   cutoffNotifiedDate      DateTime? @db.Date
   cutoffNotifiedMessageTs String?
   cutoffNotifiedChannelId String?
@@ -366,17 +384,17 @@ model Stock {
 }
 
 model StockMovement {
-  id        String               @id @default(cuid())
+  id        String              @id @default(cuid())
   officeId  String
   itemId    String
-  item      Item                 @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  stock     Stock                @relation(fields: [officeId, itemId], references: [officeId, itemId], onDelete: Cascade)
-  delta     Int                  // +N or -N
+  item      Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  stock     Stock               @relation(fields: [officeId, itemId], references: [officeId, itemId], onDelete: Cascade)
+  delta     Int // +N or -N
   reason    StockMovementReason
   note      String?
   userId    String?
-  user      User?                @relation(fields: [userId], references: [id])
-  createdAt DateTime             @default(now())
+  user      User?               @relation(fields: [userId], references: [id])
+  createdAt DateTime            @default(now())
 
   @@index([officeId, itemId])
 }
@@ -386,14 +404,14 @@ model StockMovement {
 /// movement, and the missing cans are billed as shrinkage on the period that
 /// contains `countedAt`.
 model StockCount {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   officeId        String
-  office          Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  countedAt       DateTime @default(now())
+  office          Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  countedAt       DateTime  @default(now())
   countedByUserId String
-  countedBy       User     @relation("CountedBy", fields: [countedByUserId], references: [id])
+  countedBy       User      @relation("CountedBy", fields: [countedByUserId], references: [id])
   note            String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
   /// When the count was undone. A cancelled count is kept — it happened, and
   /// the stock movements that reversed it point back at it — but `@/lib/costing`
   /// skips its lines, so its shrinkage stops being billed to anybody.
@@ -421,19 +439,19 @@ model StockCountLine {
 /// A purchase order. Can span several item types via its `lines`; `totalPrice`
 /// is the order total (sum of the line totals).
 model PurchaseBatch {
-  id             String         @id @default(cuid())
-  officeId       String
-  office         Office         @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  status         PurchaseStatus @default(ORDERED)
-  purchasedAt    DateTime       @default(now())
-  deliveredAt    DateTime?
+  id              String         @id @default(cuid())
+  officeId        String
+  office          Office         @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  status          PurchaseStatus @default(ORDERED)
+  purchasedAt     DateTime       @default(now())
+  deliveredAt     DateTime?
   orderedByUserId String
-  orderedBy      User           @relation("OrderedBy", fields: [orderedByUserId], references: [id])
-  paidByUserId   String
-  paidBy         User           @relation("PaidBy", fields: [paidByUserId], references: [id])
-  totalPrice     Decimal        @db.Decimal(10, 2)
-  notes          String?
-  createdAt      DateTime       @default(now())
+  orderedBy       User           @relation("OrderedBy", fields: [orderedByUserId], references: [id])
+  paidByUserId    String
+  paidBy          User           @relation("PaidBy", fields: [paidByUserId], references: [id])
+  totalPrice      Decimal        @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime       @default(now())
 
   lines              PurchaseLine[]
   invoices           InvoiceFile[]
@@ -480,6 +498,10 @@ model ConsumptionEntry {
   source          ConsumptionSource @default(DAILY_REQUEST)
   purchaseBatchId String?
   purchaseBatch   PurchaseBatch?    @relation(fields: [purchaseBatchId], references: [id])
+  /// Terminal that recorded the take, when there was one.
+  deviceId        String?
+  device          Device?           @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  deviceTakes     DeviceTake[]
   cancelledAt     DateTime?
   createdAt       DateTime          @default(now())
 
@@ -487,22 +509,22 @@ model ConsumptionEntry {
 }
 
 model ReimbursementPeriod {
-  id        String    @id @default(cuid())
-  officeId  String
-  office    Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  month     Int       // 1-12
-  year      Int       // e.g. 2026
-  startDate DateTime  @db.Date
-  endDate   DateTime  @db.Date
-  createdAt DateTime  @default(now())
+  id               String    @id @default(cuid())
+  officeId         String
+  office           Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  month            Int // 1-12
+  year             Int // e.g. 2026
+  startDate        DateTime  @db.Date
+  endDate          DateTime  @db.Date
+  createdAt        DateTime  @default(now())
   /// When each member was last emailed their own statement for this period.
   /// Null means never: both the monthly cron and the admin button read it
   /// before sending, so a re-run of either does not bill everybody twice by
   /// mail.
   statementsSentAt DateTime?
 
-  lines       ReimbursementLine[]
-  deliveries  StatementDelivery[]
+  lines      ReimbursementLine[]
+  deliveries StatementDelivery[]
 
   @@unique([officeId, year, month])
 }
@@ -558,4 +580,108 @@ model FlipScore {
   updatedAt     DateTime @updatedAt
 
   @@index([landings, bestStreak])
+}
+
+// ─── Badge terminals ─────────────────────────────────────
+
+/// A badge terminal linked to an office. It authenticates with a bearer token;
+/// only the token's SHA-256 is stored, so a database leak gives no access.
+model Device {
+  id         String  @id @default(cuid())
+  officeId   String
+  office     Office  @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  name       String
+  /// Wi-Fi MAC address the terminal reported when it asked to be linked.
+  hardwareId String
+  tokenHash  String  @unique
+  linkedById String?
+  linkedBy   User?   @relation("DeviceLinkedBy", fields: [linkedById], references: [id], onDelete: SetNull)
+
+  leftAction  DeviceKeyAction @default(TAKE)
+  leftItemId  String?
+  leftItem    Item?           @relation("DeviceLeftItem", fields: [leftItemId], references: [id], onDelete: SetNull)
+  /// Text above the key; null derives it from the action and the item.
+  leftLabel   String?
+  rightAction DeviceKeyAction @default(RETURN)
+  rightItemId String?
+  rightItem   Item?           @relation("DeviceRightItem", fields: [rightItemId], references: [id], onDelete: SetNull)
+  rightLabel  String?
+  /// Local times ("HH:MM", office timezone) at which the terminal syncs.
+  syncTimes   String[]        @default(["08:00", "12:00", "15:00", "18:00"])
+
+  firmwareVersion String?
+  batteryMv       Int?
+  wifiRssi        Int?
+  lastSeenAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  consumptionEntries ConsumptionEntry[]
+  takes              DeviceTake[]
+
+  @@index([officeId])
+}
+
+/// One key press confirmed by a badge on a terminal, as the terminal sent it.
+/// A terminal resends its queue until the server acknowledges it, so
+/// (deviceId, takeId) is unique and a replay changes nothing.
+model DeviceTake {
+  id                 String            @id @default(cuid())
+  deviceId           String
+  device             Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  /// Id the terminal gave the take.
+  takeId             String
+  action             DeviceKeyAction
+  badgeUid           String
+  itemId             String?
+  /// Null when the take was applied; otherwise why it was not.
+  rejectedReason     String?
+  consumptionEntryId String?
+  consumptionEntry   ConsumptionEntry? @relation(fields: [consumptionEntryId], references: [id], onDelete: SetNull)
+  takenAt            DateTime
+  createdAt          DateTime          @default(now())
+
+  @@unique([deviceId, takeId])
+  @@index([deviceId, takenAt])
+}
+
+/// A pending link between a terminal and an office, after RFC 8628: the
+/// terminal holds the secret device code, a signed-in admin approves the short
+/// user code, and the terminal's next poll turns the approval into a `Device`.
+model DeviceLink {
+  id             String    @id @default(cuid())
+  deviceCodeHash String    @unique
+  /// Eight characters without look-alikes, shown on the terminal as XXXX-XXXX.
+  userCode       String    @unique
+  hardwareId     String
+  expiresAt      DateTime
+  lastPolledAt   DateTime?
+  approvedAt     DateTime?
+  deniedAt       DateTime?
+  /// Set by the poll that hands the token over; a link is redeemed once.
+  redeemedAt     DateTime?
+  officeId       String?
+  office         Office?   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  deviceName     String?
+  approvedById   String?
+  approvedBy     User?     @relation("DeviceLinkApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+/// A badge seen by a terminal. Unknown badges are recorded unassigned so an
+/// admin can give them to a member without anyone typing an UID.
+model Badge {
+  id          String   @id @default(cuid())
+  officeId    String
+  office      Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  /// Uppercase hex, no separators.
+  uid         String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([officeId, uid])
 }
