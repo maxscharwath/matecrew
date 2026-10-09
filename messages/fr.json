@@ -1114,7 +1114,6 @@
       "return": "Rendre"
     },
     "screen": {
-      "updated": "Mis à jour à {time}",
       "batteryLow": "Batterie faible",
       "lowStock": "stock bas",
       "inStock": "en stock"

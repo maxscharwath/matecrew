@@ -57,7 +57,7 @@ Le contrat est écrit en Zod dans `src/lib/device/contract.ts` ; le firmware rep
 
 ## L'écran principal est en React
 
-Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `next/og`, puis le réduit en 800 × 480 pixels noir et blanc, soit 48 000 octets. L'appareil le télécharge à chaque synchro et l'affiche tel quel.
+Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `next/og`, en pixel art comme les écrans de l'appareil : une toile de 200 × 120 avec des polices pixel (Silkscreen, Pixelify Sans), agrandie quatre fois en 800 × 480 pixels noir et blanc, soit 48 000 octets. L'appareil le télécharge à chaque synchro et l'affiche tel quel.
 
 - Aperçu exact dans Admin > Appareils. Avec `just api`, une modification de `screen.tsx` se voit en rechargeant la page.
 - Changer le design ne demande pas de reflasher l'appareil.

@@ -9,7 +9,18 @@ import type { ScreenData } from "@/lib/device/screen";
 /** Below this the terminal and the site warn that it needs charging. */
 export const LOW_BATTERY_MV = 3500;
 
-type KeySide = { action: DeviceKeyAction; itemId: string | null; label: string | null };
+function wifiBars(rssi: number | null): number | null {
+  if (rssi == null) return null;
+  return rssi > -60 ? 3 : rssi > -70 ? 2 : rssi > -80 ? 1 : 0;
+}
+
+/** Rough LiPo charge from its resting voltage: 3.3 V empty, 4.15 V full. */
+function batteryPercent(mv: number | null): number | null {
+  if (mv == null) return null;
+  return Math.round(Math.min(100, Math.max(0, ((mv - 3300) / (4150 - 3300)) * 100)));
+}
+
+type KeySide ={ action: DeviceKeyAction; itemId: string | null; label: string | null };
 
 async function loadOfficeData(officeId: string) {
   const [items, badges] = await Promise.all([
@@ -79,7 +90,9 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
 
   return {
     officeName: office.name,
-    updatedLabel: t("updated", { time }),
+    time,
+    wifiBars: wifiBars(device.wifiRssi),
+    batteryPercent: batteryPercent(device.batteryMv),
     batteryLowLabel:
       device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
     items: items.map((i) => {

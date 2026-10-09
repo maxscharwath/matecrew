@@ -1114,7 +1114,6 @@
       "return": "Return"
     },
     "screen": {
-      "updated": "Updated at {time}",
       "batteryLow": "Battery low",
       "lowStock": "low stock",
       "inStock": "in stock"
