@@ -1123,7 +1123,7 @@
       "chart": "Stock · {days} days"
     },
     "title": "Devices",
-    "subtitle": "This office's badge terminals: what they show, what their keys do, and the badges they have read.",
+    "subtitle": "The office's badge terminals: their screen, their settings and the badges they read.",
     "linkHintTitle": "Link a new device",
     "linkHint": "Turn the device on and connect it to Wi-Fi: it shows a code and a QR. Scan the QR or enter the code at {url}.",
     "empty": "No device linked yet.",
@@ -1208,7 +1208,10 @@
       "firmware": "Firmware",
       "battery": "Battery",
       "signal": "Wi-Fi",
-      "hardwareId": "Identifier"
+      "hardwareId": "Identifier",
+      "more": "More actions",
+      "waiting": "{count, plural, one {# command waiting} other {# commands waiting}}",
+      "noFrame": "The device has not sent its screen yet."
     },
     "virtual": {
       "open": "Virtual terminal",
@@ -1242,7 +1245,16 @@
       "queueEmpty": "Everything is sent. Cut the Wi-Fi to watch takes pile up.",
       "monitor": "Monitor"
     },
-    "virtualBadge": "virtual"
+    "virtualBadge": "virtual",
+    "linkDevice": "Link a device",
+    "linkStep1": "Turn the terminal on: it shows a QR code to set up its Wi-Fi.",
+    "linkStep2": "Scan it with your phone and pick the office Wi-Fi.",
+    "linkStep3": "The terminal then shows a code: scan its QR code or enter the code on {url}.",
+    "assignedBadges": "{count, plural, one {# assigned badge} other {# assigned badges}}",
+    "settings": "Settings",
+    "firstItem": "Item offered first",
+    "save": "Save",
+    "noTakes": "No takes yet."
   },
   "deviceLink": {
     "title": "Link a device",

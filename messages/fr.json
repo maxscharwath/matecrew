@@ -1123,7 +1123,7 @@
       "chart": "Stock · {days} jours"
     },
     "title": "Appareils",
-    "subtitle": "Les terminaux à badge de ce bureau : ce qu'ils affichent, ce que font leurs touches, et les badges qu'ils ont vus.",
+    "subtitle": "Les terminaux à badge du bureau : leur écran, leurs réglages et les badges qu'ils ont lus.",
     "linkHintTitle": "Lier un nouvel appareil",
     "linkHint": "Allume l'appareil et connecte-le au Wi-Fi : il affiche un code et un QR. Scanne le QR ou saisis le code sur {url}.",
     "empty": "Aucun appareil lié pour l'instant.",
@@ -1208,7 +1208,10 @@
       "firmware": "Firmware",
       "battery": "Batterie",
       "signal": "Wi-Fi",
-      "hardwareId": "Identifiant"
+      "hardwareId": "Identifiant",
+      "more": "Plus d'actions",
+      "waiting": "{count, plural, one {# commande en attente} other {# commandes en attente}}",
+      "noFrame": "L'appareil n'a pas encore envoyé son écran."
     },
     "virtual": {
       "open": "Terminal virtuel",
@@ -1242,7 +1245,16 @@
       "queueEmpty": "Tout est envoyé. Coupe le Wi-Fi pour voir les prises s'accumuler.",
       "monitor": "Moniteur"
     },
-    "virtualBadge": "virtuel"
+    "virtualBadge": "virtuel",
+    "linkDevice": "Lier un appareil",
+    "linkStep1": "Allume le terminal : il affiche un QR pour configurer son Wi-Fi.",
+    "linkStep2": "Scanne-le avec ton téléphone et choisis le Wi-Fi du bureau.",
+    "linkStep3": "Le terminal affiche ensuite un code : scanne son QR ou saisis le code sur {url}.",
+    "assignedBadges": "{count, plural, one {# badge attribué} other {# badges attribués}}",
+    "settings": "Réglages",
+    "firstItem": "Article proposé en premier",
+    "save": "Enregistrer",
+    "noTakes": "Aucune prise pour l'instant."
   },
   "deviceLink": {
     "title": "Lier un appareil",

@@ -10,8 +10,6 @@ import { toRow, type ConsoleCommand } from "@/lib/device/commands";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
-const SYNC_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-
 function revalidateDevices(officeId: string) {
   revalidatePath(`/org/${officeId}/admin/devices`);
 }
@@ -24,46 +22,23 @@ export async function updateDevice(
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations("devices");
 
-  const optionalId = z
-    .string()
-    .transform((v) => (v === "" || v === "none" ? null : v))
-    .nullable();
   const parsed = z
     .object({
       name: z.string().trim().min(1, t("nameRequired")).max(60),
-      leftAction: z.enum(["TAKE", "RETURN"]),
-      leftItemId: optionalId,
-      leftLabel: z.string().trim().max(40),
-      rightAction: z.enum(["TAKE", "RETURN"]),
-      rightItemId: optionalId,
-      rightLabel: z.string().trim().max(40),
-      syncTimes: z
-        .string()
-        .transform((v) => v.split(/[,\s]+/).filter(Boolean))
-        .refine((times) => times.length > 0 && times.length <= 24 && times.every((x) => SYNC_TIME.test(x)), {
-          message: t("invalidSyncTimes"),
-        }),
+      firstItemId: z.string().min(1).nullable(),
     })
-    .safeParse(Object.fromEntries(formData));
+    .safeParse({ name: formData.get("name"), firstItemId: formData.get("firstItemId") });
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
 
   const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
   if (!device) return { success: false, error: t("notFound") };
+  const { name, firstItemId } = parsed.data;
+  if (firstItemId && !(await prisma.item.count({ where: { id: firstItemId, officeId } }))) {
+    return { success: false, error: t("notFound") };
+  }
 
-  const { leftItemId, rightItemId } = parsed.data;
-  const itemIds = [leftItemId, rightItemId].filter((id): id is string => id !== null);
-  const known = await prisma.item.count({ where: { id: { in: itemIds }, officeId } });
-  if (known !== new Set(itemIds).size) return { success: false, error: t("notFound") };
-
-  await prisma.device.update({
-    where: { id: deviceId },
-    data: {
-      ...parsed.data,
-      leftLabel: parsed.data.leftLabel || null,
-      rightLabel: parsed.data.rightLabel || null,
-      syncTimes: [...new Set(parsed.data.syncTimes)].sort(),
-    },
-  });
+  // The picker opens on the left key's item; that is all the keys still have to set.
+  await prisma.device.update({ where: { id: deviceId }, data: { name, leftItemId: firstItemId } });
   revalidateDevices(officeId);
   return { success: true };
 }
