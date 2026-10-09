@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -11,7 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { sendDeviceCommand } from "@/app/org/[officeId]/admin/devices/actions";
 import type { ConsoleCommand } from "@/lib/device/commands";
 import type { LiveStatus } from "@/lib/device/live";
-import { BadgeZone, DeviceShell, type BadgeOption, type Side } from "@/components/device-console/device-shell";
+import {
+  BadgeZone,
+  DeviceShell,
+  useDeviceShortcuts,
+  type BadgeOption,
+  type Side,
+} from "@/components/device-console/device-shell";
 
 interface Props {
   readonly officeId: string;
@@ -78,23 +84,15 @@ export function DeviceConsole({ officeId, device, badges, initial, renderedAt }:
     if (globalThis.confirm(t("forgetWifiConfirm", { name: device.name }))) send({ kind: "forgetWifi" });
   }, [send, t, device.name]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || badgeOpen) return;
-      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
-      const action = {
-        ArrowLeft: () => send({ kind: "key", side: "left" }),
-        ArrowRight: () => send({ kind: "key", side: "right" }),
-        b: () => setBadgeOpen(true),
-        s: () => send({ kind: "sync" }),
-      }[event.key];
-      if (!action) return;
-      event.preventDefault();
-      action();
-    };
-    globalThis.addEventListener("keydown", onKeyDown);
-    return () => globalThis.removeEventListener("keydown", onKeyDown);
-  }, [send, badgeOpen]);
+  const shortcuts = useMemo(
+    () => ({
+      key: (side: Side) => send({ kind: "key", side }),
+      badge: () => setBadgeOpen(true),
+      sync: () => send({ kind: "sync" }),
+    }),
+    [send],
+  );
+  useDeviceShortcuts(shortcuts, badgeOpen);
 
   const relative = (iso: string) => format.relativeTime(new Date(iso), now);
   const volts = live.batteryMv != null ? (live.batteryMv / 1000).toFixed(2) : null;

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import Link from "next/link";
-import { BatteryLow, BatteryMedium, MonitorSmartphone, Nfc, Tablet, Unlink } from "lucide-react";
+import { BatteryLow, BatteryMedium, Cpu, MonitorSmartphone, Nfc, Tablet, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,6 +74,18 @@ export function DevicesManager({ officeId, linkUrl, items, members, badges, devi
         </CardHeader>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cpu className="size-5" /> {t("virtual.open")}
+            <Button asChild size="sm" variant="outline" className="ml-auto">
+              <Link href={`/org/${officeId}/admin/devices/virtual`}>{t("virtual.open")}</Link>
+            </Button>
+          </CardTitle>
+          <CardDescription>{t("virtual.openHint")}</CardDescription>
+        </CardHeader>
+      </Card>
+
       <BadgesCard officeId={officeId} badges={badges} members={members} />
     </div>
   );
@@ -102,6 +114,7 @@ function DeviceCard({
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           {device.name}
+          {device.hardwareId.startsWith("sim-") && <Badge variant="secondary">{t("virtualBadge")}</Badge>}
           {device.firmwareVersion && (
             <Badge variant="secondary">{t("firmware", { version: device.firmwareVersion })}</Badge>
           )}

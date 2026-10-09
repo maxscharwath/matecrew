@@ -1205,7 +1205,40 @@
       "battery": "Batterie",
       "signal": "Wi-Fi",
       "hardwareId": "Identifiant"
-    }
+    },
+    "virtual": {
+      "open": "Terminal virtuel",
+      "openHint": "Un terminal qui tourne dans le navigateur, avec le code du firmware : pour tester l'écran, les touches et les badges sans matériel.",
+      "title": "Terminal virtuel",
+      "loading": "Démarrage du terminal virtuel…",
+      "loadError": "Le terminal virtuel n'a pas pu démarrer : {error}",
+      "phase": {
+        "booting": "Démarrage",
+        "linking": "En attente de liaison",
+        "online": "En ligne",
+        "offline": "Hors ligne"
+      },
+      "cutWifi": "Couper le Wi-Fi",
+      "restoreWifi": "Rétablir le Wi-Fi",
+      "forget": "Délier",
+      "forgetConfirm": "Le terminal virtuel oublie son jeton et sa file de prises, puis redemande une liaison. Continuer ?",
+      "mute": "Couper le son",
+      "unmute": "Rétablir le son",
+      "hint": "Identifiant {id}.",
+      "linkTitle": "Code de liaison",
+      "approve": "Lier à {office}",
+      "approveElsewhere": "Ouvrir la page de liaison",
+      "approved": "Lié à {office}",
+      "defaultName": "Terminal virtuel",
+      "sensors": "Capteurs",
+      "battery": "Batterie",
+      "signal": "Wi-Fi",
+      "sensorsHint": "Envoyés au site à la prochaine synchro.",
+      "queue": "{count, plural, =0 {File d'attente} one {# prise en attente} other {# prises en attente}}",
+      "queueEmpty": "Tout est envoyé. Coupe le Wi-Fi pour voir les prises s'accumuler.",
+      "monitor": "Moniteur"
+    },
+    "virtualBadge": "virtuel"
   },
   "deviceLink": {
     "title": "Lier un appareil",

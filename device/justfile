@@ -19,6 +19,16 @@ sim:
 test:
     cd core && cargo test
     cd ui && cargo test
+    cd web && cargo test
+
+# Build the virtual device's wasm into the site (public/device/matecrew.wasm).
+web:
+    cd web && cargo build --release --target wasm32-unknown-unknown
+    cp "$(cd web && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/wasm32-unknown-unknown/release/matecrew_web.wasm" ../public/device/matecrew.wasm
+
+# Rebuild the wasm on every save in core, ui or web; the virtual device in `just api` reloads it by itself.
+web-watch:
+    cd web && cargo watch -q -w ../core -w ../ui -w src -s "cd .. && just web"
 
 # Build, flash the XIAO over USB and open the serial monitor. Talks to matecrew.vercel.app.
 flash:

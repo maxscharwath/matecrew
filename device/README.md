@@ -52,6 +52,8 @@ Le principe est celui du « device authorization grant » (RFC 8628), le même q
 | `POST` | `/api/device/takes` | jeton | Envoyer les prises en attente (idempotent) |
 | `POST` | `/api/device/status` | jeton | Batterie, version, signal Wi-Fi, badges inconnus |
 | `GET` | `/api/device/screen` | jeton | Écran principal en bitmap 1 bit, `304` s'il n'a pas changé |
+| `GET` | `/api/device/commands?wait=25` | jeton | Ce qu'un admin fait depuis la console : touche, badge, synchro, redémarrage, oubli du Wi-Fi. Tenue jusqu'à 25 s |
+| `PUT` | `/api/device/frame` | jeton | Ce que l'écran affiche, 48 000 octets, pour le miroir de la console |
 
 Le contrat est écrit en Zod dans `src/lib/device/contract.ts` ; le firmware reprend les mêmes formes.
 
@@ -63,6 +65,13 @@ Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `
 - Changer le design ne demande pas de reflasher l'appareil.
 - Les écrans qui doivent apparaître tout de suite et hors ligne (badge, confirmation, Wi-Fi, code de liaison, erreurs) restent dessinés par l'appareil, dans `device/ui`.
 
+## Console et terminal virtuel
+
+Dans Admin > Appareils :
+
+- **Console** d'un appareil : son écran en miroir, à jour à chaque rafraîchissement. On clique ses touches, on badge avec le badge d'un membre ou un badge inconnu, on synchronise, on redémarre, on lui fait oublier le Wi-Fi. Clavier : ← et → pour les touches, B pour badger, S pour synchroniser. Touches et badges arrivent en moins d'une seconde quand l'appareil est en ligne ; ceux de plus d'une minute sont abandonnés.
+- **Terminal virtuel** : un terminal complet dans le navigateur, sans matériel. La machine à états de la prise et les écrans sont le code Rust du firmware (`core`, `ui`) compilé en WebAssembly (`web`) ; il parle à la même API que le vrai. Il se lie en un clic, a sa file de prises, ses capteurs (batterie, signal), un bouton pour couper le Wi-Fi, le son du buzzer et un moniteur des requêtes. Il apparaît dans la liste des appareils, et sa console marche comme celle d'un vrai.
+
 ## Développement
 
 ```
@@ -70,6 +79,7 @@ device/
   core/      logique sans matériel : contrat de l'API, file de prises, trames PN532
   ui/        écrans, compilés pour le Mac et pour l'appareil
   sim/       rend tous les écrans en PNG sur le Mac, sans carte
+  web/       le terminal virtuel : core et ui en WebAssembly pour le site
   firmware/  firmware Rust (ESP-IDF) du XIAO ESP32-S3
   hardware/  boîtier OpenSCAD et STL
 ```
@@ -81,10 +91,14 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 | `just setup` | Installe la toolchain Rust de l'ESP32-S3, `espflash`, `ldproxy` et `cargo-watch` |
 | `just sim` | Redessine les écrans dans `sim/out/` à chaque sauvegarde, en une seconde environ |
 | `just test` | Tests des écrans et de la logique sur le Mac |
+| `just web` | Recompile le terminal virtuel (`public/device/matecrew.wasm`) |
+| `just web-watch` | Pareil à chaque sauvegarde dans `core`, `ui` ou `web` ; avec `just api`, la page du terminal virtuel recharge le wasm toute seule |
 | `just flash` | Compile, flashe le XIAO branché en USB et ouvre le moniteur série |
 | `just api` | Lance le site en local ; l'appareil le vise si on compile avec `MATECREW_URL=http://<ip-du-mac>:3000` |
 
-On itère sur les écrans avec `just sim`. On ne flashe que pour tester le matériel, le Wi-Fi ou la liaison.
+On itère sur les écrans avec `just sim`, ou dans le terminal virtuel avec `just api` et `just web-watch`. On ne flashe que pour tester le matériel, le Wi-Fi ou la liaison.
+
+Le wasm compilé est versionné dans `public/device/` : Vercel n'a pas la toolchain Rust. Après un changement dans `core`, `ui` ou `web`, lancer `just web` et commiter le fichier.
 
 Sans touches ni lecteur câblés, le moniteur série de `just flash` les remplace : `l` et `r` touchent une touche, `b 04A1B2C3D4E5F6` pose un badge, `s` lance une synchro.
 

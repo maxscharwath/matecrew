@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Nfc } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,33 @@ import {
 } from "@/components/ui/command";
 
 export type Side = "left" | "right";
+
+/**
+ * ← and → press the keys, B opens the badge picker, S syncs. Off while
+ * `paused` (the badge picker is open) or while typing in a field.
+ */
+export function useDeviceShortcuts(
+  handlers: { key: (side: Side) => void; badge: () => void; sync: () => void },
+  paused: boolean,
+) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || paused) return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]")) return;
+      const action = {
+        ArrowLeft: () => handlers.key("left"),
+        ArrowRight: () => handlers.key("right"),
+        b: handlers.badge,
+        s: handlers.sync,
+      }[event.key];
+      if (!action) return;
+      event.preventDefault();
+      action();
+    };
+    globalThis.addEventListener("keydown", onKeyDown);
+    return () => globalThis.removeEventListener("keydown", onKeyDown);
+  }, [handlers, paused]);
+}
 
 /** Key centres along the panel's 800 px, from the enclosure model in device/hardware. */
 const KEY_LEFT = `${(130 / 800) * 100}%`;

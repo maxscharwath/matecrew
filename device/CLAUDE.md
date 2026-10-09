@@ -20,6 +20,7 @@ Ce dossier `device/` vit dans le dépôt de l'app web matécrew.
 - `device/core/` : la logique sans matériel (contrat de l'API, file de prises, trames PN532, commandes de la console série), testée sur le Mac.
 - `device/ui/` : les écrans (crate Rust), dessinés sur n'importe quelle cible 800 × 480 noir et blanc.
 - `device/sim/` : rend les écrans en PNG sur le Mac (`just sim`), sans carte.
+- `device/web/` : `core` et `ui` compilés en WebAssembly pour le terminal virtuel du site (`just web` écrit `public/device/matecrew.wasm`, versionné). Le runtime réseau est en TypeScript dans `src/lib/device/virtual/`.
 - `device/firmware/` : firmware Rust sur ESP-IDF (`esp-idf-svc`, `epd-waveshare`), toolchain `esp` via espup.
 - `device/hardware/` : modèle OpenSCAD du boîtier (`boitier-matecrew.scad`, source de vérité) et ses STL exportés.
 - Le reste du dépôt est l'app web (Next.js App Router, Prisma, PostgreSQL, Bun ; voir le `README.md` à la racine).

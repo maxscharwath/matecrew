@@ -1205,7 +1205,40 @@
       "battery": "Battery",
       "signal": "Wi-Fi",
       "hardwareId": "Identifier"
-    }
+    },
+    "virtual": {
+      "open": "Virtual terminal",
+      "openHint": "A terminal running in the browser, on the firmware's own code: try the screen, keys and badges without hardware.",
+      "title": "Virtual terminal",
+      "loading": "Starting the virtual terminal…",
+      "loadError": "The virtual terminal could not start: {error}",
+      "phase": {
+        "booting": "Starting",
+        "linking": "Waiting to be linked",
+        "online": "Online",
+        "offline": "Offline"
+      },
+      "cutWifi": "Cut Wi-Fi",
+      "restoreWifi": "Restore Wi-Fi",
+      "forget": "Unlink",
+      "forgetConfirm": "The virtual terminal forgets its token and its queue of takes, then asks to be linked again. Continue?",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "hint": "Identifier {id}.",
+      "linkTitle": "Link code",
+      "approve": "Link to {office}",
+      "approveElsewhere": "Open the link page",
+      "approved": "Linked to {office}",
+      "defaultName": "Virtual terminal",
+      "sensors": "Sensors",
+      "battery": "Battery",
+      "signal": "Wi-Fi",
+      "sensorsHint": "Sent to the site with the next sync.",
+      "queue": "{count, plural, =0 {Queue} one {# take waiting} other {# takes waiting}}",
+      "queueEmpty": "Everything is sent. Cut the Wi-Fi to watch takes pile up.",
+      "monitor": "Monitor"
+    },
+    "virtualBadge": "virtual"
   },
   "deviceLink": {
     "title": "Link a device",
