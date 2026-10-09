@@ -13,7 +13,8 @@ COPY=matecrew_prod
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-vercel link --yes --project matecrew >/dev/null
+# Linking writes a VERCEL_OIDC_TOKEN into .env.local: only when not linked yet.
+[ -f .vercel/project.json ] || vercel link --yes --project matecrew >/dev/null
 vercel env pull "$tmp/prod.env" --environment=production --yes >/dev/null
 url=""
 for name in DATABASE_URL_UNPOOLED POSTGRES_URL_NON_POOLING DIRECT_URL DATABASE_URL; do
@@ -26,7 +27,7 @@ echo "Dumping production (read only)…"
 docker exec "$CONTAINER" pg_dump "$url" --format=custom --no-owner --no-acl > "$tmp/prod.dump"
 
 user=$(docker exec "$CONTAINER" printenv POSTGRES_USER)
-echo "Restoring into $COPY…"
+echo "Restoring into ${COPY}…"
 docker exec "$CONTAINER" dropdb -U "$user" --if-exists "$COPY"
 docker exec "$CONTAINER" createdb -U "$user" "$COPY"
 docker exec -i "$CONTAINER" pg_restore -U "$user" -d "$COPY" --no-owner --no-acl < "$tmp/prod.dump" \
