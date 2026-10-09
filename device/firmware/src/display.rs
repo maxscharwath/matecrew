@@ -54,7 +54,7 @@ impl Screen {
             Option::<AnyIOPin>::None,
             Some(pins.cs),
             &SpiDriverConfig::new(),
-            &Config::new().baudrate(10u32.MHz().into()),
+            &Config::new().baudrate(4u32.MHz().into()),
         )?;
         let epd = Epd::new(
             spi,

@@ -9,6 +9,12 @@ pub struct WifiCredentials {
     pub password: String,
 }
 
+/// What the setup page sends: the office Wi-Fi and the site to link to.
+pub struct Setup {
+    pub wifi: WifiCredentials,
+    pub site: String,
+}
+
 pub struct Store(EspNvs<NvsDefault>);
 
 impl Store {
@@ -61,6 +67,19 @@ impl Store {
     }
 
     /// The bearer token the site issued when the device was linked.
+    /// The site the terminal links to and syncs with, chosen during setup.
+    pub fn site(&self) -> Result<Option<String>> {
+        self.get("site")
+    }
+
+    /// A token is only good on the site that gave it: a new site forgets it.
+    pub fn set_site(&self, site: &str) -> Result<()> {
+        if self.site()?.as_deref() != Some(site) {
+            self.clear_token()?;
+        }
+        self.set("site", site)
+    }
+
     pub fn token(&self) -> Result<Option<String>> {
         self.get("token")
     }

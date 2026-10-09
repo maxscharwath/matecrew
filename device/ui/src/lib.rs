@@ -161,7 +161,7 @@ where
     title_bar(px, Point::new(4, CONTENT_TOP), W - 8, "CONNECTÉ")?;
     text(px, &SECONDARY, &format!("Wi-Fi {ssid}"), Point::new(6, 40))?;
     text(px, &MONO, ip, Point::new(6, 52))?;
-    key_hints(px, "Prendre", "Rendre")
+    footer(px, "Contact du site pour obtenir un code de liaison…")
 }
 
 pub fn error_screen<D>(d: &mut D, title: &str, detail: &str) -> Result<(), D::Error>
@@ -227,7 +227,22 @@ where
         let style = if i as u32 == info.index { PrimitiveStyle::with_fill(INK) } else { PrimitiveStyle::with_stroke(INK, 1) };
         dot.into_styled(style).draw(px)?;
     }
+    if info.index + 1 == info.count {
+        text(px, &SECONDARY, "Autre : ne rien prendre", Point::new(x, baseline + 26))?;
+    }
     key_hints(px, "Autre", "Prendre")
+}
+
+/// The stop after the last item: leave without taking anything.
+pub fn leave_screen<D>(d: &mut D, name: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, name, Status::None)?;
+    centered(px, &BIG, "Ne rien prendre", W / 2, CONTENT_TOP + 34)?;
+    centered(px, &SECONDARY, "Quitter revient à l'écran du stock.", W / 2, CONTENT_TOP + 50)?;
+    key_hints(px, "Autre", "Quitter")
 }
 
 /// The take is queued: what was taken, for whom.
@@ -295,6 +310,7 @@ where
             let info = PickInfo { name, item, stock: *stock, image: image.as_deref(), index: *index, count: *count };
             pick_screen(d, &info)
         }
+        Screen::Leave { name } => leave_screen(d, name),
         Screen::Taken { name, item, image } => taken_screen(d, name, item, decode_base64(image).as_deref()),
         Screen::Summary { name, today, week, month } => summary_screen(d, name, *today, *week, *month),
         Screen::UnknownBadge { uid } => unknown_badge_screen(d, uid),

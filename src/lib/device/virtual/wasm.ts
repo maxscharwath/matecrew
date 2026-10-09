@@ -13,6 +13,7 @@ export type FlowScreen =
   | { type: "main" }
   | { type: "badge"; keyLabel: string }
   | { type: "pick"; name: string; item: string; stock: number; image: string; index: number; count: number }
+  | { type: "leave"; name: string }
   | { type: "taken"; name: string; item: string; image: string }
   | { type: "summary"; name: string; today: number; week: number; month: number }
   | { type: "unknownBadge"; uid: string }

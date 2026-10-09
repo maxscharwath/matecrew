@@ -35,6 +35,7 @@ fn main() {
     save(&out, "badge", |d| ui::badge_screen(d, "Prendre"));
     let info = ui::PickInfo { name: "Alex", item: "Maté Classic", stock: 36, image: None, index: 0, count: 3 };
     save(&out, "pick", |d| ui::pick_screen(d, &info));
+    save(&out, "leave", |d| ui::leave_screen(d, "Alex"));
     save(&out, "taken", |d| ui::taken_screen(d, "Alex", "Maté Classic", None));
     save(&out, "summary", |d| ui::summary_screen(d, "Alex Martin", 1, 4, 11));
     save(&out, "unknown-badge", |d| ui::unknown_badge_screen(d, "04A1B2C3D4E5F6"));

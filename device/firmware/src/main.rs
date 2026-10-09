@@ -61,10 +61,25 @@ pub enum Input {
     ForgetWifi,
 }
 
-fn main() -> Result<()> {
+/// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
+const MAX_SITE_FAILURES: u32 = 10;
+/// How long an error stays on screen before the terminal starts over.
+const RETRY_AFTER: Duration = Duration::from_secs(30);
+
+fn main() {
+    // The terminal has no button and no switch: whatever fails, it starts over
+    // rather than stopping on a frozen screen.
+    if let Err(e) = app() {
+        log::error!("{e:#}; restarting in {RETRY_AFTER:?}");
+        thread::sleep(RETRY_AFTER);
+    }
+    reset::restart();
+}
+
+fn app() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    log::info!("matecrew device {FIRMWARE_VERSION}, site {}", api::BASE_URL);
+    log::info!("matecrew device {FIRMWARE_VERSION}");
 
     let p = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
@@ -95,11 +110,18 @@ fn main() -> Result<()> {
     };
 
     let mut wifi = BlockingWifi::wrap(EspWifi::new(p.modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
+    let site = store.site()?.unwrap_or_else(|| api::DEFAULT_SITE.to_owned());
+    log::info!("site {site}");
     let Some(creds) = store.wifi()? else {
-        setup_wifi(&mut wifi, &mut screen, &store)?;
+        setup_wifi(&mut wifi, &mut screen, &store, &site)?;
         reset::restart();
     };
 
+    let linked = store.token()?.is_some();
+    if !linked {
+        // Setting up: say what happens at each step.
+        screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
+    }
     if let Err(e) = wifi::connect(&mut wifi, &creds) {
         let failures = store.wifi_failures()?.saturating_add(1);
         log::warn!("Wi-Fi {:?} failed ({failures}/{MAX_WIFI_FAILURES}): {e:#}", creds.ssid);
@@ -116,13 +138,17 @@ fn main() -> Result<()> {
         reset::restart();
     }
     store.set_wifi_failures(0)?;
+    if !linked {
+        let ip = wifi.wifi().sta_netif().get_ip_info()?.ip.to_string();
+        screen.show(|d| ui::connected_screen(d, &creds.ssid, &ip))?;
+    }
 
     let token = match store.token()? {
         Some(token) => token,
-        None => link(&wifi, &mut screen, &store)?,
+        None => link(&wifi, &mut screen, &store, &site)?,
     };
 
-    let api = Api::with_token(token);
+    let api = Api::with_token(&site, token);
     remote::poll_commands(api.clone(), sender.clone())?;
     Terminal {
         mirror: remote::Mirror::start(api.clone())?,
@@ -144,7 +170,7 @@ fn main() -> Result<()> {
 }
 
 /// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
-fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store) -> Result<()> {
+fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<()> {
     let ap = wifi::start_setup_access_point(wifi)?;
     log::info!("setup access point {} at {}", ap.ssid, ap.ip);
     let portal_url = format!("http://{}", ap.ip);
@@ -156,21 +182,47 @@ fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store) -> Result<()> 
     })?;
 
     let (saved, received) = mpsc::channel();
-    let _server = portal::serve(ap.ip.parse()?, ap.networks, saved)?;
-    let creds = received.recv()?;
-    log::info!("Wi-Fi {:?} saved", creds.ssid);
+    let _server = portal::serve(ap.ip.parse()?, ap.networks, site.to_owned(), saved)?;
+    let setup: store::Setup = received.recv()?;
+    let creds = setup.wifi;
+    log::info!("Wi-Fi {:?} and site {} saved", creds.ssid, setup.site);
     store.set_wifi(&creds)?;
-    // Let the confirmation page reach the phone before the access point goes away.
-    thread::sleep(Duration::from_secs(3));
+    store.set_site(&setup.site)?;
+    // Drawing takes a few seconds: time enough for the confirmation page to
+    // reach the phone before the access point goes away. The panel keeps the
+    // message through the restart.
+    screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
     Ok(())
 }
 
 /// Shows a code until an office admin approves it on the site, then keeps the token.
-fn link(wifi: &Wifi, screen: &mut Panel, store: &Store) -> Result<String> {
+fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<String> {
     let hardware_id = wifi::hardware_id(wifi)?;
-    let api = Api::anonymous();
+    let api = Api::anonymous(site);
+    let mut failures = 0;
     loop {
-        let start = api.link_start(&hardware_id)?;
+        let start = match api.link_start(&hardware_id) {
+            Ok(start) => start,
+            Err(e) => {
+                failures += 1;
+                log::warn!("link start failed ({failures}/{MAX_SITE_FAILURES}): {e:#}");
+                if failures >= MAX_SITE_FAILURES {
+                    // Maybe the wrong site or the wrong network: set up again.
+                    store.clear_wifi()?;
+                    let detail = format!("{} ne répond toujours pas. Retour à la configuration du Wi-Fi.", api::host(site));
+                    screen.show(|d| ui::error_screen(d, "Site injoignable", &detail))?;
+                    thread::sleep(Duration::from_secs(10));
+                    reset::restart();
+                }
+                if failures == 1 {
+                    let detail = format!("{} ne répond pas. Le terminal réessaie toutes les 30 secondes.", api::host(site));
+                    screen.show(|d| ui::error_screen(d, "Site injoignable", &detail))?;
+                }
+                thread::sleep(RETRY_AFTER);
+                continue;
+            }
+        };
+        failures = 0;
         log::info!("link code {}", start.user_code);
         let short_url = start
             .verification_uri

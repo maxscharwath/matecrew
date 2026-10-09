@@ -3,7 +3,8 @@
 //! the time, and carries out the effects it returns.
 //!
 //! Left key → "put your badge" → badge → the items one by one: the left key
-//! shows the next one, the right key takes it.
+//! shows the next one, the right key takes it. After the last item comes a
+//! card to leave without taking anything.
 //! Right key → "put your badge" → badge → what the person drank today, this
 //! week and this month.
 
@@ -55,6 +56,8 @@ pub enum Screen {
     Badge { key_label: String },
     /// One item to take; `image` as in `contract::Item`.
     Pick { name: String, item: String, stock: i64, image: String, index: u32, count: u32 },
+    /// After the last item: the right key leaves without taking anything.
+    Leave { name: String },
     Taken { name: String, item: String, image: String },
     Summary { name: String, today: u32, week: u32, month: u32 },
     UnknownBadge { uid: String },
@@ -130,9 +133,13 @@ impl Flow {
             (Stage::AwaitBadge { side, .. }, Event::Badge { uid }) => self.read_badge(side, uid, cx),
             (Stage::AwaitBadge { .. }, Event::Key { .. }) => vec![beep(Beep::Key), show(Screen::Main)],
 
+            // The items, then the card to leave: one more stop than there are items.
             (Stage::Pick { uid, name, index, .. }, Event::Key { side: Side::Left }) => {
-                let count = cx.state.map_or(0, |s| s.items.len()).max(1);
-                self.pick(uid, name, (index + 1) % count, cx, Beep::Key)
+                let stops = cx.state.map_or(0, |s| s.items.len()) + 1;
+                self.pick(uid, name, (index + 1) % stops, cx, Beep::Key)
+            }
+            (Stage::Pick { index, .. }, Event::Key { side: Side::Right }) if index >= cx.state.map_or(0, |s| s.items.len()) => {
+                vec![beep(Beep::Key), show(Screen::Main)]
             }
             (Stage::Pick { uid, name, index, .. }, Event::Key { side: Side::Right }) => self.take(uid, name, index, cx),
 
@@ -188,7 +195,11 @@ impl Flow {
     }
 
     fn pick(&mut self, uid: String, name: String, index: usize, cx: Context, sound: Beep) -> Vec<Effect> {
-        let Some(item) = cx.state.and_then(|s| s.items.get(index)) else { return vec![show(Screen::Main)] };
+        let Some(state) = cx.state else { return vec![show(Screen::Main)] };
+        let Some(item) = state.items.get(index) else {
+            self.stage = Stage::Pick { uid, name: name.clone(), index, until: cx.now_ms + PICK_MS };
+            return vec![beep(sound), show(Screen::Leave { name })];
+        };
         let screen = Screen::Pick {
             name: name.clone(),
             item: item.name.clone(),
@@ -272,8 +283,6 @@ mod tests {
         assert!(flow.wants_badge());
         assert_eq!(flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)), [beep(Beep::Accepted), pick("Maté", 36, 0)]);
         assert_eq!(flow.handle(key(Side::Left), cx(&s, 2_000)), [beep(Beep::Key), pick("Zero", 12, 1)]);
-        assert_eq!(flow.handle(key(Side::Left), cx(&s, 3_000)), [beep(Beep::Key), pick("Maté", 36, 0)]);
-        assert_eq!(flow.handle(key(Side::Left), cx(&s, 4_000)), [beep(Beep::Key), pick("Zero", 12, 1)]);
         assert_eq!(
             flow.handle(key(Side::Right), cx(&s, 5_000)),
             [
@@ -292,6 +301,24 @@ mod tests {
         );
         assert_eq!(flow.handle(Event::Tick, cx(&s, 5_000 + MESSAGE_MS)), [show(Screen::Main)]);
         assert!(flow.is_idle());
+    }
+
+    #[test]
+    fn after_the_last_item_the_right_key_leaves() {
+        let s = state();
+        let mut flow = Flow::default();
+        flow.handle(key(Side::Left), cx(&s, 0));
+        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000));
+        flow.handle(key(Side::Left), cx(&s, 2_000));
+        assert_eq!(flow.handle(key(Side::Left), cx(&s, 3_000)), [beep(Beep::Key), show(Screen::Leave { name: "Alex".into() })]);
+        assert_eq!(flow.handle(key(Side::Right), cx(&s, 4_000)), [beep(Beep::Key), show(Screen::Main)]);
+        assert!(flow.is_idle());
+
+        flow.handle(key(Side::Left), cx(&s, 5_000));
+        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 6_000));
+        flow.handle(key(Side::Left), cx(&s, 7_000));
+        flow.handle(key(Side::Left), cx(&s, 8_000));
+        assert_eq!(flow.handle(key(Side::Left), cx(&s, 9_000)), [beep(Beep::Key), pick("Maté", 36, 0)]);
     }
 
     #[test]

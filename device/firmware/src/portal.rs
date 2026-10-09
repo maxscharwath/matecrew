@@ -15,12 +15,13 @@ use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::store::WifiCredentials;
+use crate::api::normalize_site;
+use crate::store::{Setup, WifiCredentials};
 
 const PAGE: &str = include_str!("portal.html");
 const SAVED: &str = include_str!("portal-saved.html");
 
-pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>) -> Result<EspHttpServer<'static>> {
+pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Setup>) -> Result<EspHttpServer<'static>> {
     thread::Builder::new()
         .name("dns".into())
         .stack_size(6 * 1024)
@@ -34,7 +35,7 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
         .iter()
         .map(|n| format!("<option value=\"{0}\">{0}</option>", escape_html(n)))
         .collect();
-    let page = PAGE.replace("{{networks}}", &options);
+    let page = PAGE.replace("{{networks}}", &options).replace("{{site}}", &escape_html(&site));
     let home = format!("http://{ip}/");
     let host = ip.to_string();
 
@@ -58,11 +59,15 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
         let ssid = if other.is_empty() { field(&fields, "ssid").unwrap_or("") } else { other };
         let password = field(&fields, "password").unwrap_or("");
         let creds = WifiCredentials { ssid: ssid.to_owned(), password: password.to_owned() };
-        let page = SAVED.replace("{{ssid}}", &escape_html(&creds.ssid));
+        // A site that is not a web address keeps the one proposed.
+        let chosen = field(&fields, "site").and_then(normalize_site).unwrap_or_else(|| site.clone());
+        let page = SAVED
+            .replace("{{ssid}}", &escape_html(&creds.ssid))
+            .replace("{{site}}", &escape_html(crate::api::host(&chosen)));
         req.into_response(200, None, &[("content-type", "text/html; charset=utf-8")])?
             .write_all(page.as_bytes())?;
         if !creds.ssid.is_empty() {
-            let _ = saved.send(creds);
+            let _ = saved.send(Setup { wifi: creds, site: chosen });
         }
         Ok(())
     })?;

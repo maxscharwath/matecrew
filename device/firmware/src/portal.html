@@ -13,6 +13,8 @@
   select, input { width: 100%; box-sizing: border-box; font-size: 1rem; padding: 12px; border-radius: 10px; border: 1px solid #8884; background: transparent; color: inherit; }
   button { width: 100%; margin-top: 24px; padding: 14px; font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px; background: #111; color: #fff; }
   small { display: block; color: #777; margin-top: 6px; }
+  details { margin-top: 20px; }
+  summary { color: #777; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -26,6 +28,12 @@
   <label for="password">Mot de passe</label>
   <input id="password" name="password" type="password" autocomplete="off">
   <small>Il ne quitte pas ce téléphone et le terminal : rien ne passe par internet.</small>
+  <details>
+    <summary>Site matécrew</summary>
+    <label for="site">Adresse du site</label>
+    <input id="site" name="site" type="url" value="{{site}}" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <small>Le terminal s'y lie à l'étape suivante. Change-la seulement si ton bureau a son propre site matécrew.</small>
+  </details>
   <button type="submit">Connecter</button>
 </form>
 </body>

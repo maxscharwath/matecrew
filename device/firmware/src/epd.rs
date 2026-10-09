@@ -97,7 +97,8 @@ impl Epd {
         self.rst.set_low()?;
         FreeRtos::delay_ms(2);
         self.rst.set_high()?;
-        FreeRtos::delay_ms(20);
+        // As epd-waveshare does: less and the controller misses the first commands.
+        FreeRtos::delay_ms(200);
         Ok(())
     }
 

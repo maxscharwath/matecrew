@@ -10,10 +10,23 @@ use matecrew_core::contract::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
-pub const BASE_URL: &str = match option_env!("MATECREW_URL") {
+/// The site proposed during setup; the person can pick another one there.
+pub const DEFAULT_SITE: &str = match option_env!("MATECREW_URL") {
     Some(url) => url,
     None => "https://matecrew.vercel.app",
 };
+
+/// "https://matecrew.example.com" from what a person typed, or None if it is not a web address.
+pub fn normalize_site(input: &str) -> Option<String> {
+    let site = input.trim().trim_end_matches('/');
+    let rest = site.strip_prefix("https://").or_else(|| site.strip_prefix("http://"))?;
+    (!rest.is_empty() && !rest.contains(char::is_whitespace)).then(|| site.to_owned())
+}
+
+/// The site without its scheme, for the screens: "matecrew.vercel.app".
+pub fn host(site: &str) -> &str {
+    site.trim_start_matches("https://").trim_start_matches("http://")
+}
 
 pub enum LinkPoll {
     Granted(LinkGranted),
@@ -64,16 +77,17 @@ impl Body<'_> {
 
 #[derive(Clone)]
 pub struct Api {
+    site: String,
     token: Option<String>,
 }
 
 impl Api {
-    pub fn anonymous() -> Self {
-        Self { token: None }
+    pub fn anonymous(site: &str) -> Self {
+        Self { site: site.to_owned(), token: None }
     }
 
-    pub fn with_token(token: String) -> Self {
-        Self { token: Some(token) }
+    pub fn with_token(site: &str, token: String) -> Self {
+        Self { site: site.to_owned(), token: Some(token) }
     }
 
     pub fn link_start(&self, hardware_id: &str) -> Result<LinkStart> {
@@ -138,7 +152,7 @@ impl Api {
             ..Default::default()
         })?;
         let mut client = Client::wrap(connection);
-        let url = format!("{BASE_URL}{path}");
+        let url = format!("{}{path}", self.site);
         let (payload, content_type) = match &body {
             Body::None => (None, None),
             Body::Json(json) => (Some(json.as_slice()), Some("application/json")),
@@ -167,7 +181,9 @@ impl Api {
         let mut response = request.submit()?;
         let status = response.status();
         let etag = response.header("etag").map(str::to_owned);
-        let mut body = Vec::new();
+        // Sized up front: growing a 48 kB screen by doubling asks for 64 kB at once.
+        let expected = response.header("content-length").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+        let mut body = Vec::with_capacity(expected.min(64 * 1024));
         let mut chunk = [0u8; 1024];
         loop {
             let read = response.read(&mut chunk)?;
