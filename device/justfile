@@ -1,6 +1,9 @@
 # Run from device/. `just --list` shows every recipe.
 
 esp := ". ~/export-esp.sh &&"
+version := `grep -m1 '^version' firmware/Cargo.toml | cut -d'"' -f2`
+# Files the local site serves (images, firmware), kept apart from the copy of production.
+storage := "STORAGE_PROVIDER=local LOCAL_STORAGE_DIR=.data/dev-storage"
 
 default:
     @just --list
@@ -30,13 +33,23 @@ web:
 web-watch:
     cd web && cargo watch -q -w ../core -w ../ui -w src -s "cd .. && just web"
 
-# Build, flash the XIAO over USB and open the serial monitor. Talks to matecrew.vercel.app.
+# Build, flash the XIAO over USB and open the serial monitor. Setup proposes matecrew.vercel.app.
 flash:
-    cd firmware && {{esp}} cargo run
+    cd firmware && {{esp}} cargo build && ./flash.sh --monitor
 
-# Same, but the device talks to the site running on this Mac (`just api`).
+# Same, but setup proposes the site running on this Mac (`just api`).
 flash-local:
-    cd firmware && {{esp}} MATECREW_URL=http://$(ipconfig getifaddr en0):3000 cargo run
+    cd firmware && {{esp}} MATECREW_URL=http://$(ipconfig getifaddr en0):3000 cargo build && ./flash.sh --monitor
+
+# Build the application image for an update over the network: release/matecrew-<version>.bin.
+release:
+    cd firmware && {{esp}} cargo build
+    mkdir -p release
+    espflash save-image --chip esp32s3 "$(cd firmware && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/xtensa-esp32s3-espidf/debug/matecrew-device" release/matecrew-{{version}}.bin
+
+# Publish that image on the local copy of production (scripts/dev-prod-copy.sh): terminals install it at their next sync.
+publish:
+    cd .. && url=$(sed -n 's/^DATABASE_URL=//p' .env.local | tr -d '"' | sed -E 's#/[^/?]+(\?|$)#/matecrew_prod\1#') && DATABASE_URL="$url" DIRECT_URL="$url" STORAGE_PROVIDER=local LOCAL_STORAGE_DIR=.data/storage bun scripts/publish-firmware.ts device/release/matecrew-{{version}}.bin
 
 # Forget the Wi-Fi, the token and the screen: the device starts setup again.
 forget:
@@ -48,4 +61,4 @@ build:
 
 # Run the matécrew site locally for the device to talk to.
 api:
-    cd .. && bun dev --hostname 0.0.0.0
+    cd .. && {{storage}} bun dev --hostname 0.0.0.0

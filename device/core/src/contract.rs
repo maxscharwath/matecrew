@@ -106,6 +106,28 @@ pub struct DeviceState {
     pub badges: Vec<Badge>,
     pub sync_times: Vec<String>,
     pub server_time: String,
+    /// The latest firmware published on the site; the terminal installs it when it is newer.
+    #[serde(default)]
+    pub firmware: Option<FirmwareRelease>,
+}
+
+/// A firmware image on the site, downloaded with the device's token.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FirmwareRelease {
+    /// As in device/firmware/Cargo.toml: "0.2.0".
+    pub version: String,
+    /// Path on the site: "/api/device/firmware/0.2.0".
+    pub url: String,
+    /// Hex SHA-256 of the image.
+    pub sha256: String,
+    pub size: u64,
+}
+
+/// Whether `candidate` ("0.10.0") comes after `current` ("0.9.3"), comparing
+/// numbers; anything that is not a version never does.
+pub fn is_newer_version(candidate: &str, current: &str) -> bool {
+    let parse = |v: &str| v.split('.').map(|n| n.parse::<u64>().ok()).collect::<Option<Vec<_>>>();
+    matches!((parse(candidate), parse(current)), (Some(a), Some(b)) if a > b)
 }
 
 impl DeviceState {
@@ -309,6 +331,21 @@ pub fn decode_base64(input: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::is_newer_version;
+
+    #[test]
+    fn compares_numbers_not_text() {
+        assert!(is_newer_version("0.2.0", "0.1.0"));
+        assert!(is_newer_version("0.10.0", "0.9.3"));
+        assert!(is_newer_version("1.0", "0.9.9"));
+        assert!(!is_newer_version("0.1.0", "0.1.0"));
+        assert!(!is_newer_version("0.1.0", "0.2.0"));
+        assert!(!is_newer_version("next", "0.1.0"));
+    }
 }
 
 #[cfg(test)]

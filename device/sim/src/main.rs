@@ -38,6 +38,7 @@ fn main() {
     save(&out, "leave", |d| ui::leave_screen(d, "Alex"));
     save(&out, "taken", |d| ui::taken_screen(d, "Alex", "Maté Classic", None));
     save(&out, "summary", |d| ui::summary_screen(d, "Alex Martin", 1, 4, 11));
+    save(&out, "update", |d| ui::update_screen(d, "0.2.0", 50));
     save(&out, "unknown-badge", |d| ui::unknown_badge_screen(d, "04A1B2C3D4E5F6"));
     save(&out, "error", |d| {
         ui::error_screen(d, "Wi-Fi introuvable", "Le réseau « OWT-Office » ne répond pas.")

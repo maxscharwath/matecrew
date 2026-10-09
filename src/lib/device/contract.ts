@@ -73,6 +73,13 @@ export const deviceState = z.object({
   ),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
+  /**
+   * The newest firmware on the site; the terminal installs it when it is
+   * newer than its own. `url` is a path on the site, fetched with the token.
+   */
+  firmware: z
+    .object({ version: z.string(), url: z.string(), sha256: z.string(), size: z.number().int() })
+    .nullable(),
 });
 
 export const deviceTake = z.object({

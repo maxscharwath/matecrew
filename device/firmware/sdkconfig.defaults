@@ -10,3 +10,7 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# An updated firmware that does not sync before its first restart is rolled
+# back by the bootloader (src/ota.rs). Flash this build's bootloader, not
+# espflash's: `just flash` does.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

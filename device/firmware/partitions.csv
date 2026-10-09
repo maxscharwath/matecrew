@@ -1,0 +1,9 @@
+# Two app slots for updates over the network (see src/ota.rs). NVS stays
+# where it always was, so the Wi-Fi, the site and the token survive the
+# switch from the old single-app table.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+phy_init, data, phy,     0xf000,   0x1000
+otadata,  data, ota,     0x10000,  0x2000
+ota_0,    app,  ota_0,   0x20000,  0x380000
+ota_1,    app,  ota_1,   0x3a0000, 0x380000

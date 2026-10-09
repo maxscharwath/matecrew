@@ -13,7 +13,10 @@ use std::{
     time::Duration,
 };
 
-use crate::{api::Api, Input};
+use crate::{
+    api::{Api, Unauthorized},
+    Input,
+};
 
 /// Long-polls the site for console commands and passes them on as inputs.
 pub fn poll_commands(api: Api, inputs: Sender<Input>) -> Result<()> {
@@ -22,6 +25,11 @@ pub fn poll_commands(api: Api, inputs: Sender<Input>) -> Result<()> {
             Ok(reply) => reply,
             Err(e) => {
                 log::warn!("console commands: {e:#}");
+                // Unlinked on the site: a sync now finds out and links again,
+                // instead of at the next scheduled one.
+                if e.is::<Unauthorized>() && inputs.send(Input::Sync).is_err() {
+                    return;
+                }
                 thread::sleep(Duration::from_secs(10));
                 continue;
             }

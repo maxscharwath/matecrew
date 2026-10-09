@@ -80,6 +80,38 @@ impl Store {
         self.set("site", site)
     }
 
+    /// The firmware version installed and not confirmed yet (src/ota.rs).
+    pub fn ota_pending(&self) -> Result<Option<String>> {
+        self.get("ota_pending")
+    }
+
+    pub fn set_ota_pending(&self, version: Option<&str>) -> Result<()> {
+        match version {
+            Some(version) => self.set("ota_pending", version),
+            None => Ok(self.0.remove("ota_pending").map(|_| ())?),
+        }
+    }
+
+    /// A firmware version that failed: not tried again.
+    pub fn ota_failed(&self) -> Result<Option<String>> {
+        self.get("ota_failed")
+    }
+
+    pub fn set_ota_failed(&self, version: &str) -> Result<()> {
+        self.set("ota_failed", version)
+    }
+
+    /// Terminals linked before the site was a setting have a token and no
+    /// site: they keep the one they were built for, token included, so an
+    /// update built for another default does not move them.
+    pub fn pin_site(&self, built_for: &str) -> Result<()> {
+        if self.site()?.is_none() && self.token()?.is_some() {
+            self.set("site", built_for)?;
+            log::info!("site {built_for} kept for this linked terminal");
+        }
+        Ok(())
+    }
+
     pub fn token(&self) -> Result<Option<String>> {
         self.get("token")
     }

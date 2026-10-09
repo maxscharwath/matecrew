@@ -99,7 +99,8 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 ## API de l'appareil (côté site)
 
-- Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `screen`).
+- Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `screen`, `commands`, `frame`, `firmware/<version>`).
+- Mise à jour par le réseau : `state.firmware` annonce la dernière `FirmwareRelease` ; `firmware/src/ota.rs` l'installe dans l'autre slot (`partitions.csv`) et la confirme après sa première synchro, sinon le bootloader revient à l'ancienne. Publier : `just release` puis `just publish`.
 - Liaison façon RFC 8628 : `/api/device/link` renvoie `device_code` (secret, gardé par l'appareil) et `user_code` (affiché) ; un admin valide sur `/link` ; l'appareil interroge `/api/device/link/token` toutes les 5 s et reçoit son jeton `mcd_…` une seule fois.
 - Ensuite : `Authorization: Bearer mcd_…`. Le serveur ne garde que le SHA-256 du jeton. Un 401 veut dire « appareil délié » : effacer le jeton et recommencer la liaison.
 - `POST /api/device/takes` est idempotent par `id` de prise : renvoyer toute la file tant qu'elle n'est pas acquittée, puis retirer les ids de `done`.
@@ -110,7 +111,8 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 - Commandes depuis `device/` : `just sim`, `just test`, `just flash`, `just build`, `just api` (voir le `README.md`).
 - Itérer sur les écrans avec `just sim`, ne flasher que pour le matériel, le Wi-Fi ou la liaison.
-- Le XIAO se flashe par son USB-C (`/dev/cu.usbmodem…`) ; `espflash` gère le reset USB.
+- Le XIAO se flashe par son USB-C (`/dev/cu.usbmodem…`) ; `espflash` gère le reset USB. Si espflash ne se connecte pas, `esptool.py --chip esp32s3 --before usb_reset --after no_reset chip_id` (celui de PlatformIO) met la puce en mode téléchargement, puis `firmware/flash.sh --before no-reset --after hard-reset`.
+- `firmware/flash.sh` pose la table à deux slots et le bootloader du projet, compilé avec le retour arrière ; celui d'espflash ne l'a pas.
 - Le XIAO n'a aucun bouton accessible et la batterie est soudée sans interrupteur : pas de B + R, et débrancher l'USB ne le redémarre pas. Le flash ne passe que par le reset USB : un firmware qui casse l'USB-Serial-JTAG ou plante avant qu'il démarre rend l'appareil inflashable. Tester d'abord dans le terminal virtuel.
 - En deep sleep, le port USB disparaît : réveiller avec une touche.
 - Les binaires sortent dans le `target-dir` partagé de Cargo (`~/.cargo/shared-target`), pas dans `device/firmware/target`.

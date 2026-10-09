@@ -654,6 +654,20 @@ model DeviceCommand {
   @@index([deviceId, deliveredAt])
 }
 
+/// A firmware image the terminals install over the network (device/firmware/src/ota.rs).
+/// Published with scripts/publish-firmware.ts; the newest one is announced in
+/// every device state.
+model FirmwareRelease {
+  id         String   @id @default(cuid())
+  /// From device/firmware/Cargo.toml: "0.2.0".
+  version    String   @unique
+  /// Hex SHA-256 of the image, which the terminal checks before switching to it.
+  sha256     String
+  size       Int
+  storageKey String
+  createdAt  DateTime @default(now())
+}
+
 /// What the terminal's panel shows, as it last reported it: the console's mirror.
 model DeviceFrame {
   deviceId String   @id

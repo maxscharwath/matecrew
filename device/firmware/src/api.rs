@@ -60,6 +60,8 @@ struct Reply {
 
 /// Time for an ordinary request.
 const TIMEOUT: Duration = Duration::from_secs(20);
+/// Longest wait for the next piece of a firmware download.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the site holds a commands request when there is nothing to say.
 const COMMANDS_WAIT_SECONDS: u64 = 25;
 
@@ -141,6 +143,38 @@ impl Api {
         }
         check(&reply)?;
         Ok(ScreenUpdate::Changed { bits: reply.body, etag: reply.etag })
+    }
+
+    /// Downloads `path` and hands it over in pieces as they arrive, for a
+    /// firmware too big to hold in memory. Fails unless the site answers 200.
+    pub fn download(&self, path: &str, mut piece: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+        let connection = EspHttpConnection::new(&Configuration {
+            crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
+            timeout: Some(DOWNLOAD_TIMEOUT),
+            buffer_size: Some(4096),
+            ..Default::default()
+        })?;
+        let mut client = Client::wrap(connection);
+        let url = format!("{}{path}", self.site);
+        let auth = self.token.as_ref().map(|t| format!("Bearer {t}")).unwrap_or_default();
+        let headers = [("authorization", auth.as_str())];
+        let mut response = client.request(Method::Get, &url, &headers)?.submit()?;
+        let status = response.status();
+        log::info!("GET {path} -> {status}");
+        if status == 401 {
+            return Err(Unauthorized.into());
+        }
+        if status != 200 {
+            return Err(anyhow!("GET {path}: {status}"));
+        }
+        let mut buf = vec![0u8; 4096];
+        loop {
+            let read = response.read(&mut buf)?;
+            if read == 0 {
+                return Ok(());
+            }
+            piece(&buf[..read])?;
+        }
     }
 
     fn send(&self, method: Method, path: &str, body: Body, if_none_match: Option<&str>, timeout: Duration) -> Result<Reply> {

@@ -3,7 +3,8 @@ target = "xtensa-esp32s3-espidf"
 
 [target.xtensa-esp32s3-espidf]
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+# Two app slots: without the table, espflash would write its single-app one.
+runner = "espflash flash --monitor --partition-table partitions.csv"
 rustflags = ["--cfg", "espidf_time64"]
 
 [unstable]

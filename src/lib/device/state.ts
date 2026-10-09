@@ -84,6 +84,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     }),
     keyLabels(device),
   ]);
+  const release = await prisma.firmwareRelease.findFirst({ orderBy: { createdAt: "desc" } });
   const stats = await consumptionByUser(
     office.id,
     office.timezone,
@@ -106,6 +107,12 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
     syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
     serverTime: new Date().toISOString(),
+    firmware: release && {
+      version: release.version,
+      url: `/api/device/firmware/${encodeURIComponent(release.version)}`,
+      sha256: release.sha256,
+      size: release.size,
+    },
   };
 }
 

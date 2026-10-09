@@ -256,6 +256,7 @@ mod tests {
             badges: vec![Badge { uid: "04A1B2C3D4E5F6".into(), name: "Alex".into(), today: 1, week: 4, month: 11 }],
             sync_times: vec![],
             server_time: "2026-10-09T18:25:00Z".into(),
+            firmware: None,
         }
     }
 

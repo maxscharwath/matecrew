@@ -9,6 +9,7 @@ mod display;
 mod epd;
 mod keys;
 mod nfc;
+mod ota;
 mod portal;
 mod remote;
 mod store;
@@ -85,6 +86,8 @@ fn app() -> Result<()> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
     let store = Store::new(nvs.clone())?;
+    ota::check_boot(&store)?;
+    store.pin_site(api::DEFAULT_SITE)?;
     let mut screen = Panel::new(Pins {
         spi: p.spi2,
         sck: p.pins.gpio7,
@@ -165,6 +168,7 @@ fn app() -> Result<()> {
         nfc,
         inputs,
         _sender: sender,
+        confirmed: false,
     }
     .run()
 }
@@ -280,6 +284,8 @@ struct Terminal {
     queue: Queue,
     /// The site's last screen, to come back to without the network.
     main_screen: Option<Vec<u8>>,
+    /// This firmware has synced since it started: the bootloader keeps it.
+    confirmed: bool,
 }
 
 enum Next {
@@ -295,6 +301,7 @@ impl Terminal {
         // Keys touched during setup or linking do not count.
         while self.inputs.try_recv().is_ok() {}
         self.sync(false);
+        self.maybe_update();
         let mut sync_at = Instant::now() + SYNC_EVERY;
         loop {
             match self.next(sync_at)? {
@@ -303,6 +310,7 @@ impl Terminal {
                 Next::Input(Input::Sync) | Next::SyncDue => {
                     if self.flow.is_idle() {
                         self.sync(false);
+                        self.maybe_update();
                         sync_at = Instant::now() + SYNC_EVERY;
                     }
                 }
@@ -406,7 +414,15 @@ impl Terminal {
     /// Syncs and says whether it worked. A device the site no longer knows links again.
     fn sync(&mut self, redraw: bool) -> bool {
         match self.try_sync(redraw) {
-            Ok(()) => true,
+            Ok(()) => {
+                if !self.confirmed {
+                    if let Err(e) = ota::confirm(&self.store) {
+                        log::error!("ota: could not confirm this firmware: {e:#}");
+                    }
+                    self.confirmed = true;
+                }
+                true
+            }
             Err(e) if e.is::<api::Unauthorized>() => {
                 log::warn!("the site unlinked this device, linking again");
                 let _ = self.store.clear_token();
@@ -461,6 +477,38 @@ impl Terminal {
             }
         }
         Ok(())
+    }
+
+    /// Installs the site's newer firmware, if any, and restarts on it. Only
+    /// from a firmware that has synced: one that cannot is rolled back anyway.
+    fn maybe_update(&mut self) {
+        let firmware = self.state.as_ref().and_then(|state| state.firmware.as_ref());
+        let Some(release) = ota::wanted(firmware, &self.store).cloned() else { return };
+        if !self.confirmed || !self.flow.is_idle() {
+            return;
+        }
+        log::info!("ota: installing {} over {FIRMWARE_VERSION}", release.version);
+        let (screen, mirror) = (&mut self.screen, &self.mirror);
+        let mut draw = |percent: u8| {
+            if screen.show(|d| ui::update_screen(d, &release.version, percent)).is_ok() {
+                mirror.send(screen.frame());
+            }
+        };
+        draw(0);
+        match ota::install(&self.api, &release, &mut draw) {
+            Ok(()) => {
+                draw(100);
+                if let Err(e) = self.store.set_ota_pending(Some(&release.version)) {
+                    log::error!("ota: {e:#}");
+                }
+                reset::restart();
+            }
+            Err(e) => {
+                log::error!("ota: {} failed: {e:#}", release.version);
+                let _ = self.store.set_ota_failed(&release.version);
+                let _ = self.show_main();
+            }
+        }
     }
 
     fn save_queue(&self) {

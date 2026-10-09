@@ -280,6 +280,29 @@ where
     footer(px, "Le détail est sur le site")
 }
 
+/// An update over the network: which version and how far. Drawn at a few
+/// steps only, each a partial refresh of the bar.
+pub fn update_screen<D>(d: &mut D, version: &str, percent: u8) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "Mise à jour", Status::None)?;
+    centered(px, &PRIMARY, &format!("Version {version}"), W / 2, CONTENT_TOP + 20)?;
+    let bar = Rectangle::new(Point::new(30, CONTENT_TOP + 32), Size::new((W - 60) as u32, 12));
+    RoundedRectangle::new(bar, CornerRadii::new(Size::new(3, 3)))
+        .into_styled(PrimitiveStyle::with_stroke(INK, 1))
+        .draw(px)?;
+    let filled = (W - 64) * i32::from(percent.min(100)) / 100;
+    if filled > 0 {
+        Rectangle::new(Point::new(32, CONTENT_TOP + 34), Size::new(filled as u32, 8))
+            .into_styled(PrimitiveStyle::with_fill(INK))
+            .draw(px)?;
+    }
+    centered(px, &MONO, &format!("{percent} %"), W / 2, CONTENT_TOP + 58)?;
+    footer(px, "Le terminal redémarre tout seul à la fin")
+}
+
 /// The badge is not assigned to anyone yet. The terminal reports it to the
 /// site, where an admin can give it to its owner.
 pub fn unknown_badge_screen<D>(d: &mut D, uid: &str) -> Result<(), D::Error>

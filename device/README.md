@@ -56,8 +56,23 @@ Le principe est celui du « device authorization grant » (RFC 8628), le même q
 | `GET` | `/api/device/screen` | jeton | Écran principal en bitmap 1 bit, `304` s'il n'a pas changé |
 | `GET` | `/api/device/commands?wait=25` | jeton | Ce qu'un admin fait depuis la console : touche, badge, synchro, redémarrage, oubli du Wi-Fi. Tenue jusqu'à 25 s |
 | `PUT` | `/api/device/frame` | jeton | Ce que l'écran affiche, 48 000 octets, pour le miroir de la console |
+| `GET` | `/api/device/firmware/<version>` | jeton | Image du firmware annoncé dans l'état, pour la mise à jour |
 
 Le contrat est écrit en Zod dans `src/lib/device/contract.ts` ; le firmware reprend les mêmes formes.
+
+## Mise à jour par le réseau
+
+Le site annonce son dernier firmware dans chaque état (`firmware` : version, chemin, SHA-256, taille). Un terminal inactif dont la version est plus ancienne le télécharge dans l'autre slot de la flash (deux slots de 3,5 Mo, `firmware/partitions.csv`), vérifie la taille et le SHA-256, puis redémarre dessus. L'écran montre la progression.
+
+- La nouvelle version démarre « en essai » : elle ne devient définitive qu'après sa première synchro. Si elle plante ou redémarre avant, le bootloader revient à l'ancienne, et le terminal ne retente plus cette version.
+- Le Wi-Fi, le site et le jeton restent en NVS : une mise à jour ne les touche pas.
+- Le retour arrière vient du bootloader du projet, pas de celui d'espflash : flasher par `just flash` (ou `firmware/flash.sh`), jamais par `cargo run` seul pour un premier flash.
+
+Publier une version :
+
+1. Monter `version` dans `firmware/Cargo.toml`.
+2. `just release` : construit l'image applicative `release/matecrew-<version>.bin`.
+3. `just publish` : l'envoie sur la copie locale de la production (`scripts/dev-prod-copy.sh`). Pour un autre site : `bun scripts/publish-firmware.ts <image> [version]` avec la `DATABASE_URL` et le stockage de ce site. Republier une version la remplace.
 
 ## L'écran principal est en React
 
@@ -94,6 +109,8 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 | `just sim` | Redessine les écrans dans `sim/out/` à chaque sauvegarde, en une seconde environ |
 | `just test` | Tests des écrans et de la logique sur le Mac |
 | `just web` | Recompile le terminal virtuel (`public/device/matecrew.wasm`) |
+| `just release` | Construit l'image d'une mise à jour par le réseau |
+| `just publish` | La publie sur le site local : les terminaux l'installent à leur synchro suivante |
 | `just web-watch` | Pareil à chaque sauvegarde dans `core`, `ui` ou `web` ; avec `just api`, la page du terminal virtuel recharge le wasm toute seule |
 | `just flash` | Compile, flashe le XIAO branché en USB et ouvre le moniteur série |
 | `just api` | Lance le site en local ; l'appareil le vise si on compile avec `MATECREW_URL=http://<ip-du-mac>:3000` |
