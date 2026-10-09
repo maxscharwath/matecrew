@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server";
-import { getOptionalSession } from "@/lib/auth-utils";
-import { prisma } from "@/lib/prisma";
+import { adminDevice } from "@/lib/device/admin";
 import { buildScreenData } from "@/lib/device/state";
 import { bitsToPng, renderScreenBits } from "@/lib/device/screen";
 
@@ -13,23 +11,11 @@ export async function GET(
   { params }: { params: Promise<{ officeId: string; deviceId: string }> },
 ) {
   const { officeId, deviceId } = await params;
-  const session = await getOptionalSession();
-  if (!session) return new NextResponse(null, { status: 401 });
+  const found = await adminDevice(officeId, deviceId);
+  if ("error" in found) return found.error;
 
-  const membership = await prisma.membership.findUnique({
-    where: { userId_officeId: { userId: session.user.id, officeId } },
-    select: { roles: true },
-  });
-  if (!membership?.roles.includes("ADMIN")) return new NextResponse(null, { status: 403 });
-
-  const device = await prisma.device.findFirst({
-    where: { id: deviceId, officeId },
-    include: { office: true },
-  });
-  if (!device) return new NextResponse(null, { status: 404 });
-
-  const png = await bitsToPng(await renderScreenBits(await buildScreenData(device)));
-  return new NextResponse(new Uint8Array(png), {
+  const png = await bitsToPng(await renderScreenBits(await buildScreenData(found.device)));
+  return new Response(new Uint8Array(png), {
     headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
   });
 }

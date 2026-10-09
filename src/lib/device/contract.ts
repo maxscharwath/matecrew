@@ -90,9 +90,35 @@ export const statusRequest = z.object({
   unknownBadges: z.array(z.string().trim().min(1).max(32)).max(50).default([]),
 });
 
-export type LinkStartResponse = z.infer<typeof linkStartResponse>;
+/**
+ * What an admin does to the terminal from the site's console. Keys and badges
+ * go through the same path as the real ones; a key or badge command older
+ * than COMMAND_INPUT_TTL_SECONDS is dropped, not delivered late.
+ */
+export const deviceCommand = z.discriminatedUnion("kind", [
+  z.object({ id: z.string(), kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  z.object({ id: z.string(), kind: z.literal("badge"), uid: z.string() }),
+  z.object({ id: z.string(), kind: z.literal("sync") }),
+  z.object({ id: z.string(), kind: z.literal("restart") }),
+  /** Forget the Wi-Fi and start setup again; the token stays. */
+  z.object({ id: z.string(), kind: z.literal("forgetWifi") }),
+]);
+
+/**
+ * `GET /api/device/commands?wait=0..25`: held up to `wait` seconds until a
+ * command arrives. Each command is delivered once.
+ */
+export const commandsResponse = z.object({
+  commands: z.array(deviceCommand),
+  /** Someone has the console open: worth staying awake and polling again. */
+  live: z.boolean(),
+});
+
+export type LinkStartResponse =z.infer<typeof linkStartResponse>;
 export type LinkTokenResponse = z.infer<typeof linkTokenResponse>;
 export type LinkTokenError = z.infer<typeof linkTokenError>["error"];
 export type DeviceState = z.infer<typeof deviceState>;
 export type DeviceTake = z.infer<typeof deviceTake>;
 export type TakesResponse = z.infer<typeof takesResponse>;
+export type DeviceCommand = z.infer<typeof deviceCommand>;
+export type CommandsResponse = z.infer<typeof commandsResponse>;

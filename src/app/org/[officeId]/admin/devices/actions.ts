@@ -5,6 +5,8 @@ import { z } from "zod";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
+import { normalizeBadgeUid } from "@/lib/device/codes";
+import { toRow, type ConsoleCommand } from "@/lib/device/commands";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -91,5 +93,37 @@ export async function assignBadge(
   const updated = await prisma.badge.updateMany({ where: { id: badgeId, officeId }, data: { userId } });
   if (updated.count === 0) return { success: false, error: t("notFound") };
   revalidateDevices(officeId);
+  return { success: true };
+}
+
+const consoleCommand = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  z.object({ kind: z.literal("badge"), uid: z.string() }),
+  z.object({ kind: z.literal("sync") }),
+  z.object({ kind: z.literal("restart") }),
+  z.object({ kind: z.literal("forgetWifi") }),
+]);
+
+/** Queues a command from the console; the terminal picks it up on its next poll. */
+export async function sendDeviceCommand(
+  officeId: string,
+  deviceId: string,
+  input: ConsoleCommand,
+): Promise<ActionResult> {
+  const { session } = await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations("devices");
+  const parsed = consoleCommand.safeParse(input);
+  if (!parsed.success) return { success: false, error: t("notFound") };
+
+  let command: ConsoleCommand = parsed.data;
+  if (command.kind === "badge") {
+    const uid = normalizeBadgeUid(command.uid);
+    if (!uid) return { success: false, error: t("console.invalidUid") };
+    command = { kind: "badge", uid };
+  }
+
+  const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
+  if (!device) return { success: false, error: t("notFound") };
+  await prisma.deviceCommand.create({ data: { deviceId, sentById: session.user.id, ...toRow(command) } });
   return { success: true };
 }

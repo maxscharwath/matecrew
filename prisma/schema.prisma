@@ -103,6 +103,7 @@ model User {
   statementDeliveries StatementDelivery[]
   badges              Badge[]
   devicesLinked       Device[]            @relation("DeviceLinkedBy")
+  deviceCommandsSent  DeviceCommand[]     @relation("DeviceCommandsSent")
   deviceLinksApproved DeviceLink[]        @relation("DeviceLinkApprovedBy")
 }
 
@@ -613,13 +614,54 @@ model Device {
   batteryMv       Int?
   wifiRssi        Int?
   lastSeenAt      DateTime?
+  /// Last time the terminal asked for console commands: it is reachable live.
+  polledAt        DateTime?
+  /// Last time an admin had the console open; the terminal stays awake for it.
+  watchedAt       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   consumptionEntries ConsumptionEntry[]
   takes              DeviceTake[]
+  commands           DeviceCommand[]
+  frame              DeviceFrame?
 
   @@index([officeId])
+}
+
+enum DeviceCommandKind {
+  KEY
+  BADGE
+  SYNC
+  RESTART
+  FORGET_WIFI
+}
+
+/// Something an admin did to a terminal from the site's console, waiting for
+/// the terminal to pick it up.
+model DeviceCommand {
+  id          String            @id @default(cuid())
+  deviceId    String
+  device      Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  kind        DeviceCommandKind
+  /// KEY: "left" or "right". BADGE: the UID.
+  arg         String?
+  sentById    String?
+  sentBy      User?             @relation("DeviceCommandsSent", fields: [sentById], references: [id], onDelete: SetNull)
+  createdAt   DateTime          @default(now())
+  deliveredAt DateTime?
+
+  @@index([deviceId, deliveredAt])
+}
+
+/// What the terminal's panel shows, as it last reported it: the console's mirror.
+model DeviceFrame {
+  deviceId String   @id
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  /// 800 x 480, packed 1-bit, the format of /api/device/screen.
+  bits     Bytes
+  hash     String
+  drawnAt  DateTime
 }
 
 /// One key press confirmed by a badge on a terminal, as the terminal sent it.

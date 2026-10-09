@@ -233,3 +233,24 @@
       transparent 70%
     );
 }
+
+/* A new frame on the device console flashes like an e-ink panel refreshing. */
+@theme {
+  --animate-eink-refresh: eink-refresh 0.6s steps(1, end);
+
+  @keyframes eink-refresh {
+    0% {
+      filter: invert(1);
+    }
+    30% {
+      filter: none;
+    }
+    55% {
+      filter: invert(1);
+    }
+    80%,
+    100% {
+      filter: none;
+    }
+  }
+}

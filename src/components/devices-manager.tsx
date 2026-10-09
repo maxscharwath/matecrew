@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BatteryLow, BatteryMedium, Nfc, Tablet, Unlink } from "lucide-react";
+import Link from "next/link";
+import { BatteryLow, BatteryMedium, MonitorSmartphone, Nfc, Tablet, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -110,6 +111,11 @@ function DeviceCard({
               {batteryLow ? t("batteryLow", { volts }) : t("battery", { volts })}
             </Badge>
           )}
+          <Button asChild size="sm" variant="outline" className="ml-auto">
+            <Link href={`/org/${officeId}/admin/devices/${device.id}`}>
+              <MonitorSmartphone /> {t("console.open")}
+            </Link>
+          </Button>
         </CardTitle>
         <CardDescription>
           {device.lastSeenAt
