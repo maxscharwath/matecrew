@@ -14,16 +14,13 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // Redirect authenticated users away from auth pages
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) {
-    if (sessionCookie) {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
-  }
+  // Auth pages send signed-in users away themselves: only they can tell a
+  // valid session from a stale cookie, and redirecting on the cookie alone
+  // loops between /sign-in and / when the cookie is stale.
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/org/:path*", "/sign-in", "/sign-up"],
+  matcher: ["/org/:path*"],
 };
