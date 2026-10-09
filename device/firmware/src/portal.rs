@@ -1,10 +1,12 @@
-//! Captive portal of the setup access point: any page the phone opens shows
-//! the Wi-Fi form, and DNS answers every name with the device's address.
+//! Captive portal of the setup access point. DNS answers every name with the
+//! device's address and every unknown page redirects to the form, which is
+//! what makes iOS and Android open the settings page on their own.
 
 use anyhow::Result;
 use embedded_svc::http::{Headers, Method};
 use embedded_svc::io::{Read, Write};
 use esp_idf_svc::http::server::{Configuration, EspHttpServer};
+use matecrew_ui::captive::dns_reply;
 use matecrew_ui::form::{escape_html, field, parse_urlencoded};
 use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::mpsc::Sender;
@@ -30,6 +32,8 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
         .map(|n| format!("<option value=\"{0}\">{0}</option>", escape_html(n)))
         .collect();
     let page = PAGE.replace("{{networks}}", &options);
+    let home = format!("http://{ip}/");
+    let host = ip.to_string();
 
     let mut server = EspHttpServer::new(&Configuration {
         uri_match_wildcard: true,
@@ -47,7 +51,8 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
         let password = field(&fields, "password").unwrap_or("");
         let creds = WifiCredentials { ssid: ssid.to_owned(), password: password.to_owned() };
         let page = SAVED.replace("{{ssid}}", &escape_html(&creds.ssid));
-        req.into_ok_response()?.write_all(page.as_bytes())?;
+        req.into_response(200, None, &[("content-type", "text/html; charset=utf-8")])?
+            .write_all(page.as_bytes())?;
         if !creds.ssid.is_empty() {
             let _ = saved.send(creds);
         }
@@ -55,6 +60,15 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
     })?;
 
     server.fn_handler::<anyhow::Error, _>("/*", Method::Get, move |req| {
+        // Connectivity checks ask for other hosts (captive.apple.com,
+        // connectivitycheck.gstatic.com...). Answering them with a redirect
+        // tells the phone it is behind a portal, and it opens ours.
+        let on_our_host = req.header("host").is_some_and(|h| h == host);
+        let path = req.uri().split('?').next().unwrap_or("/");
+        if !on_our_host || path != "/" {
+            req.into_response(302, Some("Found"), &[("location", &home), ("cache-control", "no-store")])?;
+            return Ok(());
+        }
         req.into_response(200, None, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")])?
             .write_all(page.as_bytes())?;
         Ok(())
@@ -63,25 +77,14 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
     Ok(server)
 }
 
-/// Answers every DNS question with an A record for `ip`. That makes phones
-/// see a captive portal and open the setup page on their own.
+/// Answers A questions with `ip` and every other type with no record.
 fn answer_dns(ip: Ipv4Addr) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:53")?;
     let mut buf = [0u8; 512];
     loop {
         let (len, from) = socket.recv_from(&mut buf)?;
-        if len < 12 {
-            continue;
+        if let Some(reply) = dns_reply(&buf[..len], ip) {
+            socket.send_to(&reply, from)?;
         }
-        // Copy the question, then append one answer pointing at it.
-        let mut reply = Vec::with_capacity(len + 16);
-        reply.extend_from_slice(&buf[..2]); // id
-        reply.extend_from_slice(&[0x81, 0x80]); // response, recursion available, no error
-        reply.extend_from_slice(&buf[4..6]); // question count
-        reply.extend_from_slice(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x00]); // 1 answer
-        reply.extend_from_slice(&buf[12..len]);
-        reply.extend_from_slice(&[0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04]);
-        reply.extend_from_slice(&ip.octets());
-        socket.send_to(&reply, from)?;
     }
 }

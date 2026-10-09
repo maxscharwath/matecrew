@@ -1,11 +1,12 @@
-//! Screens of the matécrew terminal, drawn on any 800 x 480 black and white target.
+//! Screens of the matécrew terminal: 1-bit pixel art on a 200 x 120 canvas,
+//! scaled x4 to the 800 x 480 panel.
 //!
 //! `BinaryColor::On` is ink. The same code runs on the device and in `device/sim`.
 
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::*,
-    primitives::{PrimitiveStyle, Rectangle, Triangle},
+    primitives::{CornerRadii, PrimitiveStyle, Rectangle, RoundedRectangle},
 };
 use qrcodegen::{QrCode, QrCodeEcc};
 use u8g2_fonts::{
@@ -14,65 +15,42 @@ use u8g2_fonts::{
     FontRenderer,
 };
 
+pub mod captive;
+pub mod form;
+mod icons;
+mod pixelated;
+
+pub use pixelated::Pixelated;
+
+/// Panel size in physical pixels.
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 480;
+/// Every logical pixel is SCALE x SCALE physical pixels.
+pub const SCALE: u32 = 4;
+/// Canvas size in logical pixels.
+pub const W: i32 = (WIDTH / SCALE) as i32;
+pub const H: i32 = (HEIGHT / SCALE) as i32;
 
-/// Key centres on the panel, from the enclosure model.
-pub const KEY_LEFT_X: i32 = 130;
-pub const KEY_RIGHT_X: i32 = 670;
+/// Key centres on the canvas, from the enclosure model (130 and 670 physical px).
+pub const KEY_LEFT_X: i32 = 32;
+pub const KEY_RIGHT_X: i32 = 168;
 
-const MARGIN: i32 = 30;
 const INK: BinaryColor = BinaryColor::On;
 const PAPER: BinaryColor = BinaryColor::Off;
 
-const TITLE: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB24_tf>();
-const BODY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvR18_tf>();
-const BODY_BOLD: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB18_tf>();
-const CODE: FontRenderer = FontRenderer::new::<fonts::u8g2_font_inb42_mf>();
+const PRIMARY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB08_tf>();
+const SECONDARY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvR08_tf>();
+const MONO: FontRenderer = FontRenderer::new::<fonts::u8g2_font_profont10_tf>();
+const BIG_MONO: FontRenderer = FontRenderer::new::<fonts::u8g2_font_profont22_tf>();
 
-pub mod form;
+const STATUS_H: i32 = 12;
+const CONTENT_TOP: i32 = 17;
 
 /// What the setup screen shows so a phone can join the setup access point.
 pub struct SetupInfo<'a> {
     pub ap_ssid: &'a str,
     pub ap_password: &'a str,
     pub portal_url: &'a str,
-}
-
-pub fn test_screen<D>(d: &mut D) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    header(d, "matécrew")?;
-    text(d, &BODY, "Banc d'essai : XIAO ESP32-S3 + écran 7,5\", en Rust", 140)?;
-    action_labels(d, "Prendre un maté", "Rendre un maté")
-}
-
-pub fn setup_screen<D>(d: &mut D, info: &SetupInfo) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    header(d, "Configuration du Wi-Fi")?;
-
-    let qr = wifi_qr_payload(info.ap_ssid, info.ap_password);
-    qr_code(d, &qr, Point::new(MARGIN, 110), 330)?;
-
-    let x = 400;
-    let lines: [(&FontRenderer, &str, i32); 6] = [
-        (&BODY_BOLD, "1. Scanne ce code", 140),
-        (&BODY, "avec l'appareil photo du téléphone.", 172),
-        (&BODY_BOLD, "2. Rejoins le réseau proposé.", 222),
-        (&BODY_BOLD, "3. Sur la page qui s'ouvre,", 272),
-        (&BODY, "choisis le Wi-Fi du bureau.", 304),
-        (&BODY, "Page absente ? Ouvre :", 370),
-    ];
-    for (font, line, y) in lines {
-        text_at(d, font, line, Point::new(x, y))?;
-    }
-    text_at(d, &BODY_BOLD, info.portal_url, Point::new(x, 402))?;
-
-    let ap = format!("Réseau {}, mot de passe {}", info.ap_ssid, info.ap_password);
-    text(d, &BODY, &ap, 465)
 }
 
 /// Shown while the terminal waits for an admin to approve its code on the site.
@@ -85,57 +63,112 @@ pub struct LinkInfo<'a> {
     pub url_with_code: &'a str,
 }
 
+/// Right side of the status bar.
+#[derive(Clone, Copy)]
+pub enum Status<'a> {
+    /// "1/2", "2/2": where the person is in the setup.
+    Step(&'a str),
+    /// Wi-Fi signal (0 to 3 bars) and battery charge (0 to 100 %, if known).
+    Device { wifi_bars: u8, battery: Option<u8> },
+    None,
+}
+
+pub fn test_screen<D>(d: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::Device { wifi_bars: 3, battery: Some(80) })?;
+    title_bar(px, Point::new(4, CONTENT_TOP), W - 8, "BANC D'ESSAI")?;
+    text(px, &SECONDARY, "XIAO ESP32-S3, écran 7,5\", Rust.", Point::new(6, 40))?;
+    text(px, &SECONDARY, "Les écrans sont du pixel art x4.", Point::new(6, 52))?;
+    key_hints(px, "Prendre", "Rendre")
+}
+
+pub fn setup_screen<D>(d: &mut D, info: &SetupInfo) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "Wi-Fi", Status::Step("1/2"))?;
+    let qr = qr_panel(px, &wifi_qr_payload(info.ap_ssid, info.ap_password), Point::new(3, CONTENT_TOP))?;
+
+    let x = qr.top_left.x + qr.size.width as i32 + 6;
+    let width = W - x - 3;
+    title_bar(px, Point::new(x, CONTENT_TOP), width, "SCANNE LE QR")?;
+    let y = paragraph(px, &SECONDARY, "Le téléphone rejoint le terminal et la page des réglages s'ouvre.", x + 1, CONTENT_TOP + 24, width - 2)?;
+    text(px, &MONO, info.ap_ssid, Point::new(x + 1, y + 6))?;
+    text(px, &MONO, info.ap_password, Point::new(x + 1, y + 16))?;
+
+    footer(px, &format!("Sinon, ouvre {}", info.portal_url.trim_start_matches("http://")))
+}
+
 pub fn link_screen<D>(d: &mut D, info: &LinkInfo) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    header(d, "Lier l'appareil")?;
-    qr_code(d, info.url_with_code, Point::new(MARGIN, 110), 330)?;
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "Liaison", Status::Step("2/2"))?;
+    let qr = qr_panel(px, info.url_with_code, Point::new(3, CONTENT_TOP))?;
 
-    let x = 400;
-    text_at(d, &BODY_BOLD, "Scanne ce code avec", Point::new(x, 140))?;
-    text_at(d, &BODY_BOLD, "un compte admin du bureau,", Point::new(x, 172))?;
-    text_at(d, &BODY, "ou ouvre", Point::new(x, 222))?;
-    text_at(d, &BODY_BOLD, info.url, Point::new(x, 254))?;
-    text_at(d, &BODY, "et saisis le code :", Point::new(x, 286))?;
-    text_at(d, &CODE, info.code, Point::new(x, 360))?;
-    text(d, &BODY, "Le code change toutes les 10 minutes.", 465)
+    let x = qr.top_left.x + qr.size.width as i32 + 6;
+    let width = W - x - 3;
+    title_bar(px, Point::new(x, CONTENT_TOP), width, "CODE DE LIAISON")?;
+    centered(px, &BIG_MONO, info.code, x + width / 2, CONTENT_TOP + 36)?;
+
+    let y = paragraph(px, &SECONDARY, "Scanne avec un compte admin, ou ouvre :", x + 1, CONTENT_TOP + 52, width - 2)?;
+    text(px, &MONO, info.url, Point::new(x + 1, y + 1))?;
+
+    footer(px, "Nouveau code toutes les 10 minutes")
 }
 
 pub fn linked_screen<D>(d: &mut D, office: &str, name: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    header(d, "matécrew")?;
-    text(d, &BODY_BOLD, &format!("Lié au bureau « {office} »"), 140)?;
-    text(d, &BODY, &format!("Cet appareil s'appelle « {name} ».", ), 180)?;
-    text(d, &BODY, "Ses touches se règlent sur le site, dans Admin > Appareils.", 220)
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::Step("OK"))?;
+    icons::CHECK.draw(px, Point::new(W / 2 - icons::CHECK.width() / 2, CONTENT_TOP + 6))?;
+    centered(px, &PRIMARY, &format!("Lié au bureau {office}"), W / 2, CONTENT_TOP + 42)?;
+    centered(px, &SECONDARY, name, W / 2, CONTENT_TOP + 54)?;
+    footer(px, "Touches et badges : Admin > Appareils")
 }
 
 pub fn connecting_screen<D>(d: &mut D, ssid: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    header(d, "matécrew")?;
-    text(d, &BODY, &format!("Connexion au Wi-Fi « {ssid} »…"), 140)
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::None)?;
+    icons::WIFI_BIG.draw(px, Point::new(W / 2 - icons::WIFI_BIG.width() / 2, CONTENT_TOP + 8))?;
+    centered(px, &PRIMARY, "Connexion au Wi-Fi", W / 2, CONTENT_TOP + 44)?;
+    centered(px, &SECONDARY, ssid, W / 2, CONTENT_TOP + 56)
 }
 
 pub fn connected_screen<D>(d: &mut D, ssid: &str, ip: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    header(d, "matécrew")?;
-    text(d, &BODY_BOLD, &format!("Connecté au Wi-Fi « {ssid} »"), 140)?;
-    text(d, &BODY, &format!("Adresse IP : {ip}"), 180)?;
-    action_labels(d, "Prendre un maté", "Rendre un maté")
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::Device { wifi_bars: 3, battery: None })?;
+    title_bar(px, Point::new(4, CONTENT_TOP), W - 8, "CONNECTÉ")?;
+    text(px, &SECONDARY, &format!("Wi-Fi {ssid}"), Point::new(6, 40))?;
+    text(px, &MONO, ip, Point::new(6, 52))?;
+    key_hints(px, "Prendre", "Rendre")
 }
 
 pub fn error_screen<D>(d: &mut D, title: &str, detail: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    header(d, title)?;
-    text(d, &BODY, detail, 140)
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::None)?;
+    icons::WARNING.draw(px, Point::new(W / 2 - icons::WARNING.width() / 2, CONTENT_TOP + 4))?;
+    centered(px, &PRIMARY, title, W / 2, CONTENT_TOP + 34)?;
+    for (i, line) in wrap(&SECONDARY, detail, W - 48).iter().enumerate() {
+        centered(px, &SECONDARY, line, W / 2, CONTENT_TOP + 48 + 10 * i as i32)?;
+    }
+    Ok(())
 }
 
 /// Joining payload understood by iOS and Android cameras.
@@ -151,84 +184,186 @@ pub fn wifi_qr_payload(ssid: &str, password: &str) -> String {
     format!("WIFI:T:WPA;S:{};P:{};;", escape(ssid), escape(password))
 }
 
-fn header<D>(d: &mut D, title: &str) -> Result<(), D::Error>
+/// Paper, status bar with a title on the left, and a dotted rule under it.
+fn frame<D>(px: &mut D, title: &str, status: Status) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    d.clear(PAPER)?;
-    text(d, &TITLE, title, 60)?;
-    fill(d, Rectangle::new(Point::new(MARGIN, 80), Size::new(WIDTH - 2 * MARGIN as u32, 3)))
-}
-
-fn action_labels<D>(d: &mut D, left: &str, right: &str) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    fill(d, Rectangle::new(Point::new(MARGIN, 400), Size::new(WIDTH - 2 * MARGIN as u32, 2)))?;
-    for (x, label) in [(KEY_LEFT_X, left), (KEY_RIGHT_X, right)] {
-        render(&BODY_BOLD, d, label, Point::new(x, 440), HorizontalAlignment::Center)?;
-        Triangle::new(Point::new(x - 8, 452), Point::new(x + 8, 452), Point::new(x, 462))
-            .into_styled(PrimitiveStyle::with_fill(INK))
-            .draw(d)?;
+    px.clear(PAPER)?;
+    text(px, &PRIMARY, title, Point::new(3, 9))?;
+    match status {
+        Status::Step(step) => {
+            render(&MONO, px, step, Point::new(W - 3, 9), HorizontalAlignment::Right)?;
+        }
+        Status::Device { wifi_bars, battery } => {
+            let mut x = W - 3;
+            if let Some(charge) = battery {
+                x -= icons::battery_width();
+                icons::draw_battery(px, Point::new(x, 2), charge)?;
+                x -= 4;
+            }
+            x -= icons::wifi_width();
+            icons::draw_wifi(px, Point::new(x, 1), wifi_bars)?;
+        }
+        Status::None => {}
+    }
+    for x in (0..W).step_by(2) {
+        Pixel(Point::new(x, STATUS_H), INK).draw(px)?;
     }
     Ok(())
 }
 
-fn qr_code<D>(d: &mut D, payload: &str, origin: Point, max_size: u32) -> Result<(), D::Error>
+/// Black bar with white capitals, the way a selected item looks.
+fn title_bar<D>(px: &mut D, at: Point, width: i32, label: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    let Ok(qr) = QrCode::encode_text(payload, QrCodeEcc::Medium) else {
-        return Ok(());
+    RoundedRectangle::new(
+        Rectangle::new(at, Size::new(width as u32, 12)),
+        CornerRadii::new(Size::new(2, 2)),
+    )
+    .into_styled(PrimitiveStyle::with_fill(INK))
+    .draw(px)?;
+    let color = FontColor::Transparent(PAPER);
+    match PRIMARY.render_aligned(label, at + Point::new(width / 2, 9), VerticalPosition::Baseline, HorizontalAlignment::Center, color, px) {
+        Err(u8g2_fonts::Error::DisplayError(e)) => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// QR inside a rounded frame, returns the frame. The modules are drawn at the
+/// panel's own resolution, 6 px (about 1.2 mm) each: small enough to look
+/// neat, large enough for a phone held a hand away.
+fn qr_panel<D>(px: &mut Pixelated<'_, D>, payload: &str, at: Point) -> Result<Rectangle, D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    const MODULE: i32 = 6;
+    const PADDING: i32 = 3;
+    let Ok(qr) = QrCode::encode_text(payload, QrCodeEcc::Low) else {
+        return Ok(Rectangle::new(at, Size::zero()));
     };
-    let modules = qr.size();
-    let scale = (max_size as i32 / modules).max(1);
-    for y in 0..modules {
-        for x in 0..modules {
+    let scale = px.scale() as i32;
+    let qr_side = qr.size() * MODULE;
+    let side = (qr_side + scale - 1) / scale + 2 * PADDING;
+    let panel = Rectangle::new(at, Size::new(side as u32, side as u32));
+    RoundedRectangle::new(panel, CornerRadii::new(Size::new(3, 3)))
+        .into_styled(PrimitiveStyle::with_stroke(INK, 1))
+        .draw(px)?;
+
+    let inset = (side * scale - qr_side) / 2;
+    let origin = Point::new(at.x * scale + inset, at.y * scale + inset);
+    let target = px.inner();
+    for y in 0..qr.size() {
+        for x in 0..qr.size() {
             if qr.get_module(x, y) {
-                let at = origin + Point::new(x * scale, y * scale);
-                fill(d, Rectangle::new(at, Size::new(scale as u32, scale as u32)))?;
+                let module = Rectangle::new(
+                    origin + Point::new(x * MODULE, y * MODULE),
+                    Size::new(MODULE as u32, MODULE as u32),
+                );
+                target.fill_solid(&module, INK)?;
             }
         }
     }
+    Ok(panel)
+}
+
+/// Black tabs anchored to the bottom edge, one above each touch key.
+fn key_hints<D>(px: &mut D, left: &str, right: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    for (x, label) in [(KEY_LEFT_X, left), (KEY_RIGHT_X, right)] {
+        let label_width = PRIMARY
+            .get_rendered_dimensions(label, Point::zero(), VerticalPosition::Baseline)
+            .ok()
+            .and_then(|d| d.bounding_box)
+            .map_or(30, |b| b.size.width as i32);
+        let tab_width = label_width + icons::ARROW_DOWN.width() + 10;
+        let tab = Rectangle::new(Point::new(x - tab_width / 2, H - 13), Size::new(tab_width as u32, 14));
+        RoundedRectangle::new(tab, CornerRadii::new(Size::new(3, 3)))
+            .into_styled(PrimitiveStyle::with_fill(INK))
+            .draw(px)?;
+        let text_x = tab.top_left.x + 4;
+        match PRIMARY.render(label, Point::new(text_x, H - 4), VerticalPosition::Baseline, FontColor::Transparent(PAPER), px) {
+            Err(u8g2_fonts::Error::DisplayError(e)) => return Err(e),
+            _ => {}
+        }
+        let arrow = Point::new(text_x + label_width + 3, H - 8);
+        icons::ARROW_DOWN.draw_colored(px, arrow, PAPER)?;
+    }
     Ok(())
 }
 
-fn text<D>(d: &mut D, font: &FontRenderer, s: &str, baseline: i32) -> Result<(), D::Error>
+/// A centred line of small text above the bottom edge.
+fn footer<D>(px: &mut D, line: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    text_at(d, font, s, Point::new(MARGIN, baseline))
-}
-
-fn text_at<D>(d: &mut D, font: &FontRenderer, s: &str, at: Point) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    render(font, d, s, at, HorizontalAlignment::Left)
-}
-
-fn render<D>(
-    font: &FontRenderer,
-    d: &mut D,
-    s: &str,
-    at: Point,
-    align: HorizontalAlignment,
-) -> Result<(), D::Error>
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    match font.render_aligned(s, at, VerticalPosition::Baseline, align, FontColor::Transparent(INK), d) {
-        Ok(_) => Ok(()),
-        Err(u8g2_fonts::Error::DisplayError(e)) => Err(e),
-        // A missing glyph or colour mode must not stop the screen from drawing.
-        Err(_) => Ok(()),
+    for x in (0..W).step_by(2) {
+        Pixel(Point::new(x, H - 13), INK).draw(px)?;
     }
+    centered(px, &SECONDARY, line, W / 2, H - 3)
 }
 
-fn fill<D>(d: &mut D, rect: Rectangle) -> Result<(), D::Error>
+/// Draws `s` wrapped to `width`, returns the baseline under the last line.
+fn paragraph<D>(px: &mut D, font: &FontRenderer, s: &str, x: i32, top: i32, width: i32) -> Result<i32, D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    rect.into_styled(PrimitiveStyle::with_fill(INK)).draw(d)
+    const LINE: i32 = 10;
+    let mut y = top;
+    for line in wrap(font, s, width) {
+        text(px, font, &line, Point::new(x, y))?;
+        y += LINE;
+    }
+    Ok(y)
+}
+
+/// Splits `s` into lines no wider than `width` logical pixels.
+fn wrap(font: &FontRenderer, s: &str, width: i32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in s.split_whitespace() {
+        let candidate = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
+        if !line.is_empty() && text_width(font, &candidate) > width {
+            lines.push(std::mem::replace(&mut line, word.to_owned()));
+        } else {
+            line = candidate;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+fn text_width(font: &FontRenderer, s: &str) -> i32 {
+    font.get_rendered_dimensions(s, Point::zero(), VerticalPosition::Baseline)
+        .map_or(0, |d| d.advance.x)
+}
+
+fn text<D>(px: &mut D, font: &FontRenderer, s: &str, at: Point) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    render(font, px, s, at, HorizontalAlignment::Left)
+}
+
+fn centered<D>(px: &mut D, font: &FontRenderer, s: &str, x: i32, baseline: i32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    render(font, px, s, Point::new(x, baseline), HorizontalAlignment::Center)
+}
+
+fn render<D>(font: &FontRenderer, px: &mut D, s: &str, at: Point, align: HorizontalAlignment) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    match font.render_aligned(s, at, VerticalPosition::Baseline, align, FontColor::Transparent(INK), px) {
+        Err(u8g2_fonts::Error::DisplayError(e)) => Err(e),
+        // A missing glyph must not stop the screen from drawing.
+        _ => Ok(()),
+    }
 }

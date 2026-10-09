@@ -13,7 +13,7 @@ fn main() {
 
     let setup = ui::SetupInfo {
         ap_ssid: "matecrew-setup-50E4",
-        ap_password: "k7m2xq9p",
+        ap_password: "k7m2xq9pab",
         portal_url: "http://192.168.71.1",
     };
 
@@ -45,7 +45,10 @@ fn save(
     let mut display = SimulatorDisplay::<BinaryColor>::new(Size::new(ui::WIDTH, ui::HEIGHT));
     draw(&mut display).unwrap();
     let settings = OutputSettingsBuilder::new()
-        .theme(BinaryColorTheme::LcdWhite)
+        .theme(BinaryColorTheme::Custom {
+            color_off: embedded_graphics::pixelcolor::Rgb888::new(0xF4, 0xF2, 0xEC),
+            color_on: embedded_graphics::pixelcolor::Rgb888::new(0x1D, 0x1D, 0x1F),
+        })
         .build();
     let path = dir.join(format!("{name}.png"));
     display
