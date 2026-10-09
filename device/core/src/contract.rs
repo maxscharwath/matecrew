@@ -72,12 +72,25 @@ pub struct Item {
     pub id: String,
     pub name: String,
     pub stock: i64,
+    /// 24 x 24 pixels, packed 1-bit (1 = ink), base64. See [`ITEM_IMAGE_SIZE`].
+    #[serde(default)]
+    pub image: String,
 }
+
+/// Side of an item's picture, in pixels of the 200 x 120 canvas.
+pub const ITEM_IMAGE_SIZE: u32 = 24;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Badge {
     pub uid: String,
     pub name: String,
+    /// What the holder drank today, this week and this month, as of the last sync.
+    #[serde(default)]
+    pub today: u32,
+    #[serde(default)]
+    pub week: u32,
+    #[serde(default)]
+    pub month: u32,
 }
 
 /// What the terminal needs to work until the next sync. It keeps a copy in
@@ -103,12 +116,14 @@ impl DeviceState {
         }
     }
 
-    /// Name of the person the badge belongs to; `uid` as `normalize_uid` gives it.
+    /// The badge with this UID, if it is assigned; `uid` as `normalize_uid` gives it.
+    pub fn badge(&self, uid: &str) -> Option<&Badge> {
+        self.badges.iter().find(|b| normalize_uid(&b.uid).as_deref() == Some(uid))
+    }
+
+    /// Name of the person the badge belongs to.
     pub fn badge_holder(&self, uid: &str) -> Option<&str> {
-        self.badges
-            .iter()
-            .find(|b| normalize_uid(&b.uid).as_deref() == Some(uid))
-            .map(|b| b.name.as_str())
+        self.badge(uid).map(|b| b.name.as_str())
     }
 }
 
@@ -270,5 +285,41 @@ mod tests {
         assert_eq!(normalize_uid("04:a1:b2:c3").as_deref(), Some("04A1B2C3"));
         assert_eq!(normalize_uid("04a1b2"), None);
         assert_eq!(normalize_uid("04a1b2c3d"), None);
+    }
+}
+
+/// Decodes standard base64 (with or without padding), as the site sends item pictures.
+pub fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for c in input.bytes().filter(|&c| c != b'=') {
+        buffer = (buffer << 6) | u32::from(value(c)?);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod base64_tests {
+    use super::decode_base64;
+
+    #[test]
+    fn decodes() {
+        assert_eq!(decode_base64("TWFu").unwrap(), b"Man");
+        assert_eq!(decode_base64("TWE=").unwrap(), b"Ma");
+        assert_eq!(decode_base64("/w==").unwrap(), [0xff]);
+        assert_eq!(decode_base64("@@"), None);
     }
 }

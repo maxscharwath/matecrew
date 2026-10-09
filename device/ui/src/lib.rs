@@ -8,7 +8,10 @@ use embedded_graphics::{
     prelude::*,
     primitives::{CornerRadii, PrimitiveStyle, Rectangle, RoundedRectangle},
 };
-use matecrew_core::flow::Screen;
+use matecrew_core::{
+    contract::{decode_base64, ITEM_IMAGE_SIZE},
+    flow::Screen,
+};
 use qrcodegen::{QrCode, QrCodeEcc};
 use u8g2_fonts::{
     fonts,
@@ -187,27 +190,77 @@ where
     tab(px, W / 2, "BADGE")
 }
 
-/// A badge was read: whose it is and what happens, until it is confirmed or cancelled.
-pub struct TakeInfo<'a> {
+/// What the picker shows: one item at a time, the left key for the next one,
+/// the right key to take it.
+pub struct PickInfo<'a> {
     pub name: &'a str,
-    /// The key's label: "Prendre · Maté".
-    pub key_label: &'a str,
-    /// Seconds before the take counts without an answer.
-    pub seconds: u32,
+    pub item: &'a str,
+    pub stock: i64,
+    /// 24 x 24, packed 1-bit, as `contract::Item::image` decodes; None draws a frame.
+    pub image: Option<&'a [u8]>,
+    pub index: u32,
+    pub count: u32,
 }
 
-pub fn take_screen<D>(d: &mut D, info: &TakeInfo) -> Result<(), D::Error>
+pub fn pick_screen<D>(d: &mut D, info: &PickInfo) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, info.name, Status::None)?;
+    let side = ITEM_IMAGE * 2;
+    picture(px, info.image, Point::new(12, CONTENT_TOP + 4), 2)?;
+    let x = 12 + side + 12;
+    let width = W - x - 6;
+    let font = if text_width(&BIG, info.item) <= width { &BIG } else { &PRIMARY };
+    let mut baseline = CONTENT_TOP + 18;
+    for line in wrap(font, info.item, width).iter().take(2) {
+        text(px, font, line, Point::new(x, baseline))?;
+        baseline += 16;
+    }
+    text(px, &SECONDARY, &format!("{} en stock", info.stock), Point::new(x, baseline + 2))?;
+    // Where the person is in the list: one dot per item, the current one filled.
+    for i in 0..info.count.min(12) as i32 {
+        let dot = Rectangle::new(Point::new(x + i * 7, baseline + 10), Size::new(4, 4));
+        let style = if i as u32 == info.index { PrimitiveStyle::with_fill(INK) } else { PrimitiveStyle::with_stroke(INK, 1) };
+        dot.into_styled(style).draw(px)?;
+    }
+    key_hints(px, "Autre", "Prendre")
+}
+
+/// The take is queued: what was taken, for whom.
+pub fn taken_screen<D>(d: &mut D, name: &str, item: &str, image: Option<&[u8]>) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     let px = &mut Pixelated::new(d, SCALE);
     frame(px, "matécrew", Status::None)?;
-    icons::CHECK.draw(px, Point::new(W / 2 - icons::CHECK.width() / 2, CONTENT_TOP + 2))?;
-    let font = if text_width(&BIG, info.name) <= W - 8 { &BIG } else { &PRIMARY };
-    centered(px, font, info.name, W / 2, CONTENT_TOP + 40)?;
-    centered(px, &SECONDARY, info.key_label, W / 2, CONTENT_TOP + 53)?;
-    centered(px, &MONO, &format!("Validé dans {} s", info.seconds), W / 2, CONTENT_TOP + 66)?;
-    key_hints(px, "OK", "Annuler")
+    let side = ITEM_IMAGE * 2;
+    picture(px, image, Point::new(W / 2 - side / 2, CONTENT_TOP + 2), 2)?;
+    icons::CHECK.draw(px, Point::new(W / 2 + side / 2 + 4, CONTENT_TOP + 2))?;
+    centered(px, &PRIMARY, &format!("Bonne pause {name} !"), W / 2, CONTENT_TOP + side + 16)?;
+    centered(px, &SECONDARY, item, W / 2, CONTENT_TOP + side + 28)
+}
+
+/// What the person drank: today, this week, this month.
+pub fn summary_screen<D>(d: &mut D, name: &str, today: u32, week: u32, month: u32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "Ma conso", Status::None)?;
+    centered(px, &PRIMARY, name, W / 2, CONTENT_TOP + 12)?;
+    let columns = [(today, "aujourd'hui"), (week, "semaine"), (month, "mois")];
+    for (i, (count, label)) in columns.iter().enumerate() {
+        let x = W / 6 + i as i32 * W / 3;
+        let card = Rectangle::new(Point::new(x - 30, CONTENT_TOP + 20), Size::new(60, 48));
+        RoundedRectangle::new(card, CornerRadii::new(Size::new(3, 3)))
+            .into_styled(PrimitiveStyle::with_stroke(INK, 1))
+            .draw(px)?;
+        centered(px, &BIG_MONO, &count.to_string(), x, CONTENT_TOP + 46)?;
+        centered(px, &SECONDARY, label, x, CONTENT_TOP + 60)?;
+    }
+    footer(px, "Le détail est sur le site")
 }
 
 /// The badge is not assigned to anyone yet. The terminal reports it to the
@@ -235,9 +288,16 @@ where
     match screen {
         Screen::Main => Ok(()),
         Screen::Badge { key_label } => badge_screen(d, key_label),
-        Screen::Take { name, key_label, seconds } => take_screen(d, &TakeInfo { name, key_label, seconds: *seconds }),
+        Screen::Pick { name, item, stock, image, index, count } => {
+            let image = decode_base64(image);
+            let info = PickInfo { name, item, stock: *stock, image: image.as_deref(), index: *index, count: *count };
+            pick_screen(d, &info)
+        }
+        Screen::Taken { name, item, image } => taken_screen(d, name, item, decode_base64(image).as_deref()),
+        Screen::Summary { name, today, week, month } => summary_screen(d, name, *today, *week, *month),
         Screen::UnknownBadge { uid } => unknown_badge_screen(d, uid),
         Screen::NotReady => error_screen(d, "Pas encore prêt", "Le terminal attend sa première synchro avec le site."),
+        Screen::NoItems => error_screen(d, "Rien à prendre", "Aucun article n'est actif sur le site."),
     }
 }
 
@@ -369,6 +429,33 @@ where
         return Err(e);
     }
     icons::ARROW_DOWN.draw_colored(px, Point::new(text_x + label_width + 3, H - 8), PAPER)
+}
+
+/// Side of an item picture in canvas pixels.
+const ITEM_IMAGE: i32 = ITEM_IMAGE_SIZE as i32;
+
+/// An item's 24 x 24 picture at `scale`, or an empty frame when there is none.
+fn picture<D>(px: &mut D, bits: Option<&[u8]>, at: Point, scale: i32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let side = ITEM_IMAGE * scale;
+    let Some(bits) = bits.filter(|b| b.len() * 8 >= (ITEM_IMAGE * ITEM_IMAGE) as usize) else {
+        return Rectangle::new(at, Size::new(side as u32, side as u32))
+            .into_styled(PrimitiveStyle::with_stroke(INK, 1))
+            .draw(px);
+    };
+    for y in 0..ITEM_IMAGE {
+        for x in 0..ITEM_IMAGE {
+            let i = (y * ITEM_IMAGE + x) as usize;
+            if bits[i >> 3] & (0x80 >> (i & 7)) != 0 {
+                Rectangle::new(at + Point::new(x * scale, y * scale), Size::new(scale as u32, scale as u32))
+                    .into_styled(PrimitiveStyle::with_fill(INK))
+                    .draw(px)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A centred line of small text above the bottom edge.

@@ -12,9 +12,12 @@ export type Side = "left" | "right";
 export type FlowScreen =
   | { type: "main" }
   | { type: "badge"; keyLabel: string }
-  | { type: "take"; name: string; keyLabel: string; seconds: number }
+  | { type: "pick"; name: string; item: string; stock: number; image: string; index: number; count: number }
+  | { type: "taken"; name: string; item: string; image: string }
+  | { type: "summary"; name: string; today: number; week: number; month: number }
   | { type: "unknownBadge"; uid: string }
-  | { type: "notReady" };
+  | { type: "notReady" }
+  | { type: "noItems" };
 
 export type FlowEvent = { type: "key"; side: Side } | { type: "badge"; uid: string } | { type: "tick" };
 

@@ -1,13 +1,20 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { effectiveLowStockThreshold } from "@/lib/stock";
-import type { DeviceKeyAction } from "@/generated/prisma/client";
+import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
+import { getSessionsForDay } from "@/lib/session-utils";
+import { itemImage, stockChart, toPngDataUrl, patternSample } from "@/lib/device/bitmap";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
 import type { DeviceState } from "@/lib/device/contract";
-import type { ScreenData } from "@/lib/device/screen";
+import { CHART_HEIGHT, CHART_WIDTH, type ScreenData } from "@/lib/device/screen";
 
 /** Below this the terminal and the site warn that it needs charging. */
 export const LOW_BATTERY_MV = 3500;
+/** After a session's cutoff, the terminal shows what to prepare for this long, or until it is served. */
+export const PREPARATION_MINUTES = 90;
+/** Days of stock on the main screen's chart, today included. */
+const CHART_DAYS = 14;
+const DAY_MS = 86_400_000;
 
 function wifiBars(rssi: number | null): number | null {
   if (rssi == null) return null;
@@ -20,87 +27,194 @@ function batteryPercent(mv: number | null): number | null {
   return Math.round(Math.min(100, Math.max(0, ((mv - 3300) / (4150 - 3300)) * 100)));
 }
 
-type KeySide ={ action: DeviceKeyAction; itemId: string | null; label: string | null };
-
-async function loadOfficeData(officeId: string) {
-  const [items, badges] = await Promise.all([
-    prisma.item.findMany({
-      where: { officeId, active: true },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        lowStockThreshold: true,
-        stock: { where: { officeId }, select: { currentQty: true } },
-      },
-    }),
-    prisma.badge.findMany({
-      where: { officeId, userId: { not: null } },
-      select: { uid: true, user: { select: { name: true } } },
-    }),
-  ]);
-  return { items, badges };
+async function loadItems(officeId: string) {
+  const items = await prisma.item.findMany({
+    where: { officeId, active: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      imageKey: true,
+      lowStockThreshold: true,
+      stock: { where: { officeId }, select: { currentQty: true } },
+    },
+  });
+  return items.map((i) => ({ ...i, qty: i.stock[0]?.currentQty ?? 0 }));
 }
 
-async function keyLabel(side: KeySide, itemName: string | null, locale: string) {
-  if (side.label) return side.label;
-  const t = await getTranslations({ locale, namespace: "devices.keys" });
-  const verb = side.action === "TAKE" ? t("take") : t("return");
-  return itemName ? `${verb} · ${itemName}` : verb;
+/** Left key takes (with a choice of item), right key shows the person's consumption. */
+async function keyLabels(device: AuthenticatedDevice) {
+  const t = await getTranslations({ locale: device.office.locale, namespace: "devices.keys" });
+  return { left: device.leftLabel ?? t("take"), right: device.rightLabel ?? t("summary") };
 }
 
-function sides(device: AuthenticatedDevice): { left: KeySide; right: KeySide } {
-  return {
-    left: { action: device.leftAction, itemId: device.leftItemId, label: device.leftLabel },
-    right: { action: device.rightAction, itemId: device.rightItemId, label: device.rightLabel },
-  };
+/** What each badge holder drank today, this week (from Monday) and this month, in the office's time zone. */
+async function consumptionByUser(officeId: string, timezone: string, userIds: string[]) {
+  const today = getDateInTimezone(new Date(), timezone);
+  const weekStart = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * DAY_MS);
+  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const since = new Date(Math.min(weekStart.getTime(), monthStart.getTime()));
+  const entries = await prisma.consumptionEntry.findMany({
+    where: { officeId, userId: { in: userIds }, cancelledAt: null, date: { gte: since } },
+    select: { userId: true, date: true, qty: true },
+  });
+  const counts = new Map<string, { today: number; week: number; month: number }>();
+  for (const e of entries) {
+    const c = counts.get(e.userId) ?? { today: 0, week: 0, month: 0 };
+    if (e.date.getTime() === today.getTime()) c.today += e.qty;
+    if (e.date >= weekStart) c.week += e.qty;
+    if (e.date >= monthStart) c.month += e.qty;
+    counts.set(e.userId, c);
+  }
+  return (userId: string) => counts.get(userId) ?? { today: 0, week: 0, month: 0 };
+}
+
+/** Base64 of the packed bits, which device/core decodes. */
+function base64(bits: Uint8Array): string {
+  return Buffer.from(bits).toString("base64");
 }
 
 export async function buildDeviceState(device: AuthenticatedDevice): Promise<DeviceState> {
   const { office } = device;
-  const { items, badges } = await loadOfficeData(office.id);
-  const itemName = (id: string | null) => items.find((i) => i.id === id)?.name ?? null;
-  const { left, right } = sides(device);
+  const [items, badges, labels] = await Promise.all([
+    loadItems(office.id),
+    prisma.badge.findMany({
+      where: { officeId: office.id, userId: { not: null } },
+      select: { uid: true, userId: true, user: { select: { name: true } } },
+    }),
+    keyLabels(device),
+  ]);
+  const stats = await consumptionByUser(
+    office.id,
+    office.timezone,
+    badges.map((b) => b.userId).filter((id): id is string => id !== null),
+  );
+  // The picker opens on the left key's item; the rest follow in shelf order.
+  const first = items.findIndex((i) => i.id === device.leftItemId);
+  const ordered = first > 0 ? [items[first], ...items.filter((_, i) => i !== first)] : items;
 
   return {
     device: { id: device.id, name: device.name },
     office: { name: office.name, timezone: office.timezone, locale: office.locale },
     keys: {
-      left: { action: left.action, itemId: left.itemId, label: await keyLabel(left, itemName(left.itemId), office.locale) },
-      right: { action: right.action, itemId: right.itemId, label: await keyLabel(right, itemName(right.itemId), office.locale) },
+      left: { action: "TAKE", itemId: ordered[0]?.id ?? null, label: labels.left },
+      right: { action: "RETURN", itemId: null, label: labels.right },
     },
-    items: items.map((i) => ({ id: i.id, name: i.name, stock: i.stock[0]?.currentQty ?? 0 })),
-    badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "" })),
-    syncTimes: device.syncTimes,
+    items: await Promise.all(
+      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64((await itemImage(i.imageKey)).bits) })),
+    ),
+    badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
+    syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
     serverTime: new Date().toISOString(),
   };
 }
 
+/** The device's own times plus today's cutoffs, so it wakes up for each preparation. */
+async function syncTimes(officeId: string, timezone: string, own: string[]): Promise<string[]> {
+  const sessions = await getSessionsForDay(officeId, getDayOfWeek(timezone));
+  return [...new Set([...own, ...sessions.map((s) => s.cutoffTime)])].sort();
+}
+
+/**
+ * Stock at the end of each of the last CHART_DAYS days, per item: today's
+ * stock minus every movement after that day.
+ */
+async function stockHistory(officeId: string, timezone: string, items: { id: string; qty: number }[]) {
+  const today = getDateInTimezone(new Date(), timezone);
+  const movements = await prisma.stockMovement.findMany({
+    where: { officeId, createdAt: { gte: new Date(Date.now() - (CHART_DAYS + 1) * DAY_MS) } },
+    select: { itemId: true, delta: true, createdAt: true },
+  });
+  const days = Array.from({ length: CHART_DAYS }, (_, k) => today.getTime() - (CHART_DAYS - 1 - k) * DAY_MS);
+  return items.map((item) => {
+    const own = movements
+      .filter((m) => m.itemId === item.id)
+      .map((m) => ({ day: getDateInTimezone(m.createdAt, timezone).getTime(), delta: m.delta }));
+    return days.map((day) => item.qty - own.filter((m) => m.day > day).reduce((sum, m) => sum + m.delta, 0));
+  });
+}
+
+/**
+ * The session whose requests are to be prepared now: its cutoff has passed
+ * less than PREPARATION_MINUTES ago and some requests are not served yet.
+ */
+async function preparation(officeId: string, timezone: string) {
+  const now = timeToMinutes(getCurrentTimeInTimezone(timezone));
+  const sessions = await getSessionsForDay(officeId, getDayOfWeek(timezone));
+  const session = sessions
+    .filter((s) => now >= timeToMinutes(s.cutoffTime) && now < timeToMinutes(s.cutoffTime) + PREPARATION_MINUTES)
+    .at(-1);
+  if (!session) return null;
+  const requests = await prisma.dailyRequest.findMany({
+    where: { officeId, date: getTodayDate(), mateSessionId: session.id, status: "REQUESTED" },
+    orderBy: { createdAt: "asc" },
+    select: { item: { select: { id: true, name: true, imageKey: true } }, user: { select: { name: true } } },
+  });
+  if (requests.length === 0) return null;
+  const byItem = new Map<string, { name: string; imageKey: string | null; names: string[] }>();
+  for (const r of requests) {
+    const entry = byItem.get(r.item.id) ?? { name: r.item.name, imageKey: r.item.imageKey, names: [] };
+    entry.names.push(r.user.name.split(" ")[0]);
+    byItem.set(r.item.id, entry);
+  }
+  return { label: session.label, total: requests.length, items: [...byItem.values()] };
+}
+
 export async function buildScreenData(device: AuthenticatedDevice): Promise<ScreenData> {
   const { office } = device;
-  const { items } = await loadOfficeData(office.id);
-  const t = await getTranslations({ locale: office.locale, namespace: "devices.screen" });
-  const itemName = (id: string | null) => items.find((i) => i.id === id)?.name ?? null;
-  const { left, right } = sides(device);
+  const [items, labels, t, prep] = await Promise.all([
+    loadItems(office.id),
+    keyLabels(device),
+    getTranslations({ locale: office.locale, namespace: "devices.screen" }),
+    preparation(office.id, office.timezone),
+  ]);
   const time = new Intl.DateTimeFormat(office.locale, {
     timeZone: office.timezone,
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
 
+  const shown = items.slice(0, 3);
+  const history = await stockHistory(office.id, office.timezone, shown);
+  const thresholds = shown.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
+  const max = Math.max(10, ...history.flat(), ...thresholds);
+  const chartMax = Math.ceil(max / 10) * 10;
+
   return {
     officeName: office.name,
     time,
     wifiBars: wifiBars(device.wifiRssi),
     batteryPercent: batteryPercent(device.batteryMv),
-    batteryLowLabel:
-      device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
-    items: items.map((i) => {
-      const stock = i.stock[0]?.currentQty ?? 0;
-      const low = stock <= effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold);
-      return { name: i.name, stock, caption: low ? t("lowStock") : t("inStock"), low };
-    }),
-    leftLabel: await keyLabel(left, itemName(left.itemId), office.locale),
-    rightLabel: await keyLabel(right, itemName(right.itemId), office.locale),
+    batteryLowLabel: device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
+    items: await Promise.all(
+      shown.map(async (i, index) => ({
+        name: i.name,
+        stock: i.qty,
+        low: i.qty <= thresholds[index],
+        image: await toPngDataUrl(await itemImage(i.imageKey)),
+        pattern: await toPngDataUrl(patternSample(index, 8)),
+      })),
+    ),
+    chart: {
+      image: await toPngDataUrl(stockChart(history, chartMax, Math.min(...thresholds), CHART_WIDTH, CHART_HEIGHT)),
+      max: chartMax,
+      days: CHART_DAYS,
+    },
+    preparation: prep && {
+      title: prep.label ? t("preparationOf", { label: prep.label }) : t("preparation"),
+      total: t("toPrepare", { count: prep.total }),
+      items: await Promise.all(
+        prep.items.map(async (i) => ({
+          name: i.name,
+          count: i.names.length,
+          names: i.names.join(", "),
+          image: await toPngDataUrl(await itemImage(i.imageKey)),
+        })),
+      ),
+    },
+    lowLabel: t("lowStock"),
+    chartLabel: t("chart", { days: CHART_DAYS }),
+    leftLabel: labels.left,
+    rightLabel: labels.right,
   };
 }

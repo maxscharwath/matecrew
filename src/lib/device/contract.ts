@@ -56,9 +56,21 @@ export const deviceState = z.object({
   device: z.object({ id: z.string(), name: z.string() }),
   office: z.object({ name: z.string(), timezone: z.string(), locale: z.string() }),
   keys: z.object({ left: deviceKey, right: deviceKey }),
-  items: z.array(z.object({ id: z.string(), name: z.string(), stock: z.number().int() })),
-  /** Assigned badges only: an UID missing here is unknown to the terminal. */
-  badges: z.array(z.object({ uid: z.string(), name: z.string() })),
+  /** In the picker's order. `image`: 24 x 24 pixels, packed 1-bit (1 = ink), base64. */
+  items: z.array(z.object({ id: z.string(), name: z.string(), stock: z.number().int(), image: z.string() })),
+  /**
+   * Assigned badges only: an UID missing here is unknown to the terminal.
+   * With what the holder drank today, this week and this month, for "Ma conso".
+   */
+  badges: z.array(
+    z.object({
+      uid: z.string(),
+      name: z.string(),
+      today: z.number().int(),
+      week: z.number().int(),
+      month: z.number().int(),
+    }),
+  ),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
 });

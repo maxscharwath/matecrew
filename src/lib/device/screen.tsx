@@ -21,6 +21,9 @@ const H = SCREEN_HEIGHT / SCALE;
 const KEY_X = { left: 32, right: 168 };
 const STATUS_H = 12;
 const TAB_H = 14;
+/** The stock chart's bitmap, drawn by state.ts at this size. */
+export const CHART_WIDTH = 176;
+export const CHART_HEIGHT = 34;
 const INK = "#000";
 const PAPER = "#fff";
 
@@ -33,7 +36,17 @@ export type ScreenData = {
   /** 0 to 100, null until the device reports its battery. */
   batteryPercent: number | null;
   batteryLowLabel: string | null;
-  items: { name: string; stock: number; caption: string; low: boolean }[];
+  /** Up to three, each with its picture and the line style it has on the chart (PNG data URLs). */
+  items: { name: string; stock: number; low: boolean; image: string; pattern: string }[];
+  chart: { image: string; max: number; days: number };
+  /** After a session's cutoff, what to take out of the fridge and for whom; replaces the stock. */
+  preparation: {
+    title: string;
+    total: string;
+    items: { name: string; count: number; names: string; image: string }[];
+  } | null;
+  lowLabel: string;
+  chartLabel: string;
   leftLabel: string;
   rightLabel: string;
 };
@@ -140,8 +153,8 @@ const GLYPH_W = 7;
 const LINE_H = 9;
 
 /** Wraps `text` on words into at most `max` lines of `width` pixels, cutting what is left over. */
-function wrap(text: string, width: number, max: number): string[] {
-  const perLine = Math.floor(width / GLYPH_W);
+function wrap(text: string, width: number, max: number, glyph = GLYPH_W): string[] {
+  const perLine = Math.floor(width / glyph);
   const lines: string[] = [];
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const last = lines.at(-1);
@@ -151,150 +164,172 @@ function wrap(text: string, width: number, max: number): string[] {
   return lines.slice(0, max).map((line) => line.slice(0, perLine));
 }
 
-type CardLayout = { width: number; nameLines: number; numberSize: number };
+const text = (size: 8 | 16 | 24, bold = false) =>
+  size === 8
+    ? { fontFamily: "Silkscreen", fontWeight: bold ? 700 : 400, fontSize: 8, lineHeight: `${LINE_H}px` }
+    : { fontFamily: "Pixelify", fontWeight: 700, fontSize: size, lineHeight: 1 };
 
-const nameWidth = (cardWidth: number) => cardWidth - 6;
+// eslint-disable-next-line @next/next/no-img-element -- rendered by next/og, not by a browser
+const Picture = ({ src, size }: { src: string; size: number }) => <img src={src} width={size} height={size} alt="" />;
 
-function ItemCard({ item, layout }: { item: ScreenData["items"][number]; layout: CardLayout }) {
-  const { width, nameLines, numberSize } = layout;
+/**
+ * Names short enough for a tile: "Maté Classic", "Maté Zero" and "Maté
+ * Ginger" become "Classic", "Zero" and "Ginger" when they all start alike.
+ */
+function tileNames(names: string[]): string[] {
+  const split = names.map((n) => n.split(/\s+/));
+  const firsts = split.map((words) => words[0]);
+  return split.map((words) =>
+    words.length > 1 && firsts.filter((f) => f === words[0]).length > 1 ? words.slice(1).join(" ") : words.join(" "),
+  );
+}
+
+/** One item: its picture, its stock, and its name under it, inverted when stock is low. */
+function ItemTile({ item, width, lowLabel }: { item: ScreenData["items"][number]; width: number; lowLabel: string }) {
   return (
     <div
       style={{
         display: "flex",
-        width,
         flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "space-between",
+        width,
+        height: 38,
         border: `1px solid ${INK}`,
         borderRadius: 3,
-        padding: "3px 2px 4px",
         overflow: "hidden",
       }}
     >
+      <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "2px 3px 0" }}>
+        <Picture src={item.image} size={24} />
+        <div style={{ display: "flex", flex: 1, justifyContent: "center", ...text(item.stock >= 100 ? 16 : 24) }}>
+          {item.stock}
+        </div>
+      </div>
       <div
         style={{
           display: "flex",
-          flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
-          height: LINE_H * nameLines,
-          fontFamily: "Silkscreen",
-          fontWeight: 700,
-          fontSize: 8,
-          lineHeight: `${LINE_H}px`,
-        }}
-      >
-        {wrap(item.name, nameWidth(width), 2).map((line) => (
-          <div key={line} style={{ display: "flex", whiteSpace: "nowrap" }}>
-            {line}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "flex", fontFamily: "Pixelify", fontWeight: 700, fontSize: numberSize, lineHeight: 1 }}>
-        {item.stock}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          fontFamily: "Silkscreen",
-          fontSize: 8,
-          padding: "0 2px",
+          gap: 3,
+          marginTop: "auto",
+          height: 10,
+          padding: "0 3px",
           background: item.low ? INK : PAPER,
           color: item.low ? PAPER : INK,
+          ...text(8),
         }}
       >
-        {item.caption}
+        {!item.low && (
+          // eslint-disable-next-line @next/next/no-img-element -- rendered by next/og
+          <img src={item.pattern} width={8} height={2} alt="" />
+        )}
+        {wrap(item.low ? `${item.name} ${lowLabel}` : item.name, width - (item.low ? 8 : 16), 1, 6)[0]}
       </div>
     </div>
   );
 }
 
-/**
- * The action of a touch key: the verb in a black tab against the bottom edge,
- * right above the key, and what it applies to just over the tab, running
- * towards the middle of the screen. Default labels read "Verb · Item".
- */
-function KeyHint({ side, label }: { side: "left" | "right"; label: string }) {
-  const [verb, ...rest] = label.split(" · ");
-  const x = KEY_X[side];
-  const reach = Math.min(x, W - x);
+/** Stock over the last days, one line style per item, scale on the left. */
+function Chart({ data }: { data: ScreenData }) {
   return (
-    <>
-      {rest.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            position: "absolute",
-            bottom: TAB_H + 2,
-            left: side === "left" ? 2 : W / 2,
-            width: W / 2 - 2,
-            justifyContent: side === "left" ? "flex-start" : "flex-end",
-            whiteSpace: "nowrap",
-            fontFamily: "Silkscreen",
-            fontSize: 8,
-          }}
-        >
-          {wrap(rest.join(" · "), W / 2 - 6, 1)[0]}
-        </div>
-      )}
+    <div style={{ display: "flex", position: "absolute", top: 56, left: 2, width: W - 4, height: 48 }}>
+      <div style={{ display: "flex", position: "absolute", top: 0, left: 20, ...text(8, true) }}>{data.chartLabel}</div>
+      <div style={{ display: "flex", position: "absolute", top: 9, left: 0, width: 16, justifyContent: "flex-end", ...text(8) }}>
+        {data.chart.max}
+      </div>
+      <div style={{ display: "flex", position: "absolute", top: 38, left: 0, width: 16, justifyContent: "flex-end", ...text(8) }}>0</div>
+      <div style={{ display: "flex", position: "absolute", top: 11, left: 19 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- rendered by next/og */}
+        <img src={data.chart.image} width={CHART_WIDTH} height={CHART_HEIGHT} alt="" />
+      </div>
+    </div>
+  );
+}
+
+/** What to take out of the fridge for the session that just closed, and for whom. */
+function Preparation({ prep }: { prep: NonNullable<ScreenData["preparation"]> }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", position: "absolute", top: STATUS_H + 3, left: 4, width: W - 8 }}>
       <div
         style={{
           display: "flex",
-          position: "absolute",
-          bottom: 0,
-          left: x - reach,
-          width: reach * 2,
-          justifyContent: "center",
+          justifyContent: "space-between",
+          height: 11,
+          padding: "1px 4px 0",
+          background: INK,
+          color: PAPER,
+          borderRadius: 3,
+          ...text(8, true),
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            height: TAB_H,
-            alignItems: "center",
-            gap: 2,
-            padding: "0 4px",
-            background: INK,
-            color: PAPER,
-            borderRadius: "3px 3px 0 0",
-          }}
-        >
-          <div style={{ display: "flex", fontFamily: "Silkscreen", fontWeight: 700, fontSize: 8 }}>{verb}</div>
-          <Bitmap rows={ARROW_DOWN} color={PAPER} />
-        </div>
+        <span>{prep.title}</span>
+        <span>{prep.total}</span>
       </div>
-    </>
+      {prep.items.slice(0, 3).map((item) => (
+        <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, marginTop: 1 }}>
+          <Picture src={item.image} size={24} />
+          <div style={{ display: "flex", width: 26, justifyContent: "center", ...text(16) }}>{`×${item.count}`}</div>
+          <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+            <div style={{ display: "flex", ...text(8, true) }}>{wrap(item.name, 130, 1)[0]}</div>
+            {wrap(item.names, 136, 2).map((line) => (
+              <div key={line} style={{ display: "flex", ...text(8) }}>
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A black tab against the bottom edge, as close as it fits above its touch key. */
+function KeyTab({ side, label }: { side: "left" | "right"; label: string }) {
+  const box = 80;
+  const left = Math.min(Math.max(KEY_X[side] - box / 2, 0), W - box);
+  return (
+    <div style={{ display: "flex", position: "absolute", bottom: 0, left, width: box, justifyContent: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          height: TAB_H,
+          alignItems: "center",
+          gap: 2,
+          padding: "0 4px",
+          background: INK,
+          color: PAPER,
+          borderRadius: "3px 3px 0 0",
+          whiteSpace: "nowrap",
+          ...text(8, true),
+        }}
+      >
+        {label}
+        <Bitmap rows={ARROW_DOWN} color={PAPER} />
+      </div>
+    </div>
   );
 }
 
 function MainScreen({ data }: { data: ScreenData }) {
-  const items = data.items.slice(0, 3);
   const gap = 4;
-  const width = Math.floor((W - 8 - gap * (items.length - 1)) / Math.max(1, items.length));
-  const nameLines = Math.max(1, ...items.map((item) => wrap(item.name, nameWidth(width), 2).length));
-  // The card is 70 px tall: what the names and the caption leave goes to the number.
-  const layout = { width, nameLines, numberSize: nameLines === 1 ? 40 : 32 };
+  const width = Math.floor((W - 8 - gap * (data.items.length - 1)) / Math.max(1, data.items.length));
+  const names = tileNames(data.items.map((item) => item.name));
   return (
     <div style={{ display: "flex", position: "relative", width: W, height: H, background: PAPER, color: INK }}>
       <StatusBar data={data} />
       <DottedRule top={STATUS_H} />
-      <div
-        style={{
-          display: "flex",
-          position: "absolute",
-          top: STATUS_H + 5,
-          left: 4,
-          width: W - 8,
-          height: 70,
-          gap,
-        }}
-      >
-        {items.map((item) => (
-          <ItemCard key={item.name} item={item} layout={layout} />
-        ))}
-      </div>
-      <KeyHint side="left" label={data.leftLabel} />
-      <KeyHint side="right" label={data.rightLabel} />
+      {data.preparation ? (
+        <Preparation prep={data.preparation} />
+      ) : (
+        <>
+          <div style={{ display: "flex", position: "absolute", top: STATUS_H + 3, left: 4, width: W - 8, gap }}>
+            {data.items.map((item, i) => (
+              <ItemTile key={item.name} item={{ ...item, name: names[i] }} width={width} lowLabel={data.lowLabel} />
+            ))}
+          </div>
+          <Chart data={data} />
+        </>
+      )}
+      <KeyTab side="left" label={data.leftLabel} />
+      <KeyTab side="right" label={data.rightLabel} />
     </div>
   );
 }

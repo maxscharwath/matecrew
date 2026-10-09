@@ -1111,12 +1111,16 @@
   "devices": {
     "keys": {
       "take": "Take",
-      "return": "Return"
+      "return": "Return",
+      "summary": "My drinks"
     },
     "screen": {
       "batteryLow": "Battery low",
       "lowStock": "low stock",
-      "inStock": "in stock"
+      "preparation": "Preparation",
+      "preparationOf": "Preparation · {label}",
+      "toPrepare": "{count, plural, one {# mate} other {# mates}}",
+      "chart": "Stock · {days} days"
     },
     "title": "Devices",
     "subtitle": "This office's badge terminals: what they show, what their keys do, and the badges they have read.",

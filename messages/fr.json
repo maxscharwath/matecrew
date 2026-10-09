@@ -1111,12 +1111,16 @@
   "devices": {
     "keys": {
       "take": "Prendre",
-      "return": "Rendre"
+      "return": "Rendre",
+      "summary": "Ma conso"
     },
     "screen": {
       "batteryLow": "Batterie faible",
       "lowStock": "stock bas",
-      "inStock": "en stock"
+      "preparation": "Préparation",
+      "preparationOf": "Préparation · {label}",
+      "toPrepare": "{count, plural, one {# maté} other {# matés}}",
+      "chart": "Stock · {days} jours"
     },
     "title": "Appareils",
     "subtitle": "Les terminaux à badge de ce bureau : ce qu'ils affichent, ce que font leurs touches, et les badges qu'ils ont vus.",
