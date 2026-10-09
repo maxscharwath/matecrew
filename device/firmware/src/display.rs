@@ -87,6 +87,12 @@ impl Screen {
     }
 
     fn refresh(&mut self) -> Result<()> {
+        // epd-waveshare encodes black as 0, but this panel, set up the way
+        // Waveshare's driver does it, reads 1 as black. Every screen redraws
+        // the whole buffer, so flipping it in place is safe.
+        for byte in &mut self.buffer {
+            *byte = !*byte;
+        }
         self.epd.wake_up(&mut self.spi, &mut self.delay)?;
         self.epd.update_and_display_frame(&mut self.spi, &self.buffer, &mut self.delay)?;
         self.epd.sleep(&mut self.spi, &mut self.delay)?;
