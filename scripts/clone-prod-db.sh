@@ -14,7 +14,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # Linking writes a VERCEL_OIDC_TOKEN into .env.local: only when not linked yet.
-[ -f .vercel/project.json ] || vercel link --yes --project matecrew >/dev/null
+[ -d .vercel ] || vercel link --yes --project matecrew >/dev/null
 vercel env pull "$tmp/prod.env" --environment=production --yes >/dev/null
 url=""
 for name in DATABASE_URL_UNPOOLED POSTGRES_URL_NON_POOLING DIRECT_URL DATABASE_URL; do
@@ -39,6 +39,7 @@ rm -rf .data/storage
 
 local_url=$(sed -n 's/^DATABASE_URL=//p' .env.local | tr -d '"' | sed -E "s#/[^/?]+(\?|$)#/$COPY\1#")
 echo "Applying this branch's migrations…"
-DATABASE_URL="$local_url" bunx prisma migrate deploy
-DATABASE_URL="$local_url" bun scripts/prod-copy.ts
+# prisma.config.ts prefers DIRECT_URL, which .env.local sets to the dev database.
+DATABASE_URL="$local_url" DIRECT_URL="$local_url" bunx prisma migrate deploy
+DATABASE_URL="$local_url" DIRECT_URL="$local_url" bun scripts/prod-copy.ts
 echo "Done. Run the site on the copy with: bash scripts/dev-prod-copy.sh"
