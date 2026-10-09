@@ -14,6 +14,7 @@ export const LOW_BATTERY_MV = 3500;
 export const PREPARATION_MINUTES = 90;
 /** Days of stock on the main screen's chart, today included. */
 const CHART_DAYS = 14;
+const CHART_MAX_ITEMS = 3;
 const DAY_MS = 86_400_000;
 
 function wifiBars(rssi: number | null): number | null {
@@ -181,10 +182,11 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
     minute: "2-digit",
   }).format(new Date());
 
-  const shown = items.slice(0, 3);
-  const history = await stockHistory(office.id, office.timezone, shown);
-  const thresholds = shown.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
-  const max = Math.max(10, ...history.flat(), ...thresholds);
+  const thresholds = items.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
+  // The chart only fits next to three items or fewer: one line style each.
+  const charted = items.length <= CHART_MAX_ITEMS ? items : [];
+  const history = await stockHistory(office.id, office.timezone, charted);
+  const max = Math.max(10, ...history.flat(), ...thresholds.slice(0, charted.length));
   const chartMax = Math.ceil(max / 10) * 10;
 
   return {
@@ -194,7 +196,7 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
     batteryPercent: batteryPercent(device.batteryMv),
     batteryLowLabel: device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
     items: await Promise.all(
-      shown.map(async (i, index) => ({
+      items.map(async (i, index) => ({
         name: i.name,
         stock: i.qty,
         low: i.qty <= thresholds[index],
@@ -202,11 +204,14 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
         pattern: await toPngDataUrl(patternSample(index, 8)),
       })),
     ),
-    chart: {
-      image: await toPngDataUrl(stockChart(history, chartMax, Math.min(...thresholds), CHART_WIDTH, CHART_HEIGHT)),
-      max: chartMax,
-      days: CHART_DAYS,
-    },
+    chart:
+      charted.length > 0
+        ? {
+            image: await toPngDataUrl(stockChart(history, chartMax, Math.min(...thresholds), CHART_WIDTH, CHART_HEIGHT)),
+            max: chartMax,
+            days: CHART_DAYS,
+          }
+        : null,
     preparation: prep && {
       title: prep.label ? t("preparationOf", { label: prep.label }) : t("preparation"),
       total: t("toPrepare", { count: prep.total }),
@@ -220,6 +225,7 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
       ),
     },
     lowLabel: t("lowStock"),
+    moreLabel: t("more"),
     chartLabel: t("chart", { days: CHART_DAYS }),
     leftLabel: labels.left,
     rightLabel: labels.right,

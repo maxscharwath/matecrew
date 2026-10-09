@@ -1120,7 +1120,8 @@
       "preparation": "Preparation",
       "preparationOf": "Preparation · {label}",
       "toPrepare": "{count, plural, one {# mate} other {# mates}}",
-      "chart": "Stock · {days} days"
+      "chart": "Stock · {days} days",
+      "more": "more"
     },
     "title": "Devices",
     "subtitle": "The office's badge terminals: their screen, their settings and the badges they read.",

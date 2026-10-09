@@ -38,7 +38,8 @@ export type ScreenData = {
   batteryLowLabel: string | null;
   /** Up to three, each with its picture and the line style it has on the chart (PNG data URLs). */
   items: { name: string; stock: number; low: boolean; image: string; pattern: string }[];
-  chart: { image: string; max: number; days: number };
+  /** Only with three items or fewer. */
+  chart: { image: string; max: number; days: number } | null;
   /** After a session's cutoff, what to take out of the fridge and for whom; replaces the stock. */
   preparation: {
     title: string;
@@ -46,6 +47,8 @@ export type ScreenData = {
     items: { name: string; count: number; names: string; image: string }[];
   } | null;
   lowLabel: string;
+  /** "autres", after the count of items that do not fit. */
+  moreLabel: string;
   chartLabel: string;
   leftLabel: string;
   rightLabel: string;
@@ -228,17 +231,17 @@ function ItemTile({ item, width, lowLabel }: { item: ScreenData["items"][number]
 }
 
 /** Stock over the last days, one line style per item, scale on the left. */
-function Chart({ data }: { data: ScreenData }) {
+function Chart({ data, chart }: { data: ScreenData; chart: NonNullable<ScreenData["chart"]> }) {
   return (
     <div style={{ display: "flex", position: "absolute", top: 56, left: 2, width: W - 4, height: 48 }}>
       <div style={{ display: "flex", position: "absolute", top: 0, left: 20, ...text(8, true) }}>{data.chartLabel}</div>
       <div style={{ display: "flex", position: "absolute", top: 9, left: 0, width: 16, justifyContent: "flex-end", ...text(8) }}>
-        {data.chart.max}
+        {chart.max}
       </div>
       <div style={{ display: "flex", position: "absolute", top: 38, left: 0, width: 16, justifyContent: "flex-end", ...text(8) }}>0</div>
       <div style={{ display: "flex", position: "absolute", top: 11, left: 19 }}>
         {/* eslint-disable-next-line @next/next/no-img-element -- rendered by next/og */}
-        <img src={data.chart.image} width={CHART_WIDTH} height={CHART_HEIGHT} alt="" />
+        <img src={chart.image} width={CHART_WIDTH} height={CHART_HEIGHT} alt="" />
       </div>
     </div>
   );
@@ -263,7 +266,10 @@ function Preparation({ prep }: { prep: NonNullable<ScreenData["preparation"]> })
         <span>{prep.title}</span>
         <span>{prep.total}</span>
       </div>
-      {prep.items.slice(0, 3).map((item) => (
+      {prep.items.length > 3 ? (
+        <PreparationList prep={prep} />
+      ) : (
+        prep.items.map((item) => (
         <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 5, height: 26, marginTop: 1 }}>
           <Picture src={item.image} size={24} />
           <div style={{ display: "flex", width: 26, justifyContent: "center", ...text(16) }}>{`×${item.count}`}</div>
@@ -276,7 +282,27 @@ function Preparation({ prep }: { prep: NonNullable<ScreenData["preparation"]> })
             ))}
           </div>
         </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** Many items to prepare: one line each, the count, the item, whose. */
+function PreparationList({ prep }: { prep: NonNullable<ScreenData["preparation"]> }) {
+  const rows = 7;
+  const shown = prep.items.length > rows ? prep.items.slice(0, rows - 1) : prep.items;
+  const rest = prep.items.length - shown.length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", marginTop: 2 }}>
+      {shown.map((item) => (
+        <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 4, height: LINE_H + 2 }}>
+          <div style={{ display: "flex", width: 22, justifyContent: "flex-end", ...text(8, true) }}>{`×${item.count}`}</div>
+          <div style={{ display: "flex", width: 64, ...text(8, true) }}>{wrap(item.name, 64, 1, 7)[0]}</div>
+          <div style={{ display: "flex", flex: 1, ...text(8) }}>{wrap(item.names, 98, 1, 6)[0]}</div>
+        </div>
       ))}
+      {rest > 0 && <div style={{ display: "flex", paddingLeft: 26, ...text(8) }}>{`+${rest}`}</div>}
     </div>
   );
 }
@@ -308,26 +334,81 @@ function KeyTab({ side, label }: { side: "left" | "right"; label: string }) {
   );
 }
 
-function MainScreen({ data }: { data: ScreenData }) {
-  const gap = 4;
-  const width = Math.floor((W - 8 - gap * (data.items.length - 1)) / Math.max(1, data.items.length));
+/** Up to fourteen items, in two columns, when tiles no longer fit. */
+function ItemList({ data, names }: { data: ScreenData; names: string[] }) {
+  const perColumn = 7;
+  const fits = perColumn * 2;
+  const shown = data.items.length > fits ? data.items.slice(0, fits - 1) : data.items;
+  const rest = data.items.length - shown.length;
+  const columns = [shown.slice(0, perColumn), shown.slice(perColumn)];
+  const width = (W - 8 - 6) / 2;
+  return (
+    <div style={{ display: "flex", position: "absolute", top: STATUS_H + 3, left: 4, width: W - 8, gap: 6 }}>
+      {columns.map((column, c) => (
+        <div key={c} style={{ display: "flex", flexDirection: "column", width }}>
+          {column.map((item, i) => (
+            <div
+              key={item.name}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                height: LINE_H + 2,
+                padding: "0 3px",
+                background: item.low ? INK : PAPER,
+                color: item.low ? PAPER : INK,
+                borderBottom: item.low ? "none" : `1px dashed ${INK}`,
+              }}
+            >
+              <span style={{ display: "flex", ...text(8) }}>{wrap(names[c * perColumn + i], width - 26, 1, 6)[0]}</span>
+              <span style={{ display: "flex", ...text(8, true) }}>{item.stock}</span>
+            </div>
+          ))}
+          {c === 1 && rest > 0 && (
+            <div style={{ display: "flex", height: LINE_H + 2, padding: "0 3px", ...text(8) }}>
+              {`+${rest} ${data.moreLabel}`}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The stock, laid out for how many items there are: one row of tiles and
+ * the chart up to three, two rows of tiles up to six, a two-column list beyond.
+ */
+function Stock({ data }: { data: ScreenData }) {
   const names = tileNames(data.items.map((item) => item.name));
+  const count = data.items.length;
+  if (count > 6) return <ItemList data={data} names={names} />;
+  const gap = 4;
+  const perRow = Math.min(3, Math.max(1, count));
+  const width = Math.floor((W - 8 - gap * (perRow - 1)) / perRow);
+  const rows = [data.items.slice(0, perRow), data.items.slice(perRow)].filter((row) => row.length > 0);
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", position: "absolute", top: STATUS_H + 3, left: 4, width: W - 8, gap }}>
+        {rows.map((row, r) => (
+          <div key={r} style={{ display: "flex", gap }}>
+            {row.map((item, i) => (
+              <ItemTile key={item.name} item={{ ...item, name: names[r * perRow + i] }} width={width} lowLabel={data.lowLabel} />
+            ))}
+          </div>
+        ))}
+      </div>
+      {data.chart && <Chart data={data} chart={data.chart} />}
+    </>
+  );
+}
+
+function MainScreen({ data }: { data: ScreenData }) {
   return (
     <div style={{ display: "flex", position: "relative", width: W, height: H, background: PAPER, color: INK }}>
       <StatusBar data={data} />
       <DottedRule top={STATUS_H} />
-      {data.preparation ? (
-        <Preparation prep={data.preparation} />
-      ) : (
-        <>
-          <div style={{ display: "flex", position: "absolute", top: STATUS_H + 3, left: 4, width: W - 8, gap }}>
-            {data.items.map((item, i) => (
-              <ItemTile key={item.name} item={{ ...item, name: names[i] }} width={width} lowLabel={data.lowLabel} />
-            ))}
-          </div>
-          <Chart data={data} />
-        </>
-      )}
+      {data.preparation ? <Preparation prep={data.preparation} /> : <Stock data={data} />}
       <KeyTab side="left" label={data.leftLabel} />
       <KeyTab side="right" label={data.rightLabel} />
     </div>

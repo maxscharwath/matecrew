@@ -1120,7 +1120,8 @@
       "preparation": "Préparation",
       "preparationOf": "Préparation · {label}",
       "toPrepare": "{count, plural, one {# maté} other {# matés}}",
-      "chart": "Stock · {days} jours"
+      "chart": "Stock · {days} jours",
+      "more": "autres"
     },
     "title": "Appareils",
     "subtitle": "Les terminaux à badge du bureau : leur écran, leurs réglages et les badges qu'ils ont lus.",
