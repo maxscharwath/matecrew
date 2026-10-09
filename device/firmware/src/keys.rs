@@ -4,12 +4,12 @@
 
 use anyhow::Result;
 use esp_idf_svc::hal::gpio::{Gpio5, Gpio8, PinDriver, Pull};
-use matecrew_core::contract::Side;
+use matecrew_core::{contract::Side, flow::Event};
 use std::{sync::mpsc::Sender, thread, time::Duration};
 
-use crate::Event;
+use crate::Input;
 
-pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, events: Sender<Event>) -> Result<()> {
+pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>) -> Result<()> {
     // Pulled down so a key that is not wired yet reads as released.
     let left = PinDriver::input(left, Pull::Down)?;
     let right = PinDriver::input(right, Pull::Down)?;
@@ -18,7 +18,7 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, events: Sender<Event>)
         loop {
             let now = (left.is_high(), right.is_high());
             for (pressed, before, side) in [(now.0, was.0, Side::Left), (now.1, was.1, Side::Right)] {
-                if pressed && !before && events.send(Event::Key(side)).is_err() {
+                if pressed && !before && inputs.send(Input::Flow(Event::Key { side })).is_err() {
                     return;
                 }
             }

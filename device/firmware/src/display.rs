@@ -86,10 +86,16 @@ impl Screen {
         })
     }
 
+    /// What the panel shows, in the format of the site's screen: 1 = ink.
+    pub fn frame(&self) -> &[u8] {
+        &self.buffer
+    }
+
     fn refresh(&mut self) -> Result<()> {
         // epd-waveshare encodes black as 0, but this panel, set up the way
         // Waveshare's driver does it, reads 1 as black. Every screen redraws
-        // the whole buffer, so flipping it in place is safe.
+        // the whole buffer, so flipping it in place is safe, and afterwards
+        // the buffer holds 1 = ink, like the site's bitmaps.
         for byte in &mut self.buffer {
             *byte = !*byte;
         }

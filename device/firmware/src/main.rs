@@ -9,10 +9,12 @@ mod display;
 mod keys;
 mod nfc;
 mod portal;
+mod remote;
 mod store;
 mod wifi;
 
 use anyhow::{bail, Result};
+use core::convert::Infallible;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{peripherals::Peripherals, reset},
@@ -21,20 +23,21 @@ use esp_idf_svc::{
     wifi::{BlockingWifi, EspWifi},
 };
 use matecrew_core::{
-    contract::{DeviceState, Side, StatusReport, Take},
+    contract::{DeviceState, StatusReport},
+    flow::{Context, Effect, Event, Flow, Screen},
     queue::Queue,
     time,
 };
 use matecrew_ui as ui;
 use std::{
-    sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use api::{Api, LinkPoll, ScreenUpdate};
-use buzzer::{Beep, Buzzer};
-use display::{Pins, Screen};
+use buzzer::Buzzer;
+use display::{Canvas, Pins, Screen as Panel};
 use nfc::Nfc;
 use store::Store;
 use wifi::Wifi;
@@ -44,18 +47,17 @@ const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WIFI_FAILURES: u8 = 3;
 /// Until deep sleep is wired, the device stays awake and syncs on a timer.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
-/// How long the terminal waits for a badge after a key press.
-const BADGE_WAIT: Duration = Duration::from_secs(15);
-/// Seconds to cancel a take before it counts.
-const UNDO_SECONDS: u32 = 10;
+/// How often the NFC reader is asked for a badge while the flow waits for one.
+const BADGE_POLL: Duration = Duration::from_millis(150);
 /// Before this (November 2023) the clock has not been set by a sync yet.
 const CLOCK_SET_AFTER: i64 = 1_700_000_000;
 
-/// What the keys, the console and the NFC reader report to the main loop.
-pub enum Event {
-    Key(Side),
-    Badge(String),
+/// What the keys, the serial console and the site's console send the main loop.
+pub enum Input {
+    Flow(Event),
     Sync,
+    Restart,
+    ForgetWifi,
 }
 
 fn main() -> Result<()> {
@@ -67,7 +69,7 @@ fn main() -> Result<()> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
     let store = Store::new(nvs.clone())?;
-    let mut screen = Screen::new(Pins {
+    let mut screen = Panel::new(Pins {
         spi: p.spi2,
         sck: p.pins.gpio7,
         mosi: p.pins.gpio9,
@@ -77,11 +79,11 @@ fn main() -> Result<()> {
         rst: p.pins.gpio1,
     })?;
 
-    let (sender, events) = mpsc::channel();
+    let (sender, inputs) = mpsc::channel();
     if let Err(e) = console::watch(sender.clone()) {
         log::warn!("no serial console commands: {e:#}");
     }
-    keys::watch(p.pins.gpio5, p.pins.gpio8, sender)?;
+    keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone())?;
     let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, p.pins.gpio44)?;
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio41, p.pins.gpio42) {
         Ok(nfc) => Some(nfc),
@@ -119,22 +121,29 @@ fn main() -> Result<()> {
         None => link(&wifi, &mut screen, &store)?,
     };
 
+    let api = Api::with_token(token);
+    remote::poll_commands(api.clone(), sender.clone())?;
     Terminal {
-        api: Api::with_token(token),
+        mirror: remote::Mirror::start(api.clone())?,
+        api,
         state: store.state()?,
         queue: store.queue()?,
+        flow: Flow::new(),
+        started: Instant::now(),
+        main_screen: None,
         wifi,
         screen,
         store,
         buzzer,
         nfc,
-        events,
+        inputs,
+        _sender: sender,
     }
     .run()
 }
 
 /// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
-fn setup_wifi(wifi: &mut Wifi, screen: &mut Screen, store: &Store) -> Result<()> {
+fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store) -> Result<()> {
     let ap = wifi::start_setup_access_point(wifi)?;
     log::info!("setup access point {} at {}", ap.ssid, ap.ip);
     let portal_url = format!("http://{}", ap.ip);
@@ -156,7 +165,7 @@ fn setup_wifi(wifi: &mut Wifi, screen: &mut Screen, store: &Store) -> Result<()>
 }
 
 /// Shows a code until an office admin approves it on the site, then keeps the token.
-fn link(wifi: &Wifi, screen: &mut Screen, store: &Store) -> Result<String> {
+fn link(wifi: &Wifi, screen: &mut Panel, store: &Store) -> Result<String> {
     let hardware_id = wifi::hardware_id(wifi)?;
     let api = Api::anonymous();
     loop {
@@ -198,148 +207,167 @@ fn link(wifi: &Wifi, screen: &mut Screen, store: &Store) -> Result<String> {
     }
 }
 
-/// A linked terminal: waits for a key, takes a badge, and syncs.
+/// A linked terminal: runs the take flow on the inputs, and syncs.
 struct Terminal {
     api: Api,
+    mirror: remote::Mirror,
     wifi: Wifi,
-    screen: Screen,
+    screen: Panel,
     store: Store,
     buzzer: Buzzer,
     nfc: Option<Nfc>,
-    events: Receiver<Event>,
+    inputs: Receiver<Input>,
+    /// Keeps the channel open even if every input thread stops.
+    _sender: Sender<Input>,
+    flow: Flow,
+    /// Origin of the flow's milliseconds.
+    started: Instant,
     /// From the last sync, or from NVS until the first one succeeds.
     state: Option<DeviceState>,
     queue: Queue,
+    /// The site's last screen, to come back to without the network.
+    main_screen: Option<Vec<u8>>,
+}
+
+enum Next {
+    Input(Input),
+    /// The flow's deadline passed.
+    Tick,
+    /// Idle, and time to sync.
+    SyncDue,
 }
 
 impl Terminal {
     fn run(mut self) -> Result<()> {
         // Keys touched during setup or linking do not count.
-        while self.events.try_recv().is_ok() {}
-        let mut redraw = false;
+        while self.inputs.try_recv().is_ok() {}
+        self.sync(false);
+        let mut sync_at = Instant::now() + SYNC_EVERY;
         loop {
-            match self.sync(redraw) {
-                Ok(()) => {}
-                Err(e) if e.is::<api::Unauthorized>() => {
-                    log::warn!("the site unlinked this device, linking again");
-                    self.store.clear_token()?;
+            match self.next(sync_at)? {
+                Next::Input(Input::Flow(event)) => self.step(event)?,
+                Next::Tick => self.step(Event::Tick)?,
+                Next::Input(Input::Sync) | Next::SyncDue => {
+                    if self.flow.is_idle() {
+                        self.sync(false);
+                        sync_at = Instant::now() + SYNC_EVERY;
+                    }
+                }
+                Next::Input(Input::Restart) => {
+                    log::info!("restart asked from the site");
                     reset::restart();
                 }
-                Err(e) => log::error!("sync failed: {e:#}"),
-            }
-            // After a take the main screen must come back, even if the site's is unchanged.
-            redraw = match self.wait(SYNC_EVERY)? {
-                Some(side) => {
-                    self.take(side)?;
-                    true
+                Next::Input(Input::ForgetWifi) => {
+                    log::info!("the site asked to forget the Wi-Fi");
+                    self.store.clear_wifi()?;
+                    reset::restart();
                 }
-                None => false,
-            };
+            }
         }
     }
 
-    /// Waits for a key, a sync request or the timeout.
-    fn wait(&mut self, timeout: Duration) -> Result<Option<Side>> {
-        let deadline = Instant::now() + timeout;
+    /// Waits for an input, the flow's deadline or the sync, and reads badges meanwhile.
+    fn next(&mut self, sync_at: Instant) -> Result<Next> {
         loop {
-            match self.events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(Event::Key(side)) => return Ok(Some(side)),
-                Ok(Event::Sync) | Err(RecvTimeoutError::Timeout) => return Ok(None),
-                Ok(Event::Badge(uid)) => log::info!("badge {uid} with no key touched before: ignored"),
-                Err(RecvTimeoutError::Disconnected) => bail!("the keys stopped reporting"),
+            let deadline = self.flow.deadline().map_or(sync_at, |ms| self.started + Duration::from_millis(ms));
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(if self.flow.is_idle() { Next::SyncDue } else { Next::Tick });
             }
-        }
-    }
-
-    /// Key, badge, a few seconds to cancel, then the take joins the queue.
-    fn take(&mut self, side: Side) -> Result<()> {
-        let Some(state) = self.state.clone().filter(|_| now() > CLOCK_SET_AFTER) else {
-            self.buzzer.beep(Beep::Error);
-            self.screen.show(|d| {
-                ui::error_screen(d, "Pas encore prêt", "Le terminal attend sa première synchro avec le site.")
-            })?;
-            thread::sleep(Duration::from_secs(4));
-            return Ok(());
-        };
-        let key = state.key(side);
-        self.buzzer.beep(Beep::Key);
-        self.screen.show(|d| ui::badge_screen(d, &key.label))?;
-
-        let Some(uid) = self.wait_badge()? else {
-            log::info!("no badge, take cancelled");
-            return Ok(());
-        };
-        let Some(name) = state.badge_holder(&uid) else {
-            log::info!("unknown badge {uid}");
-            self.buzzer.beep(Beep::Error);
-            self.queue.note_unknown_badge(&uid);
-            self.save_queue();
-            self.screen.show(|d| ui::unknown_badge_screen(d, &uid))?;
-            thread::sleep(Duration::from_secs(5));
-            return Ok(());
-        };
-
-        self.buzzer.beep(Beep::Accepted);
-        let info = ui::TakeInfo { name, key_label: &key.label, seconds: UNDO_SECONDS };
-        self.screen.show(|d| ui::take_screen(d, &info))?;
-        if !self.confirm()? {
-            log::info!("{name} cancelled");
-            self.buzzer.beep(Beep::Key);
-            return Ok(());
-        }
-
-        let take = Take {
-            id: format!("{:08x}{:08x}", unsafe { esp_random() }, unsafe { esp_random() }),
-            badge_uid: uid,
-            action: key.action,
-            item_id: key.item_id.clone(),
-            at: time::format_iso(now()),
-        };
-        log::info!("{name}: {} queued", key.label);
-        if let Some(dropped) = self.queue.push(take) {
-            log::warn!("queue full, oldest take {} dropped", dropped.id);
-        }
-        self.save_queue();
-        Ok(())
-    }
-
-    /// A badge from the reader or the console; `None` after a key press or the timeout.
-    fn wait_badge(&mut self) -> Result<Option<String>> {
-        let deadline = Instant::now() + BADGE_WAIT;
-        while Instant::now() < deadline {
-            match self.events.try_recv() {
-                Ok(Event::Badge(uid)) => return Ok(Some(uid)),
-                Ok(Event::Key(_)) => return Ok(None),
-                Ok(Event::Sync) | Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => bail!("the keys stopped reporting"),
+            let wait = if self.flow.wants_badge() { BADGE_POLL.min(deadline - now) } else { deadline - now };
+            match self.inputs.recv_timeout(wait) {
+                Ok(input) => return Ok(Next::Input(input)),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => bail!("every input stopped"),
             }
-            if let Some(nfc) = &mut self.nfc {
+            if let (true, Some(nfc)) = (self.flow.wants_badge(), &mut self.nfc) {
                 match nfc.read_uid() {
-                    Ok(Some(uid)) => return Ok(Some(uid)),
+                    Ok(Some(uid)) => return Ok(Next::Input(Input::Flow(Event::Badge { uid }))),
                     Ok(None) => {}
                     Err(e) => log::warn!("NFC: {e:#}"),
                 }
             }
-            thread::sleep(Duration::from_millis(150));
         }
-        Ok(None)
     }
 
-    /// Left key confirms, right key cancels, silence confirms.
-    fn confirm(&mut self) -> Result<bool> {
-        let deadline = Instant::now() + Duration::from_secs(UNDO_SECONDS.into());
-        loop {
-            match self.events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(Event::Key(Side::Left)) | Err(RecvTimeoutError::Timeout) => return Ok(true),
-                Ok(Event::Key(Side::Right)) => return Ok(false),
-                Ok(_) => {}
-                Err(RecvTimeoutError::Disconnected) => bail!("the keys stopped reporting"),
+    fn step(&mut self, event: Event) -> Result<()> {
+        let cx = Context {
+            now_ms: self.started.elapsed().as_millis() as u64,
+            unix: Some(now()).filter(|t| *t > CLOCK_SET_AFTER),
+            state: self.state.as_ref(),
+            random: (u64::from(unsafe { esp_random() }) << 32) | u64::from(unsafe { esp_random() }),
+        };
+        for effect in self.flow.handle(event, cx) {
+            match effect {
+                Effect::Beep { beep } => self.buzzer.beep(beep),
+                Effect::Queue { take } => {
+                    log::info!("take {} queued for {}", take.id, take.badge_uid);
+                    if let Some(dropped) = self.queue.push(take) {
+                        log::warn!("queue full, oldest take {} dropped", dropped.id);
+                    }
+                    self.save_queue();
+                }
+                Effect::NoteUnknownBadge { uid } => {
+                    log::info!("unknown badge {uid}");
+                    self.queue.note_unknown_badge(&uid);
+                    self.save_queue();
+                }
+                Effect::Show { screen: Screen::Main } => self.show_main()?,
+                Effect::Show { screen } => self.show(|d| ui::flow_screen(d, &screen))?,
+            }
+        }
+        Ok(())
+    }
+
+    /// Back to the site's screen: fetched again if takes are waiting, else the last one.
+    fn show_main(&mut self) -> Result<()> {
+        if self.queue.takes().is_empty() {
+            if let Some(bits) = self.main_screen.take() {
+                let shown = self.show_bits(&bits);
+                self.main_screen = Some(bits);
+                return shown;
+            }
+        }
+        if !self.sync(true) {
+            if let Some(bits) = self.main_screen.take() {
+                let shown = self.show_bits(&bits);
+                self.main_screen = Some(bits);
+                return shown;
+            }
+        }
+        Ok(())
+    }
+
+    fn show(&mut self, draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>) -> Result<()> {
+        self.screen.show(draw)?;
+        self.mirror.send(self.screen.frame());
+        Ok(())
+    }
+
+    fn show_bits(&mut self, bits: &[u8]) -> Result<()> {
+        self.screen.show_bits(bits)?;
+        self.mirror.send(self.screen.frame());
+        Ok(())
+    }
+
+    /// Syncs and says whether it worked. A device the site no longer knows links again.
+    fn sync(&mut self, redraw: bool) -> bool {
+        match self.try_sync(redraw) {
+            Ok(()) => true,
+            Err(e) if e.is::<api::Unauthorized>() => {
+                log::warn!("the site unlinked this device, linking again");
+                let _ = self.store.clear_token();
+                reset::restart();
+            }
+            Err(e) => {
+                log::error!("sync failed: {e:#}");
+                false
             }
         }
     }
 
     /// Sends the queued takes and unknown badges, then fetches the state and the screen.
-    fn sync(&mut self, redraw: bool) -> Result<()> {
+    fn try_sync(&mut self, redraw: bool) -> Result<()> {
         wifi::reconnect(&mut self.wifi)?;
         if !self.queue.takes().is_empty() {
             let reply = self.api.takes(self.queue.takes())?;
@@ -368,11 +396,12 @@ impl Terminal {
             self.save_queue();
         }
 
-        let etag = if redraw { None } else { self.store.screen_etag()? };
+        let etag = if redraw || self.main_screen.is_none() { None } else { self.store.screen_etag()? };
         match self.api.screen(etag.as_deref())? {
             ScreenUpdate::Unchanged => log::info!("screen unchanged"),
             ScreenUpdate::Changed { bits, etag } => {
-                self.screen.show_bits(&bits)?;
+                self.show_bits(&bits)?;
+                self.main_screen = Some(bits);
                 if let Some(etag) = etag {
                     self.store.set_screen_etag(&etag)?;
                 }

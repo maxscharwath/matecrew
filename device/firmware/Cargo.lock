@@ -976,6 +976,7 @@ name = "matecrew-ui"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics",
+ "matecrew-core",
  "qrcodegen",
  "u8g2-fonts",
 ]

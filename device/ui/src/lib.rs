@@ -8,6 +8,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{CornerRadii, PrimitiveStyle, Rectangle, RoundedRectangle},
 };
+use matecrew_core::flow::Screen;
 use qrcodegen::{QrCode, QrCodeEcc};
 use u8g2_fonts::{
     fonts,
@@ -223,6 +224,21 @@ where
         centered(px, &SECONDARY, line, W / 2, CONTENT_TOP + 48 + 10 * i as i32)?;
     }
     footer(px, uid)
+}
+
+/// Draws a screen of the take flow. `Screen::Main` draws nothing: it is the
+/// site's bitmap, which the runtime keeps.
+pub fn flow_screen<D>(d: &mut D, screen: &Screen) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    match screen {
+        Screen::Main => Ok(()),
+        Screen::Badge { key_label } => badge_screen(d, key_label),
+        Screen::Take { name, key_label, seconds } => take_screen(d, &TakeInfo { name, key_label, seconds: *seconds }),
+        Screen::UnknownBadge { uid } => unknown_badge_screen(d, uid),
+        Screen::NotReady => error_screen(d, "Pas encore prêt", "Le terminal attend sa première synchro avec le site."),
+    }
 }
 
 /// Joining payload understood by iOS and Android cameras.

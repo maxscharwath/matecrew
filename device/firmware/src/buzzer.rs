@@ -8,13 +8,8 @@ use esp_idf_svc::hal::{
     units::FromValueType,
 };
 use esp_idf_svc::sys::{ledc_mode_t_LEDC_LOW_SPEED_MODE, ledc_set_freq, ledc_timer_t_LEDC_TIMER_0};
+use matecrew_core::flow::Beep;
 use std::{thread, time::Duration};
-
-pub enum Beep {
-    Key,
-    Accepted,
-    Error,
-}
 
 pub struct Buzzer {
     channel: LedcDriver<'static>,

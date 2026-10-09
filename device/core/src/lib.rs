@@ -4,6 +4,7 @@
 
 pub mod console;
 pub mod contract;
+pub mod flow;
 pub mod pn532;
 pub mod queue;
 pub mod time;
