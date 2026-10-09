@@ -173,7 +173,7 @@ function Running({
           <DeviceShell
             pressed={pressed}
             onKey={shortcuts.key}
-            screen={<FrameCanvas bits={snapshot.bits} refreshes={snapshot.refreshes} />}
+            screen={<FrameCanvas bits={snapshot.bits} refreshes={snapshot.refreshes} full={snapshot.refresh === "full"} />}
             badge={
               <BadgeZone
                 badges={badges}
@@ -221,8 +221,8 @@ function PhasePill({ phase }: { phase: Phase }) {
 const PAPER = [236, 234, 227];
 const INK = [29, 29, 31];
 
-/** Draws the 1-bit frame; each new one flashes the way an e-ink panel refreshes. */
-function FrameCanvas({ bits, refreshes }: { bits: Uint8Array | null; refreshes: number }) {
+/** Draws the 1-bit frame. A full refresh flashes black and white like the panel; a partial one does not. */
+function FrameCanvas({ bits, refreshes, full }: { bits: Uint8Array | null; refreshes: number; full: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
@@ -234,13 +234,13 @@ function FrameCanvas({ bits, refreshes }: { bits: Uint8Array | null; refreshes: 
       image.data.set([r, g, b, 255], i * 4);
     }
     context.putImageData(image, 0, 0);
-    if (refreshes > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (full && refreshes > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       element.animate([{ filter: "invert(1)" }, { filter: "none" }, { filter: "invert(1)" }, { filter: "none" }], {
         duration: 600,
         easing: "steps(1, end)",
       });
     }
-  }, [bits, refreshes]);
+  }, [bits, refreshes, full]);
   return (
     <canvas
       ref={canvas}

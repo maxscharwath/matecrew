@@ -19,6 +19,9 @@ export const FIRMWARE_VERSION = "web";
 const SYNC_EVERY_MS = 120_000;
 const COMMANDS_WAIT_SECONDS = 25;
 const MAX_LOGS = 200;
+/** As the firmware's display: a full refresh at first, then on the main screen every 40 partial ones or every hour. */
+const FULL_EVERY = 40;
+const FULL_AFTER_MS = 3_600_000;
 
 export type Phase = "booting" | "linking" | "online" | "offline";
 
@@ -28,8 +31,10 @@ export type Snapshot = {
   phase: Phase;
   /** What the panel shows: 800 x 480, packed 1-bit, 1 = ink. */
   bits: Uint8Array | null;
-  /** Counts panel refreshes, so the page can flash like e-ink. */
+  /** Counts panel refreshes, so the page can draw each one. */
   refreshes: number;
+  /** How the last one was done: only a full refresh flashes on the real panel. */
+  refresh: "full" | "partial";
   /** While linking: the code on screen and the page that approves it. */
   link: { code: string; url: string } | null;
   linked: { deviceId: string; deviceName: string; officeName: string } | null;
@@ -79,6 +84,8 @@ export class VirtualDevice {
   private tickTimer: ReturnType<typeof setTimeout> | undefined;
   private frameUpload: { busy: boolean; next: Uint8Array | null } = { busy: false, next: null };
   private logId = 0;
+  private partials = 0;
+  private lastFull: number | null = null;
 
   private sensors = { batteryMv: 4000, wifiRssi: -55 };
   private onBeep: (beep: Beep) => void = () => {};
@@ -92,6 +99,7 @@ export class VirtualDevice {
       phase: "booting",
       bits: null,
       refreshes: 0,
+      refresh: "full",
       link: null,
       linked: this.linkedInfo(),
       hardwareId: this.stored.hardwareId,
@@ -381,7 +389,15 @@ export class VirtualDevice {
 
   private display(bits: Uint8Array, view: View | "main"): void {
     this.view = view;
-    this.update({ bits, refreshes: this.snapshot.refreshes + 1 });
+    const due = this.partials >= FULL_EVERY || (this.lastFull !== null && Date.now() - this.lastFull > FULL_AFTER_MS);
+    const full = this.lastFull === null || (view === "main" && due);
+    if (full) {
+      this.partials = 0;
+      this.lastFull = Date.now();
+    } else {
+      this.partials += 1;
+    }
+    this.update({ bits, refreshes: this.snapshot.refreshes + 1, refresh: full ? "full" : "partial" });
     if (this.stored.token && this.snapshot.network) void this.uploadFrame(bits);
   }
 

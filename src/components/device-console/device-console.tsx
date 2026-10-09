@@ -186,8 +186,8 @@ export function DeviceConsole({ officeId, device, badges, initial, renderedAt }:
 }
 
 /**
- * The mirrored panel. A new frame flashes like an e-ink refresh; before the
- * terminal has sent one, the site's own render stands in, dimmed.
+ * The mirrored panel; before the terminal has sent a frame, the site's own
+ * render stands in, dimmed.
  */
 function Panel({ base, frame }: { base: string; frame: LiveStatus["frame"] }) {
   const t = useTranslations("devices.console");
@@ -203,7 +203,7 @@ function Panel({ base, frame }: { base: string; frame: LiveStatus["frame"] }) {
       className={cn(
         // Scaled down, smoothing reads better; scaled up on a dense screen, crisp pixels do.
         "size-full mix-blend-multiply select-none [@media(min-resolution:2dppx)]:[image-rendering:pixelated]",
-        frame ? "animate-eink-refresh" : "opacity-40",
+        !frame && "opacity-40",
       )}
       draggable={false}
     />

@@ -2,22 +2,23 @@
 //!
 //! Screens are drawn into a frame in memory, then only what changed is sent:
 //! nothing when the frame is the same, a partial refresh of the changed
-//! rectangle otherwise. A full refresh, slower and flashing, clears the
+//! rectangle otherwise, the controller kept awake from one to the next. Back
+//! on the main screen it goes to sleep. A full refresh, flashing, clears the
 //! ghosting partial refreshes leave: at the first screen, then on the main
-//! screen after FULL_EVERY partial ones or FULL_AFTER.
+//! screen after FULL_EVERY partial ones or FULL_AFTER, with the fast waveform.
 
 use anyhow::{bail, Result};
 use core::convert::Infallible;
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_idf_svc::hal::{
     gpio::{AnyIOPin, Gpio1, Gpio2, Gpio3, Gpio4, Gpio7, Gpio9, PinDriver, Pull},
-    spi::{config::Config, SpiDeviceDriver, SpiDriverConfig, SPI2},
+    spi::{config::Config, Dma, SpiDeviceDriver, SpiDriverConfig, SPI2},
     units::FromValueType,
 };
 use matecrew_ui::frame::{self, Frame};
 use std::time::{Duration, Instant};
 
-use crate::epd::Epd;
+use crate::epd::{Epd, CHUNK};
 
 pub type Canvas = Frame;
 
@@ -53,7 +54,7 @@ impl Screen {
             pins.mosi,
             Option::<AnyIOPin>::None,
             Some(pins.cs),
-            &SpiDriverConfig::new(),
+            &SpiDriverConfig::new().dma(Dma::Auto(CHUNK)),
             &Config::new().baudrate(4u32.MHz().into()),
         )?;
         let epd = Epd::new(
@@ -80,7 +81,12 @@ impl Screen {
         }
         self.next.bits.copy_from_slice(bits);
         let due = self.partials >= FULL_EVERY || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
-        self.present(due)
+        self.present(due)?;
+        // The main screen stays until the next key or sync: power the panel down.
+        if self.epd.is_awake() {
+            self.epd.sleep()?;
+        }
+        Ok(())
     }
 
     /// What the panel shows, in the format of the site's screen: 1 = ink.
@@ -92,10 +98,12 @@ impl Screen {
         let started = Instant::now();
         let changed = frame::changed(&self.shown, &self.next.bits);
         if self.last_full.is_none() || full {
-            self.epd.full(&self.next.bits)?;
+            // The first refresh takes the long waveform: nobody knows what the panel showed before.
+            let fast = self.last_full.is_some();
+            self.epd.full(&self.next.bits, fast)?;
             self.partials = 0;
             self.last_full = Some(Instant::now());
-            log::info!("display: full refresh in {} ms", started.elapsed().as_millis());
+            log::info!("display: {} refresh in {} ms", if fast { "fast" } else { "full" }, started.elapsed().as_millis());
         } else if let Some(window) = changed {
             self.epd.partial(window, &self.shown, &self.next.bits)?;
             self.partials += 1;
