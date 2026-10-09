@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { uploadFile, deleteFile, buildItemImageKey } from "@/lib/storage";
 import { optimizeImage } from "@/lib/image";
+import { ITEM_IMAGE_BYTES, photoBitmap, pictureToBitmap } from "@/lib/device/bitmap";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -293,6 +294,63 @@ export async function setDefaultItem(
     }),
   ]);
 
+  revalidateItemPages(officeId);
+  return { success: true };
+}
+
+type PictureResult = { success: true; bits: string } | { success: false; error: string };
+
+/**
+ * An uploaded picture as the terminal's 24 x 24 black and white, for the
+ * editor to show before anything is saved. A drawing keeps sharp edges; a
+ * photo can be dithered instead.
+ */
+export async function terminalImageFromFile(
+  officeId: string,
+  formData: FormData,
+): Promise<PictureResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0 || !ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    return { success: false, error: t("errors.invalidFileType", { name: file instanceof File ? file.name : "" }) };
+  }
+  if (file.size > MAX_IMAGE_SIZE) return { success: false, error: t("errors.fileTooLarge", { name: file.name }) };
+  try {
+    const mode = formData.get("mode") === "dither" ? "dither" : "threshold";
+    const picture = await pictureToBitmap(Buffer.from(await file.arrayBuffer()), mode);
+    return { success: true, bits: Buffer.from(picture.bits).toString("base64") };
+  } catch {
+    return { success: false, error: t("errors.invalidFileType", { name: file.name }) };
+  }
+}
+
+/** The item's photo at 24 x 24 in black and white, as a start for drawing. */
+export async function terminalImageFromPhoto(officeId: string, itemId: string): Promise<PictureResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+  const item = await prisma.item.findFirst({ where: { id: itemId, officeId }, select: { imageKey: true } });
+  if (!item) return { success: false, error: t("errors.itemNotFound") };
+  const picture = await photoBitmap(item.imageKey);
+  if (!picture) return { success: false, error: t("items.terminalImage.noPhoto") };
+  return { success: true, bits: Buffer.from(picture.bits).toString("base64") };
+}
+
+/** Saves the terminal's picture of the item; null goes back to the dithered photo. */
+export async function setTerminalImage(
+  officeId: string,
+  itemId: string,
+  bits: string | null,
+): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations();
+  const bytes = bits === null ? null : Buffer.from(bits, "base64");
+  if (bytes && bytes.length !== ITEM_IMAGE_BYTES) return { success: false, error: t("errors.itemNotFound") };
+  const updated = await prisma.item.updateMany({
+    where: { id: itemId, officeId },
+    data: { terminalImage: bytes ? new Uint8Array(bytes) : null },
+  });
+  if (updated.count === 0) return { success: false, error: t("errors.itemNotFound") };
   revalidateItemPages(officeId);
   return { success: true };
 }

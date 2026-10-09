@@ -36,6 +36,7 @@ async function loadItems(officeId: string) {
       id: true,
       name: true,
       imageKey: true,
+      terminalImage: true,
       lowStockThreshold: true,
       stock: { where: { officeId }, select: { currentQty: true } },
     },
@@ -103,7 +104,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       right: { action: "RETURN", itemId: null, label: labels.right },
     },
     items: await Promise.all(
-      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64((await itemImage(i.imageKey)).bits) })),
+      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64((await itemImage(i.imageKey, i.terminalImage)).bits) })),
     ),
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
     syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
@@ -156,12 +157,20 @@ async function preparation(officeId: string, timezone: string) {
   const requests = await prisma.dailyRequest.findMany({
     where: { officeId, date: getTodayDate(), mateSessionId: session.id, status: "REQUESTED" },
     orderBy: { createdAt: "asc" },
-    select: { item: { select: { id: true, name: true, imageKey: true } }, user: { select: { name: true } } },
+    select: {
+      item: { select: { id: true, name: true, imageKey: true, terminalImage: true } },
+      user: { select: { name: true } },
+    },
   });
   if (requests.length === 0) return null;
-  const byItem = new Map<string, { name: string; imageKey: string | null; names: string[] }>();
+  const byItem = new Map<string, { name: string; imageKey: string | null; terminalImage: Uint8Array | null; names: string[] }>();
   for (const r of requests) {
-    const entry = byItem.get(r.item.id) ?? { name: r.item.name, imageKey: r.item.imageKey, names: [] };
+    const entry = byItem.get(r.item.id) ?? {
+      name: r.item.name,
+      imageKey: r.item.imageKey,
+      terminalImage: r.item.terminalImage,
+      names: [],
+    };
     entry.names.push(r.user.name.split(" ")[0]);
     byItem.set(r.item.id, entry);
   }
@@ -200,7 +209,7 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
         name: i.name,
         stock: i.qty,
         low: i.qty <= thresholds[index],
-        image: await toPngDataUrl(await itemImage(i.imageKey)),
+        image: await toPngDataUrl(await itemImage(i.imageKey, i.terminalImage)),
         pattern: await toPngDataUrl(patternSample(index, 8)),
       })),
     ),
@@ -220,7 +229,7 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
           name: i.name,
           count: i.names.length,
           names: i.names.join(", "),
-          image: await toPngDataUrl(await itemImage(i.imageKey)),
+          image: await toPngDataUrl(await itemImage(i.imageKey, i.terminalImage)),
         })),
       ),
     },

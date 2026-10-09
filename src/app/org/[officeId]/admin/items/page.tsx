@@ -3,6 +3,7 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import { getTranslations } from "next-intl/server";
 import { resolveItemImageUrl } from "@/lib/storage";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
+import { itemImage } from "@/lib/device/bitmap";
 import { ItemsManager } from "@/components/items-manager";
 
 interface Props {
@@ -26,6 +27,7 @@ export default async function ItemsPage({ params }: Props) {
         id: true,
         name: true,
         imageKey: true,
+        terminalImage: true,
         active: true,
         isDefault: true,
         volumeMl: true,
@@ -39,10 +41,13 @@ export default async function ItemsPage({ params }: Props) {
     }),
   ]);
 
-  const rows = items.map((i) => ({
+  const rows = await Promise.all(items.map(async (i) => ({
     id: i.id,
     name: i.name,
     imageUrl: resolveItemImageUrl(i.imageKey),
+    // What the badge terminal shows for it.
+    terminalBits: Buffer.from((await itemImage(i.imageKey, i.terminalImage)).bits).toString("base64"),
+    terminalCustom: i.terminalImage !== null,
     active: i.active,
     isDefault: i.isDefault,
     volumeMl: i.volumeMl,
@@ -52,7 +57,7 @@ export default async function ItemsPage({ params }: Props) {
     consumptionCount: i._count.consumptionEntries,
     lowStockThreshold: i.lowStockThreshold,
     color: i.color,
-  }));
+  })));
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

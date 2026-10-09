@@ -782,7 +782,14 @@
     "setAsDefault": "Définir par défaut",
     "saving": "Enregistrement...",
     "saveChanges": "Enregistrer les modifications",
-    "profileSaved": "Profil enregistré"
+    "profileSaved": "Profil enregistré",
+    "badges": {
+      "title": "Mon badge",
+      "hint": "Pour lier ton badge, passe-le sur un terminal matécrew et scanne le QR qu'il affiche.",
+      "lastPass": "{office} · dernier passage le {when}",
+      "unlink": "Délier",
+      "unlinked": "Badge délié"
+    }
   },
   "bulkConsumption": {
     "title": "Consommation",
@@ -1002,7 +1009,22 @@
     "color": "Couleur des graphiques",
     "colorAuto": "Auto",
     "colorCustom": "Couleur personnalisée",
-    "colorInvalid": "Couleur invalide : utilisez un code hexadécimal (#3987e5)."
+    "colorInvalid": "Couleur invalide : utilisez un code hexadécimal (#3987e5).",
+    "terminalImage": {
+      "title": "Image du terminal",
+      "titleFor": "Image du terminal · {name}",
+      "hint": "24 × 24 pixels en noir et blanc, affichés 4 fois plus grands sur le terminal. Clique pour dessiner ou effacer, glisse pour peindre. Une image importée est réduite à 24 × 24 ; un dessin de 24, 48 ou 96 px garde ses pixels.",
+      "onTerminal": "Sur le terminal",
+      "import": "Importer une image",
+      "dither": "Tramer (pour une photo)",
+      "fromPhoto": "Partir de la photo",
+      "invert": "Inverser",
+      "clear": "Effacer",
+      "reset": "Revenir à la photo",
+      "save": "Enregistrer",
+      "saved": "Image du terminal enregistrée",
+      "noPhoto": "Cet article n'a pas de photo."
+    }
   },
   "oauthConsent": {
     "title": "Connecter {client} à MateCrew",
@@ -1154,7 +1176,7 @@
     "nameRequired": "Un nom est requis",
     "notFound": "Appareil introuvable",
     "badgesTitle": "Badges",
-    "badgesSubtitle": "Les badges inconnus apparaissent ici dès qu'un appareil les lit. Attribue-les à un membre.",
+    "badgesSubtitle": "Tous les badges lus par les terminaux, du plus récent au plus ancien. Pour lier le sien, un membre le passe sur le terminal et scanne le QR affiché.",
     "badgesEmpty": "Aucun badge lu pour l'instant.",
     "badgeUnassigned": "Non attribué",
     "badgeSeen": "Vu le {when}",
@@ -1255,7 +1277,10 @@
     "settings": "Réglages",
     "firstItem": "Article proposé en premier",
     "save": "Enregistrer",
-    "noTakes": "Aucune prise pour l'instant."
+    "noTakes": "Aucune prise pour l'instant.",
+    "badgeLastPass": "dernier passage {when}",
+    "badgeTakes": "{count, plural, =0 {aucune prise} one {# prise} other {# prises}}",
+    "badgeFirstSeen": "vu depuis le {when}"
   },
   "deviceLink": {
     "title": "Lier un appareil",
@@ -1279,5 +1304,23 @@
     "goToDevices": "Voir les appareils",
     "deniedTitle": "Demande refusée",
     "denied": "L'appareil n'a reçu aucun accès."
+  },
+  "badgeClaim": {
+    "title": "Ton badge",
+    "subtitle": "Lie ton badge de bureau à ton compte : le terminal te reconnaîtra quand tu badges.",
+    "claimTitle": "Lier ce badge à ton compte",
+    "claim": "Lu à l'instant par « {device} », au bureau de {office}.",
+    "claimButton": "C'est mon badge",
+    "doneTitle": "C'est fait",
+    "done": "Repasse ton badge sur « {device} » : il te reconnaît maintenant.",
+    "yoursTitle": "C'est déjà ton badge",
+    "yours": "« {device} » te reconnaît déjà quand tu badges.",
+    "takenTitle": "Ce badge est à quelqu'un d'autre",
+    "taken": "Il est lié au compte de {holder}. Si c'est une erreur, un admin de {office} peut le réattribuer dans Admin > Appareils.",
+    "notMember": "Tu n'es pas membre du bureau de {office}",
+    "notMemberHint": "Rejoins d'abord le bureau, puis repasse ton badge sur le terminal.",
+    "invalidTitle": "Ce lien n'est pas valable",
+    "expiredTitle": "Ce lien a expiré",
+    "tapAgain": "Repasse ton badge sur le terminal : il affiche un nouveau QR, valable 10 minutes."
   }
 }

@@ -1,0 +1,222 @@
+"use client";
+
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
+import { toast } from "sonner";
+import { Eraser, FlipHorizontal2, ImageDown, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import {
+  setTerminalImage,
+  terminalImageFromFile,
+  terminalImageFromPhoto,
+} from "@/app/org/[officeId]/admin/items/actions";
+
+/** Side of the picture on the terminal's 200 x 120 canvas; the panel shows it 4 times bigger. */
+const SIZE = 24;
+const CELL = 12;
+const PAPER = "#ECEAE3";
+const INK = "#1D1D1F";
+
+type Pixels = boolean[];
+
+function unpack(base64: string | null): Pixels {
+  const pixels: Pixels = new Array(SIZE * SIZE).fill(false);
+  if (!base64) return pixels;
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  for (let i = 0; i < pixels.length; i++) pixels[i] = (bytes[i >> 3] & (0x80 >> (i & 7))) !== 0;
+  return pixels;
+}
+
+function pack(pixels: Pixels): string {
+  const bytes = new Uint8Array((SIZE * SIZE) / 8);
+  pixels.forEach((ink, i) => {
+    if (ink) bytes[i >> 3] |= 0x80 >> (i & 7);
+  });
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** Draws the picture at `scale` pixels per pixel, with a grid when it is the editor. */
+function Picture({
+  pixels,
+  scale,
+  grid,
+  ...canvasProps
+}: { pixels: Pixels; scale: number; grid?: boolean } & React.ComponentProps<"canvas">) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const context = canvas.current?.getContext("2d");
+    if (!context) return;
+    context.fillStyle = PAPER;
+    context.fillRect(0, 0, SIZE * scale, SIZE * scale);
+    context.fillStyle = INK;
+    pixels.forEach((ink, i) => {
+      if (ink) context.fillRect((i % SIZE) * scale, Math.floor(i / SIZE) * scale, scale, scale);
+    });
+    if (grid) {
+      context.strokeStyle = "rgb(0 0 0 / 0.08)";
+      for (let k = 1; k < SIZE; k++) {
+        context.beginPath();
+        context.moveTo(k * scale + 0.5, 0);
+        context.lineTo(k * scale + 0.5, SIZE * scale);
+        context.moveTo(0, k * scale + 0.5);
+        context.lineTo(SIZE * scale, k * scale + 0.5);
+        context.stroke();
+      }
+    }
+  }, [pixels, scale, grid]);
+  return <canvas ref={canvas} width={SIZE * scale} height={SIZE * scale} {...canvasProps} />;
+}
+
+/**
+ * The item's picture on the badge terminal: 24 x 24 black and white. The
+ * button shows it as the terminal will; the dialog edits it pixel by pixel,
+ * imports a picture or starts from the item's photo.
+ */
+export function TerminalImageEditor({
+  officeId,
+  item,
+}: {
+  officeId: string;
+  item: { id: string; name: string; hasPhoto: boolean; terminalBits: string; custom: boolean };
+}) {
+  const t = useTranslations("items.terminalImage");
+  const [open, setOpen] = useState(false);
+  const [pixels, setPixels] = useState(() => unpack(item.terminalBits));
+  const [dither, setDither] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const painting = useRef<boolean | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const paint = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((event.clientX - box.left) / box.width) * SIZE);
+    const y = Math.floor(((event.clientY - box.top) / box.height) * SIZE);
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+    const i = y * SIZE + x;
+    // The first pixel decides: on an empty one the stroke draws, on an inked one it erases.
+    painting.current ??= !pixels[i];
+    const ink = painting.current;
+    if (pixels[i] !== ink) setPixels((current) => current.map((p, k) => (k === i ? ink : p)));
+  };
+
+  const load = (result: { success: true; bits: string } | { success: false; error: string }) => {
+    if (result.success) setPixels(unpack(result.bits));
+    else toast.error(result.error);
+  };
+
+  const save = (bits: string | null) =>
+    startTransition(async () => {
+      const result = await setTerminalImage(officeId, item.id, bits);
+      if (!result.success) return void toast.error(result.error);
+      toast.success(t("saved"));
+      setOpen(false);
+    });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setPixels(unpack(item.terminalBits));
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          title={t("title")}
+          aria-label={t("title")}
+          className="shrink-0 overflow-hidden rounded-md border transition-colors hover:border-foreground/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Picture pixels={unpack(item.terminalBits)} scale={2} className="block size-12 [image-rendering:pixelated]" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t("titleFor", { name: item.name })}</DialogTitle>
+          <DialogDescription>{t("hint")}</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap gap-5">
+          <Picture
+            pixels={pixels}
+            scale={CELL}
+            grid
+            className="touch-none rounded-md border [image-rendering:pixelated]"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              painting.current = null;
+              paint(event);
+            }}
+            onPointerMove={(event) => {
+              if (event.buttons) paint(event);
+            }}
+            onPointerUp={() => {
+              painting.current = null;
+            }}
+          />
+          <div className="flex min-w-40 flex-1 flex-col gap-3 text-sm">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">{t("onTerminal")}</div>
+              <Picture pixels={pixels} scale={4} className="rounded border [image-rendering:pixelated]" />
+            </div>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                const form = new FormData();
+                form.set("image", file);
+                form.set("mode", dither ? "dither" : "threshold");
+                startTransition(async () => load(await terminalImageFromFile(officeId, form)));
+              }}
+            />
+            <Button variant="outline" size="sm" className="justify-start" disabled={pending} onClick={() => fileInput.current?.click()}>
+              <Upload /> {t("import")}
+            </Button>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Switch checked={dither} onCheckedChange={setDither} /> {t("dither")}
+            </label>
+            {item.hasPhoto && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="justify-start"
+                disabled={pending}
+                onClick={() => startTransition(async () => load(await terminalImageFromPhoto(officeId, item.id)))}
+              >
+                <ImageDown /> {t("fromPhoto")}
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setPixels((current) => current.map((p) => !p))}>
+                <FlipHorizontal2 /> {t("invert")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setPixels((current) => current.map(() => false))}>
+                <Eraser /> {t("clear")}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:justify-between">
+          {item.custom ? (
+            <Button variant="ghost" disabled={pending} onClick={() => save(null)}>
+              {t("reset")}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button disabled={pending} onClick={() => save(pack(pixels))}>
+            {t("save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

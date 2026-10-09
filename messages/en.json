@@ -782,7 +782,14 @@
     "setAsDefault": "Set as default",
     "saving": "Saving...",
     "saveChanges": "Save Changes",
-    "profileSaved": "Profile saved"
+    "profileSaved": "Profile saved",
+    "badges": {
+      "title": "My badge",
+      "hint": "To link your badge, tap it on a matécrew terminal and scan the QR code it shows.",
+      "lastPass": "{office} · last tap on {when}",
+      "unlink": "Unlink",
+      "unlinked": "Badge unlinked"
+    }
   },
   "bulkConsumption": {
     "title": "Consumption",
@@ -1002,7 +1009,22 @@
     "color": "Chart colour",
     "colorAuto": "Auto",
     "colorCustom": "Custom colour",
-    "colorInvalid": "Invalid colour: use a hex code (#3987e5)."
+    "colorInvalid": "Invalid colour: use a hex code (#3987e5).",
+    "terminalImage": {
+      "title": "Terminal picture",
+      "titleFor": "Terminal picture · {name}",
+      "hint": "24 × 24 black and white pixels, shown 4 times bigger on the terminal. Click to draw or erase, drag to paint. An imported picture is scaled to 24 × 24; a drawing at 24, 48 or 96 px keeps its pixels.",
+      "onTerminal": "On the terminal",
+      "import": "Import a picture",
+      "dither": "Dither (for a photo)",
+      "fromPhoto": "Start from the photo",
+      "invert": "Invert",
+      "clear": "Clear",
+      "reset": "Back to the photo",
+      "save": "Save",
+      "saved": "Terminal picture saved",
+      "noPhoto": "This item has no photo."
+    }
   },
   "oauthConsent": {
     "title": "Connect {client} to MateCrew",
@@ -1154,7 +1176,7 @@
     "nameRequired": "A name is required",
     "notFound": "Device not found",
     "badgesTitle": "Badges",
-    "badgesSubtitle": "Unknown badges show up here as soon as a device reads them. Assign them to a member.",
+    "badgesSubtitle": "Every badge the terminals have read, most recent first. To link theirs, a member taps it on the terminal and scans the QR code it shows.",
     "badgesEmpty": "No badge read yet.",
     "badgeUnassigned": "Unassigned",
     "badgeSeen": "Seen on {when}",
@@ -1255,7 +1277,10 @@
     "settings": "Settings",
     "firstItem": "Item offered first",
     "save": "Save",
-    "noTakes": "No takes yet."
+    "noTakes": "No takes yet.",
+    "badgeLastPass": "last tap {when}",
+    "badgeTakes": "{count, plural, =0 {no takes} one {# take} other {# takes}}",
+    "badgeFirstSeen": "seen since {when}"
   },
   "deviceLink": {
     "title": "Link a device",
@@ -1279,5 +1304,23 @@
     "goToDevices": "See devices",
     "deniedTitle": "Request denied",
     "denied": "The device got no access."
+  },
+  "badgeClaim": {
+    "title": "Your badge",
+    "subtitle": "Link your office badge to your account: the terminal will know you when you tap it.",
+    "claimTitle": "Link this badge to your account",
+    "claim": "Just read by \"{device}\", at the {office} office.",
+    "claimButton": "It's my badge",
+    "doneTitle": "Done",
+    "done": "Tap your badge on \"{device}\" again: it knows you now.",
+    "yoursTitle": "This badge is already yours",
+    "yours": "\"{device}\" already knows you when you tap it.",
+    "takenTitle": "This badge belongs to someone else",
+    "taken": "It is linked to {holder}'s account. If that is a mistake, an admin of {office} can reassign it in Admin > Devices.",
+    "notMember": "You are not a member of the {office} office",
+    "notMemberHint": "Join the office first, then tap your badge on the terminal again.",
+    "invalidTitle": "This link is not valid",
+    "expiredTitle": "This link has expired",
+    "tapAgain": "Tap your badge on the terminal again: it shows a new QR code, valid for 10 minutes."
   }
 }

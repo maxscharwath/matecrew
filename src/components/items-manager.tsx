@@ -27,8 +27,11 @@ import {
   setItemImage,
   setItemNutrition,
 } from "@/app/org/[officeId]/admin/items/actions";
+import { TerminalImageEditor } from "@/components/terminal-image-editor";
 
 interface ItemRow {
+  terminalBits: string;
+  terminalCustom: boolean;
   id: string;
   name: string;
   imageUrl?: string;
@@ -239,6 +242,16 @@ export function ItemsManager({
                   <ImagePlus className="size-4" />
                 </span>
               </button>
+              <TerminalImageEditor
+                officeId={officeId}
+                item={{
+                  id: item.id,
+                  name: item.name,
+                  hasPhoto: Boolean(item.imageUrl),
+                  terminalBits: item.terminalBits,
+                  custom: item.terminalCustom,
+                }}
+              />
 
               <div className="min-w-0 flex-1">
                 {editingId === item.id ? (
