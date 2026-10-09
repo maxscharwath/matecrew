@@ -319,6 +319,19 @@ where
     footer(px, uid)
 }
 
+/// Over the main screen while the site does not answer: a black band in
+/// place of the status bar. Takes still work; they wait in the queue.
+pub fn offline_banner<D>(d: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    Rectangle::new(Point::zero(), Size::new(W as u32, (STATUS_H + 1) as u32))
+        .into_styled(PrimitiveStyle::with_fill(INK))
+        .draw(px)?;
+    title_bar(px, Point::new(0, 0), W, "Site injoignable · les prises sont gardées")
+}
+
 /// Draws a screen of the take flow. `Screen::Main` draws nothing: it is the
 /// site's bitmap, which the runtime keeps.
 pub fn flow_screen<D>(d: &mut D, screen: &Screen) -> Result<(), D::Error>

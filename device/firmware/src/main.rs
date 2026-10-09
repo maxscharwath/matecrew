@@ -49,6 +49,8 @@ const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_WIFI_FAILURES: u8 = 3;
 /// Until deep sleep is wired, the device stays awake and syncs on a timer.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
+/// How soon to try again while the site does not answer.
+const OFFLINE_RETRY: Duration = Duration::from_secs(30);
 /// How often the NFC reader is asked for a badge while the flow waits for one.
 const BADGE_POLL: Duration = Duration::from_millis(150);
 /// Before this (November 2023) the clock has not been set by a sync yet.
@@ -169,6 +171,7 @@ fn app() -> Result<()> {
         inputs,
         _sender: sender,
         confirmed: false,
+        offline: false,
     }
     .run()
 }
@@ -286,6 +289,8 @@ struct Terminal {
     main_screen: Option<Vec<u8>>,
     /// This firmware has synced since it started: the bootloader keeps it.
     confirmed: bool,
+    /// The last sync failed: the main screen says so until one works.
+    offline: bool,
 }
 
 enum Next {
@@ -302,7 +307,7 @@ impl Terminal {
         while self.inputs.try_recv().is_ok() {}
         self.sync(false);
         self.maybe_update();
-        let mut sync_at = Instant::now() + SYNC_EVERY;
+        let mut sync_at = Instant::now() + if self.offline { OFFLINE_RETRY } else { SYNC_EVERY };
         loop {
             match self.next(sync_at)? {
                 Next::Input(Input::Flow(event)) => self.step(event)?,
@@ -311,7 +316,7 @@ impl Terminal {
                     if self.flow.is_idle() {
                         self.sync(false);
                         self.maybe_update();
-                        sync_at = Instant::now() + SYNC_EVERY;
+                        sync_at = Instant::now() + if self.offline { OFFLINE_RETRY } else { SYNC_EVERY };
                     }
                 }
                 Next::Input(Input::Restart) => {
@@ -406,9 +411,30 @@ impl Terminal {
     }
 
     fn show_bits(&mut self, bits: &[u8]) -> Result<()> {
-        self.screen.show_bits(bits)?;
+        if self.offline {
+            self.screen.show_bits_with(bits, |d| ui::offline_banner(d))?;
+        } else {
+            self.screen.show_bits(bits)?;
+        }
         self.mirror.send(self.screen.frame());
         Ok(())
+    }
+
+    /// Goes offline or back online, and redraws the main screen if it is up.
+    fn set_offline(&mut self, offline: bool) {
+        if self.offline == offline {
+            return;
+        }
+        self.offline = offline;
+        log::warn!("site {}", if offline { "unreachable: showing it" } else { "reachable again" });
+        if self.flow.is_idle() {
+            if let Some(bits) = self.main_screen.take() {
+                if let Err(e) = self.show_bits(&bits) {
+                    log::error!("display: {e:#}");
+                }
+                self.main_screen = Some(bits);
+            }
+        }
     }
 
     /// Syncs and says whether it worked. A device the site no longer knows links again.
@@ -430,6 +456,7 @@ impl Terminal {
             }
             Err(e) => {
                 log::error!("sync failed: {e:#}");
+                self.set_offline(true);
                 false
             }
         }
@@ -450,6 +477,8 @@ impl Terminal {
 
         let state = self.api.state()?;
         set_clock(&state.server_time);
+        // The site answers: the banner goes before anything else is drawn.
+        self.set_offline(false);
         log::info!("{} ({}), {} badges", state.device.name, state.office.name, state.badges.len());
         self.store.set_state(&state)?;
         self.state = Some(state);

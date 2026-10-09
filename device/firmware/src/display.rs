@@ -89,6 +89,20 @@ impl Screen {
         Ok(())
     }
 
+    /// The site's main screen with something drawn over it, like the offline banner.
+    pub fn show_bits_with(&mut self, bits: &[u8], over: impl FnOnce(&mut Canvas) -> Result<(), Infallible>) -> Result<()> {
+        if bits.len() != frame::BYTES {
+            bail!("screen bitmap is {} bytes", bits.len());
+        }
+        self.next.bits.copy_from_slice(bits);
+        let _ = over(&mut self.next);
+        self.present(false)?;
+        if self.epd.is_awake() {
+            self.epd.sleep()?;
+        }
+        Ok(())
+    }
+
     /// What the panel shows, in the format of the site's screen: 1 = ink.
     pub fn frame(&self) -> &[u8] {
         &self.shown
