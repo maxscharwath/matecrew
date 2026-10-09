@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-prod-copy/
 /out/
 
 # production
@@ -53,3 +54,6 @@ next-env.d.ts
 
 # Local copy of production's files (scripts/clone-prod-db.sh)
 .data/
+
+# Firmware images built by `just release`
+device/release/

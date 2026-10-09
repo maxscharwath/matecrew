@@ -9,4 +9,6 @@ export DATABASE_URL="$local_url" DIRECT_URL="$local_url"
 export SLACK_BOT_TOKEN="" SLACK_SIGNING_SECRET="" RESEND_API_KEY="" QSTASH_TOKEN=""
 # Files from the copy in .data/storage; uploads stay there too.
 export STORAGE_PROVIDER=local LOCAL_STORAGE_DIR=.data/storage
+# Its own build folder, so it can run next to the dev site.
+export NEXT_DIST_DIR=.next-prod-copy
 exec bun run dev --hostname 0.0.0.0 --port "${PORT:-3000}"
