@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>matécrew · Wi-Fi</title>
+<style>
+  :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
+  body { margin: 0; padding: 24px; max-width: 420px; margin-inline: auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  p { color: #777; margin: 0 0 24px; }
+  label { display: block; font-weight: 600; margin: 16px 0 6px; }
+  select, input { width: 100%; box-sizing: border-box; font-size: 1rem; padding: 12px; border-radius: 10px; border: 1px solid #8884; background: transparent; color: inherit; }
+  button { width: 100%; margin-top: 24px; padding: 14px; font-size: 1rem; font-weight: 600; border: 0; border-radius: 10px; background: #111; color: #fff; }
+  small { display: block; color: #777; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>Wi-Fi du bureau</h1>
+<p>Le terminal matécrew s'y connectera, puis affichera un code pour le lier à ton bureau.</p>
+<form method="post" action="/save">
+  <label for="ssid">Réseau</label>
+  <select id="ssid" name="ssid">{{networks}}</select>
+  <label for="other">Autre réseau</label>
+  <input id="other" name="other" autocomplete="off" autocapitalize="none" placeholder="Nom du réseau, s'il n'est pas dans la liste">
+  <label for="password">Mot de passe</label>
+  <input id="password" name="password" type="password" autocomplete="off">
+  <small>Il ne quitte pas ce téléphone et le terminal : rien ne passe par internet.</small>
+  <button type="submit">Connecter</button>
+</form>
+</body>
+</html>

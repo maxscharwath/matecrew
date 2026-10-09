@@ -19,6 +19,17 @@ fn main() {
 
     save(&out, "test", |d| ui::test_screen(d));
     save(&out, "setup", |d| ui::setup_screen(d, &setup));
+    save(&out, "link", |d| {
+        ui::link_screen(
+            d,
+            &ui::LinkInfo {
+                code: "QFH7-FXRT",
+                url: "matecrew.vercel.app/link",
+                url_with_code: "https://matecrew.vercel.app/link?code=QFH7-FXRT",
+            },
+        )
+    });
+    save(&out, "linked", |d| ui::linked_screen(d, "Lausanne", "Terminal Lausanne"));
     save(&out, "connecting", |d| ui::connecting_screen(d, "OWT-Office"));
     save(&out, "connected", |d| ui::connected_screen(d, "OWT-Office", "10.0.4.27"));
     save(&out, "error", |d| {

@@ -28,6 +28,9 @@ const PAPER: BinaryColor = BinaryColor::Off;
 const TITLE: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB24_tf>();
 const BODY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvR18_tf>();
 const BODY_BOLD: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB18_tf>();
+const CODE: FontRenderer = FontRenderer::new::<fonts::u8g2_font_inb42_mf>();
+
+pub mod form;
 
 /// What the setup screen shows so a phone can join the setup access point.
 pub struct SetupInfo<'a> {
@@ -70,6 +73,43 @@ where
 
     let ap = format!("Réseau {}, mot de passe {}", info.ap_ssid, info.ap_password);
     text(d, &BODY, &ap, 465)
+}
+
+/// Shown while the terminal waits for an admin to approve its code on the site.
+pub struct LinkInfo<'a> {
+    /// "ABCD-2345", as the server formatted it.
+    pub code: &'a str,
+    /// Short address to type, without the scheme: "matecrew.vercel.app/link".
+    pub url: &'a str,
+    /// Address with the code, encoded in the QR.
+    pub url_with_code: &'a str,
+}
+
+pub fn link_screen<D>(d: &mut D, info: &LinkInfo) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    header(d, "Lier l'appareil")?;
+    qr_code(d, info.url_with_code, Point::new(MARGIN, 110), 330)?;
+
+    let x = 400;
+    text_at(d, &BODY_BOLD, "Scanne ce code avec", Point::new(x, 140))?;
+    text_at(d, &BODY_BOLD, "un compte admin du bureau,", Point::new(x, 172))?;
+    text_at(d, &BODY, "ou ouvre", Point::new(x, 222))?;
+    text_at(d, &BODY_BOLD, info.url, Point::new(x, 254))?;
+    text_at(d, &BODY, "et saisis le code :", Point::new(x, 286))?;
+    text_at(d, &CODE, info.code, Point::new(x, 360))?;
+    text(d, &BODY, "Le code change toutes les 10 minutes.", 465)
+}
+
+pub fn linked_screen<D>(d: &mut D, office: &str, name: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    header(d, "matécrew")?;
+    text(d, &BODY_BOLD, &format!("Lié au bureau « {office} »"), 140)?;
+    text(d, &BODY, &format!("Cet appareil s'appelle « {name} ».", ), 180)?;
+    text(d, &BODY, "Ses touches se règlent sur le site, dans Admin > Appareils.", 220)
 }
 
 pub fn connecting_screen<D>(d: &mut D, ssid: &str) -> Result<(), D::Error>

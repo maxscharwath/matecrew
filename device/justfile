@@ -19,9 +19,17 @@ sim:
 test:
     cd ui && cargo test
 
-# Build, flash the XIAO over USB and open the serial monitor.
+# Build, flash the XIAO over USB and open the serial monitor. Talks to matecrew.vercel.app.
 flash:
     cd firmware && {{esp}} cargo run
+
+# Same, but the device talks to the site running on this Mac (`just api`).
+flash-local:
+    cd firmware && {{esp}} MATECREW_URL=http://$(ipconfig getifaddr en0):3000 cargo run
+
+# Forget the Wi-Fi, the token and the screen: the device starts setup again.
+forget:
+    espflash erase-region 0x9000 0x6000
 
 # Build the firmware without flashing.
 build:
