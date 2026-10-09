@@ -3,8 +3,6 @@ import createNextIntlPlugin from "next-intl/plugin";
 import createMDX from "@next/mdx";
 
 const nextConfig: NextConfig = {
-  // A second `next dev` needs its own build folder (scripts/dev-prod-copy.sh).
-  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Release-note articles live as .mdx under content/whats-new, so MDX has to
   // be a recognised page/module extension.
   pageExtensions: ["ts", "tsx", "js", "jsx", "md", "mdx"],
