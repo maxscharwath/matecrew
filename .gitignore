@@ -50,3 +50,6 @@ next-env.d.ts
 
 # Local Claude Code audit log: machine-generated, contains hostname and commands
 .claude/owt-audit.jsonl
+
+# Local copy of production's files (scripts/clone-prod-db.sh)
+.data/

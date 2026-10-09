@@ -14,6 +14,10 @@ function createProvider(): StorageProvider {
       const { VercelBlobProvider } = require("./vercel-blob") as typeof import("./vercel-blob");
       return new VercelBlobProvider();
     }
+    case "local": {
+      const { LocalProvider } = require("./local") as typeof import("./local");
+      return new LocalProvider();
+    }
     default:
       throw new Error(`Unknown STORAGE_PROVIDER: ${provider}`);
   }
