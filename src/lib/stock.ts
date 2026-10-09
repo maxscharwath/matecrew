@@ -43,14 +43,16 @@ export function stockDeltaOps(opts: {
     userId = null,
     client = prisma,
   } = opts;
+  // The stock row first: the movement's foreign key needs it, and an item
+  // nobody has stocked yet has none.
   return [
-    client.stockMovement.create({
-      data: { officeId, itemId, delta, reason, note, userId },
-    }),
     client.stock.upsert({
       where: { officeId_itemId: { officeId, itemId } },
       create: { officeId, itemId, currentQty: delta },
       update: { currentQty: { increment: delta } },
+    }),
+    client.stockMovement.create({
+      data: { officeId, itemId, delta, reason, note, userId },
     }),
   ];
 }
