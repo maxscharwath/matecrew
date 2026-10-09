@@ -42,6 +42,7 @@ const PRIMARY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB08_tf>()
 const SECONDARY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvR08_tf>();
 const MONO: FontRenderer = FontRenderer::new::<fonts::u8g2_font_profont10_tf>();
 const BIG_MONO: FontRenderer = FontRenderer::new::<fonts::u8g2_font_profont22_tf>();
+const BIG: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB14_tf>();
 
 const STATUS_H: i32 = 12;
 const CONTENT_TOP: i32 = 17;
@@ -171,6 +172,59 @@ where
     Ok(())
 }
 
+/// After a key press: the terminal waits for a badge on the reader, under the
+/// middle of the screen.
+pub fn badge_screen<D>(d: &mut D, key_label: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, key_label, Status::None)?;
+    icons::BADGE.draw(px, Point::new(W / 2 - icons::BADGE.width() / 2, CONTENT_TOP + 8))?;
+    centered(px, &PRIMARY, "Pose ton badge", W / 2, CONTENT_TOP + 50)?;
+    centered(px, &SECONDARY, "Une touche pour annuler", W / 2, CONTENT_TOP + 62)?;
+    tab(px, W / 2, "BADGE")
+}
+
+/// A badge was read: whose it is and what happens, until it is confirmed or cancelled.
+pub struct TakeInfo<'a> {
+    pub name: &'a str,
+    /// The key's label: "Prendre · Maté".
+    pub key_label: &'a str,
+    /// Seconds before the take counts without an answer.
+    pub seconds: u32,
+}
+
+pub fn take_screen<D>(d: &mut D, info: &TakeInfo) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::None)?;
+    icons::CHECK.draw(px, Point::new(W / 2 - icons::CHECK.width() / 2, CONTENT_TOP + 2))?;
+    let font = if text_width(&BIG, info.name) <= W - 8 { &BIG } else { &PRIMARY };
+    centered(px, font, info.name, W / 2, CONTENT_TOP + 40)?;
+    centered(px, &SECONDARY, info.key_label, W / 2, CONTENT_TOP + 53)?;
+    centered(px, &MONO, &format!("Validé dans {} s", info.seconds), W / 2, CONTENT_TOP + 66)?;
+    key_hints(px, "OK", "Annuler")
+}
+
+/// The badge is not assigned to anyone yet. The terminal reports it to the
+/// site, where an admin can give it to its owner.
+pub fn unknown_badge_screen<D>(d: &mut D, uid: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let px = &mut Pixelated::new(d, SCALE);
+    frame(px, "matécrew", Status::None)?;
+    icons::WARNING.draw(px, Point::new(W / 2 - icons::WARNING.width() / 2, CONTENT_TOP + 4))?;
+    centered(px, &PRIMARY, "Badge inconnu", W / 2, CONTENT_TOP + 34)?;
+    for (i, line) in wrap(&SECONDARY, "Un admin peut l'attribuer sur le site, dans Admin > Appareils.", W - 40).iter().enumerate() {
+        centered(px, &SECONDARY, line, W / 2, CONTENT_TOP + 48 + 10 * i as i32)?;
+    }
+    footer(px, uid)
+}
+
 /// Joining payload understood by iOS and Android cameras.
 pub fn wifi_qr_payload(ssid: &str, password: &str) -> String {
     fn escape(s: &str) -> String {
@@ -273,26 +327,32 @@ fn key_hints<D>(px: &mut D, left: &str, right: &str) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    for (x, label) in [(KEY_LEFT_X, left), (KEY_RIGHT_X, right)] {
-        let label_width = PRIMARY
-            .get_rendered_dimensions(label, Point::zero(), VerticalPosition::Baseline)
-            .ok()
-            .and_then(|d| d.bounding_box)
-            .map_or(30, |b| b.size.width as i32);
-        let tab_width = label_width + icons::ARROW_DOWN.width() + 10;
-        let tab = Rectangle::new(Point::new(x - tab_width / 2, H - 13), Size::new(tab_width as u32, 14));
-        RoundedRectangle::new(tab, CornerRadii::new(Size::new(3, 3)))
-            .into_styled(PrimitiveStyle::with_fill(INK))
-            .draw(px)?;
-        let text_x = tab.top_left.x + 4;
-        match PRIMARY.render(label, Point::new(text_x, H - 4), VerticalPosition::Baseline, FontColor::Transparent(PAPER), px) {
-            Err(u8g2_fonts::Error::DisplayError(e)) => return Err(e),
-            _ => {}
-        }
-        let arrow = Point::new(text_x + label_width + 3, H - 8);
-        icons::ARROW_DOWN.draw_colored(px, arrow, PAPER)?;
+    tab(px, KEY_LEFT_X, left)?;
+    tab(px, KEY_RIGHT_X, right)
+}
+
+/// Black tab centred on `x` against the bottom edge, its label pointing down.
+fn tab<D>(px: &mut D, x: i32, label: &str) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let label_width = PRIMARY
+        .get_rendered_dimensions(label, Point::zero(), VerticalPosition::Baseline)
+        .ok()
+        .and_then(|d| d.bounding_box)
+        .map_or(30, |b| b.size.width as i32);
+    let tab_width = label_width + icons::ARROW_DOWN.width() + 10;
+    let tab = Rectangle::new(Point::new(x - tab_width / 2, H - 13), Size::new(tab_width as u32, 14));
+    RoundedRectangle::new(tab, CornerRadii::new(Size::new(3, 3)))
+        .into_styled(PrimitiveStyle::with_fill(INK))
+        .draw(px)?;
+    let text_x = tab.top_left.x + 4;
+    if let Err(u8g2_fonts::Error::DisplayError(e)) =
+        PRIMARY.render(label, Point::new(text_x, H - 4), VerticalPosition::Baseline, FontColor::Transparent(PAPER), px)
+    {
+        return Err(e);
     }
-    Ok(())
+    icons::ARROW_DOWN.draw_colored(px, Point::new(text_x + label_width + 3, H - 8), PAPER)
 }
 
 /// A centred line of small text above the bottom edge.

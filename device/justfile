@@ -17,6 +17,7 @@ sim:
 
 # Unit tests that run on the Mac.
 test:
+    cd core && cargo test
     cd ui && cargo test
 
 # Build, flash the XIAO over USB and open the serial monitor. Talks to matecrew.vercel.app.

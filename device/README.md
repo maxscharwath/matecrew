@@ -67,6 +67,7 @@ Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `
 
 ```
 device/
+  core/      logique sans matériel : contrat de l'API, file de prises, trames PN532
   ui/        écrans, compilés pour le Mac et pour l'appareil
   sim/       rend tous les écrans en PNG sur le Mac, sans carte
   firmware/  firmware Rust (ESP-IDF) du XIAO ESP32-S3
@@ -84,5 +85,7 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 | `just api` | Lance le site en local ; l'appareil le vise si on compile avec `MATECREW_URL=http://<ip-du-mac>:3000` |
 
 On itère sur les écrans avec `just sim`. On ne flashe que pour tester le matériel, le Wi-Fi ou la liaison.
+
+Sans touches ni lecteur câblés, le moniteur série de `just flash` les remplace : `l` et `r` touchent une touche, `b 04A1B2C3D4E5F6` pose un badge, `s` lance une synchro.
 
 La première compilation du firmware prend 10 à 20 minutes : elle compile ESP-IDF. Les suivantes prennent quelques secondes.

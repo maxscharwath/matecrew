@@ -1,36 +1,62 @@
 //! matécrew badge terminal: Wi-Fi setup by QR, linking with a code shown on
-//! the panel, then periodic syncs that draw the screen the site renders.
+//! the panel, takes with a key and a badge, and syncs that send the takes and
+//! draw the screen the site renders.
 
 mod api;
+mod buzzer;
+mod console;
 mod display;
+mod keys;
+mod nfc;
 mod portal;
 mod store;
 mod wifi;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::{peripherals::Peripherals, reset},
     nvs::EspDefaultNvsPartition,
+    sys::{esp_random, settimeofday, timeval},
     wifi::{BlockingWifi, EspWifi},
+};
+use matecrew_core::{
+    contract::{DeviceState, Side, StatusReport, Take},
+    queue::Queue,
+    time,
 };
 use matecrew_ui as ui;
 use std::{
-    sync::mpsc,
+    sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use api::{Api, LinkPoll, ScreenUpdate, StatusReport};
+use api::{Api, LinkPoll, ScreenUpdate};
+use buzzer::{Beep, Buzzer};
 use display::{Pins, Screen};
+use nfc::Nfc;
 use store::Store;
 use wifi::Wifi;
 
 const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Failed connections in a row before the device forgets the network and opens setup again.
 const MAX_WIFI_FAILURES: u8 = 3;
-/// Until the touch keys and deep sleep are wired, the device stays awake and syncs on a timer.
+/// Until deep sleep is wired, the device stays awake and syncs on a timer.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
+/// How long the terminal waits for a badge after a key press.
+const BADGE_WAIT: Duration = Duration::from_secs(15);
+/// Seconds to cancel a take before it counts.
+const UNDO_SECONDS: u32 = 10;
+/// Before this (November 2023) the clock has not been set by a sync yet.
+const CLOCK_SET_AFTER: i64 = 1_700_000_000;
+
+/// What the keys, the console and the NFC reader report to the main loop.
+pub enum Event {
+    Key(Side),
+    Badge(String),
+    Sync,
+}
 
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -50,8 +76,22 @@ fn main() -> Result<()> {
         dc: p.pins.gpio4,
         rst: p.pins.gpio1,
     })?;
-    let mut wifi = BlockingWifi::wrap(EspWifi::new(p.modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
 
+    let (sender, events) = mpsc::channel();
+    if let Err(e) = console::watch(sender.clone()) {
+        log::warn!("no serial console commands: {e:#}");
+    }
+    keys::watch(p.pins.gpio5, p.pins.gpio8, sender)?;
+    let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, p.pins.gpio44)?;
+    let nfc = match Nfc::new(p.i2c0, p.pins.gpio41, p.pins.gpio42) {
+        Ok(nfc) => Some(nfc),
+        Err(e) => {
+            log::warn!("no NFC reader ({e:#}): badges come from the console, `b <uid>`");
+            None
+        }
+    };
+
+    let mut wifi = BlockingWifi::wrap(EspWifi::new(p.modem, sys_loop.clone(), Some(nvs))?, sys_loop)?;
     let Some(creds) = store.wifi()? else {
         setup_wifi(&mut wifi, &mut screen, &store)?;
         reset::restart();
@@ -78,20 +118,19 @@ fn main() -> Result<()> {
         Some(token) => token,
         None => link(&wifi, &mut screen, &store)?,
     };
-    let api = Api::with_token(token);
 
-    loop {
-        match sync(&api, &mut screen, &store) {
-            Ok(()) => {}
-            Err(e) if e.is::<api::Unauthorized>() => {
-                log::warn!("the site unlinked this device, linking again");
-                store.clear_token()?;
-                reset::restart();
-            }
-            Err(e) => log::error!("sync failed: {e:#}"),
-        }
-        thread::sleep(SYNC_EVERY);
+    Terminal {
+        api: Api::with_token(token),
+        state: store.state()?,
+        queue: store.queue()?,
+        wifi,
+        screen,
+        store,
+        buzzer,
+        nfc,
+        events,
     }
+    .run()
 }
 
 /// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
@@ -159,24 +198,205 @@ fn link(wifi: &Wifi, screen: &mut Screen, store: &Store) -> Result<String> {
     }
 }
 
-fn sync(api: &Api, screen: &mut Screen, store: &Store) -> Result<()> {
-    let state = api.state()?;
-    log::info!("{} ({}), {} badges", state.device.name, state.office.name, state.badges.len());
-    api.status(&StatusReport {
-        firmware_version: FIRMWARE_VERSION,
-        wifi_rssi: wifi::rssi(),
-        unknown_badges: Vec::new(),
-    })?;
+/// A linked terminal: waits for a key, takes a badge, and syncs.
+struct Terminal {
+    api: Api,
+    wifi: Wifi,
+    screen: Screen,
+    store: Store,
+    buzzer: Buzzer,
+    nfc: Option<Nfc>,
+    events: Receiver<Event>,
+    /// From the last sync, or from NVS until the first one succeeds.
+    state: Option<DeviceState>,
+    queue: Queue,
+}
 
-    let etag = store.screen_etag()?;
-    match api.screen(etag.as_deref())? {
-        ScreenUpdate::Unchanged => log::info!("screen unchanged"),
-        ScreenUpdate::Changed { bits, etag } => {
-            screen.show_bits(&bits)?;
-            if let Some(etag) = etag {
-                store.set_screen_etag(&etag)?;
+impl Terminal {
+    fn run(mut self) -> Result<()> {
+        // Keys touched during setup or linking do not count.
+        while self.events.try_recv().is_ok() {}
+        let mut redraw = false;
+        loop {
+            match self.sync(redraw) {
+                Ok(()) => {}
+                Err(e) if e.is::<api::Unauthorized>() => {
+                    log::warn!("the site unlinked this device, linking again");
+                    self.store.clear_token()?;
+                    reset::restart();
+                }
+                Err(e) => log::error!("sync failed: {e:#}"),
+            }
+            // After a take the main screen must come back, even if the site's is unchanged.
+            redraw = match self.wait(SYNC_EVERY)? {
+                Some(side) => {
+                    self.take(side)?;
+                    true
+                }
+                None => false,
+            };
+        }
+    }
+
+    /// Waits for a key, a sync request or the timeout.
+    fn wait(&mut self, timeout: Duration) -> Result<Option<Side>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Event::Key(side)) => return Ok(Some(side)),
+                Ok(Event::Sync) | Err(RecvTimeoutError::Timeout) => return Ok(None),
+                Ok(Event::Badge(uid)) => log::info!("badge {uid} with no key touched before: ignored"),
+                Err(RecvTimeoutError::Disconnected) => bail!("the keys stopped reporting"),
             }
         }
     }
-    Ok(())
+
+    /// Key, badge, a few seconds to cancel, then the take joins the queue.
+    fn take(&mut self, side: Side) -> Result<()> {
+        let Some(state) = self.state.clone().filter(|_| now() > CLOCK_SET_AFTER) else {
+            self.buzzer.beep(Beep::Error);
+            self.screen.show(|d| {
+                ui::error_screen(d, "Pas encore prêt", "Le terminal attend sa première synchro avec le site.")
+            })?;
+            thread::sleep(Duration::from_secs(4));
+            return Ok(());
+        };
+        let key = state.key(side);
+        self.buzzer.beep(Beep::Key);
+        self.screen.show(|d| ui::badge_screen(d, &key.label))?;
+
+        let Some(uid) = self.wait_badge()? else {
+            log::info!("no badge, take cancelled");
+            return Ok(());
+        };
+        let Some(name) = state.badge_holder(&uid) else {
+            log::info!("unknown badge {uid}");
+            self.buzzer.beep(Beep::Error);
+            self.queue.note_unknown_badge(&uid);
+            self.save_queue();
+            self.screen.show(|d| ui::unknown_badge_screen(d, &uid))?;
+            thread::sleep(Duration::from_secs(5));
+            return Ok(());
+        };
+
+        self.buzzer.beep(Beep::Accepted);
+        let info = ui::TakeInfo { name, key_label: &key.label, seconds: UNDO_SECONDS };
+        self.screen.show(|d| ui::take_screen(d, &info))?;
+        if !self.confirm()? {
+            log::info!("{name} cancelled");
+            self.buzzer.beep(Beep::Key);
+            return Ok(());
+        }
+
+        let take = Take {
+            id: format!("{:08x}{:08x}", unsafe { esp_random() }, unsafe { esp_random() }),
+            badge_uid: uid,
+            action: key.action,
+            item_id: key.item_id.clone(),
+            at: time::format_iso(now()),
+        };
+        log::info!("{name}: {} queued", key.label);
+        if let Some(dropped) = self.queue.push(take) {
+            log::warn!("queue full, oldest take {} dropped", dropped.id);
+        }
+        self.save_queue();
+        Ok(())
+    }
+
+    /// A badge from the reader or the console; `None` after a key press or the timeout.
+    fn wait_badge(&mut self) -> Result<Option<String>> {
+        let deadline = Instant::now() + BADGE_WAIT;
+        while Instant::now() < deadline {
+            match self.events.try_recv() {
+                Ok(Event::Badge(uid)) => return Ok(Some(uid)),
+                Ok(Event::Key(_)) => return Ok(None),
+                Ok(Event::Sync) | Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => bail!("the keys stopped reporting"),
+            }
+            if let Some(nfc) = &mut self.nfc {
+                match nfc.read_uid() {
+                    Ok(Some(uid)) => return Ok(Some(uid)),
+                    Ok(None) => {}
+                    Err(e) => log::warn!("NFC: {e:#}"),
+                }
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        Ok(None)
+    }
+
+    /// Left key confirms, right key cancels, silence confirms.
+    fn confirm(&mut self) -> Result<bool> {
+        let deadline = Instant::now() + Duration::from_secs(UNDO_SECONDS.into());
+        loop {
+            match self.events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Event::Key(Side::Left)) | Err(RecvTimeoutError::Timeout) => return Ok(true),
+                Ok(Event::Key(Side::Right)) => return Ok(false),
+                Ok(_) => {}
+                Err(RecvTimeoutError::Disconnected) => bail!("the keys stopped reporting"),
+            }
+        }
+    }
+
+    /// Sends the queued takes and unknown badges, then fetches the state and the screen.
+    fn sync(&mut self, redraw: bool) -> Result<()> {
+        wifi::reconnect(&mut self.wifi)?;
+        if !self.queue.takes().is_empty() {
+            let reply = self.api.takes(self.queue.takes())?;
+            for rejected in &reply.rejected {
+                log::warn!("take {} rejected: {}", rejected.id, rejected.reason);
+            }
+            self.queue.settle(&reply.done);
+            self.save_queue();
+            log::info!("{} takes sent, {} left", reply.done.len(), self.queue.takes().len());
+        }
+
+        let state = self.api.state()?;
+        set_clock(&state.server_time);
+        log::info!("{} ({}), {} badges", state.device.name, state.office.name, state.badges.len());
+        self.store.set_state(&state)?;
+        self.state = Some(state);
+
+        self.api.status(&StatusReport {
+            firmware_version: FIRMWARE_VERSION,
+            battery_mv: None,
+            wifi_rssi: wifi::rssi(),
+            unknown_badges: self.queue.unknown_badges(),
+        })?;
+        if !self.queue.unknown_badges().is_empty() {
+            self.queue.clear_unknown_badges();
+            self.save_queue();
+        }
+
+        let etag = if redraw { None } else { self.store.screen_etag()? };
+        match self.api.screen(etag.as_deref())? {
+            ScreenUpdate::Unchanged => log::info!("screen unchanged"),
+            ScreenUpdate::Changed { bits, etag } => {
+                self.screen.show_bits(&bits)?;
+                if let Some(etag) = etag {
+                    self.store.set_screen_etag(&etag)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn save_queue(&self) {
+        if let Err(e) = self.store.set_queue(&self.queue) {
+            log::error!("queue not saved: {e:#}");
+        }
+    }
+}
+
+fn now() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// The site's clock is the reference: takes are stamped with it.
+fn set_clock(server_time: &str) {
+    if let Some(seconds) = time::parse_iso(server_time) {
+        let tv = timeval { tv_sec: seconds as _, tv_usec: 0 };
+        // SAFETY: plain call with a valid timeval and no timezone.
+        unsafe { settimeofday(&tv, std::ptr::null()) };
+    }
 }

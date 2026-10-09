@@ -1,10 +1,13 @@
-//! Client for the site's device API. Shapes mirror src/lib/device/contract.ts.
+//! Client for the site's device API. The shapes are in `matecrew_core::contract`.
 
 use anyhow::{anyhow, Context, Result};
 use embedded_svc::http::{client::Client, Method};
 use embedded_svc::io::Write;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use matecrew_core::contract::{
+    DeviceState, LinkError, LinkGranted, LinkStart, StatusReport, Take, TakesRequest, TakesResponse,
+};
+use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
 
 pub const BASE_URL: &str = match option_env!("MATECREW_URL") {
@@ -12,69 +15,12 @@ pub const BASE_URL: &str = match option_env!("MATECREW_URL") {
     None => "https://matecrew.vercel.app",
 };
 
-#[derive(Deserialize)]
-pub struct LinkStart {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    pub verification_uri_complete: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-#[derive(Deserialize)]
-pub struct LinkGranted {
-    pub access_token: String,
-    pub device_name: String,
-    pub office_name: String,
-}
-
 pub enum LinkPoll {
     Granted(LinkGranted),
     Pending,
     SlowDown,
     /// Denied, expired or unknown: ask for a new code.
     Restart,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Read once the terminal works offline (keys, badges).
-pub struct DeviceState {
-    pub device: Named,
-    pub office: Office,
-    pub badges: Vec<BadgeEntry>,
-    pub sync_times: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-pub struct Named {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-pub struct Office {
-    pub name: String,
-    pub timezone: String,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-pub struct BadgeEntry {
-    pub uid: String,
-    pub name: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusReport<'a> {
-    pub firmware_version: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wifi_rssi: Option<i8>,
-    pub unknown_badges: Vec<String>,
 }
 
 pub enum ScreenUpdate {
@@ -124,10 +70,6 @@ impl Api {
         if reply.status == 200 {
             return Ok(LinkPoll::Granted(serde_json::from_slice(&reply.body)?));
         }
-        #[derive(Deserialize)]
-        struct LinkError {
-            error: String,
-        }
         let error: LinkError = serde_json::from_slice(&reply.body)
             .with_context(|| format!("link poll answered {}", reply.status))?;
         Ok(match error.error.as_str() {
@@ -139,6 +81,10 @@ impl Api {
 
     pub fn state(&self) -> Result<DeviceState> {
         expect_json(self.send(Method::Get, "/api/device/state", None::<&()>, None)?)
+    }
+
+    pub fn takes(&self, takes: &[Take]) -> Result<TakesResponse> {
+        expect_json(self.send(Method::Post, "/api/device/takes", Some(&TakesRequest { takes }), None)?)
     }
 
     pub fn status(&self, status: &StatusReport) -> Result<()> {

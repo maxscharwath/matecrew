@@ -22,6 +22,16 @@ pub fn connect(wifi: &mut Wifi, creds: &WifiCredentials) -> Result<()> {
     Ok(())
 }
 
+/// Joins again if the access point dropped the connection since the last sync.
+pub fn reconnect(wifi: &mut Wifi) -> Result<()> {
+    if !wifi.is_connected()? {
+        log::info!("Wi-Fi lost, joining again");
+        wifi.connect()?;
+        wifi.wait_netif_up()?;
+    }
+    Ok(())
+}
+
 /// Wi-Fi MAC as "AC:A7:04:2B:50:E4": the hardware id shown on the link page.
 pub fn hardware_id(wifi: &Wifi) -> Result<String> {
     let mac = wifi.wifi().sta_netif().get_mac()?;

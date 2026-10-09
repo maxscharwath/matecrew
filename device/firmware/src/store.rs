@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
+use matecrew_core::{contract::DeviceState, queue::Queue};
 
 pub struct WifiCredentials {
     pub ssid: String,
@@ -22,6 +23,12 @@ impl Store {
 
     fn set(&self, key: &str, value: &str) -> Result<()> {
         Ok(self.0.set_str(key, value)?)
+    }
+
+    fn get_blob(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let Some(len) = self.0.blob_len(key)? else { return Ok(None) };
+        let mut buf = vec![0u8; len];
+        Ok(self.0.get_blob(key, &mut buf)?.map(<[u8]>::to_vec))
     }
 
     pub fn wifi(&self) -> Result<Option<WifiCredentials>> {
@@ -62,11 +69,30 @@ impl Store {
         self.set("token", token)
     }
 
-    /// Forgets the token and the screen it fetched: the device links again.
+    /// Forgets the token and everything that came with it: the device links again.
     pub fn clear_token(&self) -> Result<()> {
-        self.0.remove("token")?;
-        self.0.remove("etag")?;
+        for key in ["token", "etag", "state", "queue"] {
+            self.0.remove(key)?;
+        }
         Ok(())
+    }
+
+    /// Badges, keys and items from the last sync, for badging while offline.
+    pub fn state(&self) -> Result<Option<DeviceState>> {
+        Ok(self.get_blob("state")?.and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+    }
+
+    pub fn set_state(&self, state: &DeviceState) -> Result<()> {
+        Ok(self.0.set_blob("state", &serde_json::to_vec(state)?)?)
+    }
+
+    /// Takes the site has not acknowledged yet, and badges it has not seen.
+    pub fn queue(&self) -> Result<Queue> {
+        Ok(self.get_blob("queue")?.map(|bytes| Queue::from_bytes(&bytes)).unwrap_or_default())
+    }
+
+    pub fn set_queue(&self, queue: &Queue) -> Result<()> {
+        Ok(self.0.set_blob("queue", &queue.to_bytes())?)
     }
 
     /// ETag of the screen bitmap on the panel, so an unchanged screen is not redrawn.

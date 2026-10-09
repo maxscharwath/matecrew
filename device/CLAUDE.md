@@ -17,6 +17,7 @@ Une zone badge NFC est au centre. On badge avec le badge de bureau (MIFARE DESFi
 Ce dossier `device/` vit dans le dépôt de l'app web matécrew.
 
 - `device/README.md` : fonctionnalités, mise en service, sécurité de la liaison, commandes `just`.
+- `device/core/` : la logique sans matériel (contrat de l'API, file de prises, trames PN532, commandes de la console série), testée sur le Mac.
 - `device/ui/` : les écrans (crate Rust), dessinés sur n'importe quelle cible 800 × 480 noir et blanc.
 - `device/sim/` : rend les écrans en PNG sur le Mac (`just sim`), sans carte.
 - `device/firmware/` : firmware Rust sur ESP-IDF (`esp-idf-svc`, `epd-waveshare`), toolchain `esp` via espup.

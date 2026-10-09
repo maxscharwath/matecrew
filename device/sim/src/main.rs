@@ -32,6 +32,11 @@ fn main() {
     save(&out, "linked", |d| ui::linked_screen(d, "Lausanne", "Terminal Lausanne"));
     save(&out, "connecting", |d| ui::connecting_screen(d, "OWT-Office"));
     save(&out, "connected", |d| ui::connected_screen(d, "OWT-Office", "10.0.4.27"));
+    save(&out, "badge", |d| ui::badge_screen(d, "Prendre · Maté Classic"));
+    save(&out, "take", |d| {
+        ui::take_screen(d, &ui::TakeInfo { name: "Alex Martin", key_label: "Prendre · Maté Classic", seconds: 10 })
+    });
+    save(&out, "unknown-badge", |d| ui::unknown_badge_screen(d, "04A1B2C3D4E5F6"));
     save(&out, "error", |d| {
         ui::error_screen(d, "Wi-Fi introuvable", "Le réseau « OWT-Office » ne répond pas.")
     });
