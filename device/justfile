@@ -1,0 +1,32 @@
+# Run from device/. `just --list` shows every recipe.
+
+esp := ". ~/export-esp.sh &&"
+
+default:
+    @just --list
+
+# Install the ESP32-S3 Rust toolchain and the flashing tools.
+setup:
+    brew install espflash just
+    cargo install espup ldproxy cargo-watch --locked
+    espup install --targets esp32s3
+
+# Redraw every screen to sim/out/*.png on each save.
+sim:
+    cd sim && cargo watch -q -w ../ui -w src -x run
+
+# Unit tests that run on the Mac.
+test:
+    cd ui && cargo test
+
+# Build, flash the XIAO over USB and open the serial monitor.
+flash:
+    cd firmware && {{esp}} cargo run
+
+# Build the firmware without flashing.
+build:
+    cd firmware && {{esp}} cargo build
+
+# Run the matécrew site locally for the device to talk to.
+api:
+    cd .. && bun dev --hostname 0.0.0.0

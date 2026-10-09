@@ -1,0 +1,26 @@
+[package]
+name = "matecrew-device"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "matecrew-device"
+harness = false
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+esp-idf-svc = "0.53"
+embedded-graphics = "0.8"
+epd-waveshare = "0.6"
+matecrew-ui = { path = "../ui" }
+
+[build-dependencies]
+embuild = "0.33"

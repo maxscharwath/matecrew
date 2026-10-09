@@ -16,7 +16,10 @@ Une zone badge NFC est au centre. On badge avec le badge de bureau (MIFARE DESFi
 
 Ce dossier `device/` vit dans le dépôt de l'app web matécrew.
 
-- `device/firmware/` : projet PlatformIO du firmware, à créer.
+- `device/README.md` : fonctionnalités, mise en service, sécurité de la liaison, commandes `just`.
+- `device/ui/` : les écrans (crate Rust), dessinés sur n'importe quelle cible 800 × 480 noir et blanc.
+- `device/sim/` : rend les écrans en PNG sur le Mac (`just sim`), sans carte.
+- `device/firmware/` : firmware Rust sur ESP-IDF (`esp-idf-svc`, `epd-waveshare`), toolchain `esp` via espup.
 - `device/hardware/` : modèle OpenSCAD du boîtier (`boitier-matecrew.scad`, source de vérité) et ses STL exportés.
 - Le reste du dépôt est l'app web (Next.js App Router, Prisma, PostgreSQL, Bun ; voir le `README.md` à la racine).
   Pour l'API de l'appareil, les modèles utiles sont dans `prisma/schema.prisma` : `Office`, `Item`, `Stock`, `StockMovement`, `ConsumptionEntry`, `Membership`, `User`.
@@ -25,7 +28,7 @@ Ce dossier `device/` vit dans le dépôt de l'app web matécrew.
 ## Matériel et brochage
 
 Le brochage est fixé par le câblage : ne pas le changer sans raison.
-Dans le code, utiliser les macros `D0`…`D10` du variant Arduino `XIAO_ESP32S3` plutôt que des numéros de GPIO en dur.
+Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO ESP32-S3 : D0=1, D1=2, D2=3, D3=4, D4=5, D5=6, D6=43, D7=44, D8=7, D9=8, D10=9.
 
 | Fonction | Broche XIAO ESP32-S3 | Remarque |
 |---|---|---|
@@ -100,13 +103,11 @@ Avant de coder le client, proposer un contrat JSON qui s'appuie sur le schéma P
 
 ## Outils
 
-- PlatformIO, `board = seeed_xiao_esp32s3`, framework Arduino. Activer l'USB CDC au démarrage pour le moniteur série.
-- Écran : bibliothèque Seeed GFX configurée pour la « ePaper Driver Board for XIAO » et la dalle 7,5" noir et blanc, ou GxEPD2 si c'est plus simple. À valider sur le matériel.
-- PN532 : Adafruit PN532 en I2C.
-- Programmation : USB-C du XIAO branché sur le Mac (`/dev/cu.usbmodem…`).
-  - Si le téléversement échoue : maintenir B, appuyer sur R, relâcher B, puis relancer.
-  - En deep sleep, le port USB disparaît : réveiller avec une touche ou passer par B + R. En développement, attendre quelques secondes au démarrage avant de dormir.
-- Pendant le banc d'essai, la batterie n'est pas branchée : l'USB alimente tout.
+- Commandes depuis `device/` : `just sim`, `just test`, `just flash`, `just build`, `just api` (voir le `README.md`).
+- Itérer sur les écrans avec `just sim`, ne flasher que pour le matériel, le Wi-Fi ou la liaison.
+- Le XIAO se flashe par son USB-C (`/dev/cu.usbmodem…`) sans toucher aux boutons ; `espflash` gère le reset USB.
+- En deep sleep, le port USB disparaît : réveiller avec une touche, ou maintenir B, appuyer sur R, relâcher B.
+- Les binaires sortent dans le `target-dir` partagé de Cargo (`~/.cargo/shared-target`), pas dans `device/firmware/target`.
 
 ## Ordre de travail
 

@@ -1,0 +1,79 @@
+# Terminal matécrew
+
+Un écran e-ink sur batterie, posé au bureau. Il affiche le stock, on badge pour prendre un maté, et tout le reste se règle sur le site matécrew.
+
+Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifact/9b5e65c1-9bca-4c9a-aeb7-994a2acc41eb).
+
+## Fonctionnalités
+
+### Au quotidien
+
+- **Écran** : le stock de chaque article, et le libellé des deux actions juste au-dessus de leur touche.
+- **Prise** : on touche une action, on badge, l'écran confirme avec un bip. On a 10 s pour annuler.
+- **Badge inconnu** : l'écran le signale et le badge apparaît sur le site, où un admin l'attribue à un membre. Personne n'a besoin de connaître un UID.
+- **Hors ligne** : les prises restent en mémoire et partent à la synchro suivante.
+- **Batterie** : le niveau remonte sur le site ; alerte à l'écran et sur le site sous 3,5 V.
+- **Sans interrupteur** : gestes à deux touches pour éteindre, rallumer et redémarrer (détail dans `CLAUDE.md`).
+
+### Mise en service
+
+Deux étapes, rien à saisir à part le mot de passe du Wi-Fi.
+
+1. **Wi-Fi.** Au premier démarrage, l'écran affiche un QR. Le téléphone qui le scanne rejoint un point d'accès protégé par un mot de passe aléatoire, et une page s'ouvre : on choisit le Wi-Fi du bureau et on tape son mot de passe.
+2. **Liaison.** L'appareil se connecte et affiche un code court, par exemple `MATE-4F2K`, avec un QR vers `/link?code=MATE-4F2K`. Un admin du bureau ouvre le lien, choisit le bureau, nomme l'appareil et valide. L'appareil reçoit son jeton tout seul, puis affiche « Lié au bureau de Lausanne ».
+
+### Sur le site, dans Admin > Appareils
+
+- Liste des appareils : bureau, dernière synchro, batterie, version du firmware.
+- Réglages par appareil : article et sens de chaque touche (prendre, rendre), horaires de synchro, volume du bip.
+- Badges en attente d'attribution.
+- Mise à jour du firmware, appliquée à la synchro suivante.
+- Révocation : l'appareil perd son accès et revient à l'étape de liaison.
+
+## Sécurité de la liaison
+
+Le principe est celui du « device authorization grant » (RFC 8628), le même que pour se connecter à une app de TV.
+
+- L'appareil demande une liaison (`POST /api/device/link`). Le serveur lui renvoie un `device_code` secret de 256 bits, qui ne quitte jamais l'appareil, et un `user_code` court, valable 10 minutes.
+- Seul le `user_code` est affiché. Il ne sert à rien sans la validation d'un admin connecté au site. Sa saisie est limitée en nombre d'essais.
+- L'appareil interroge `POST /api/device/link/token` avec son `device_code`. Après validation, il reçoit son jeton une seule fois, en HTTPS.
+- Le jeton fait 256 bits aléatoires. Le serveur n'en garde que l'empreinte SHA-256 ; l'appareil le garde en NVS. Il n'est jamais affiché ni tapé, il est propre à un appareil et à son bureau, et on peut le révoquer depuis le site.
+- Tout passe en HTTPS, et le firmware vérifie le certificat du serveur avec le bundle de certificats d'ESP-IDF.
+- Le mot de passe du Wi-Fi du bureau ne circule qu'entre le téléphone et l'appareil, sur le point d'accès WPA2 dont le mot de passe aléatoire est dans le QR.
+- La page de validation montre l'identifiant matériel de l'appareil et l'heure de la demande. L'appareil affiche ensuite le bureau auquel il est lié : on voit tout de suite si on a validé le bon.
+
+## API de l'appareil
+
+| Méthode | Route | Authentification | Rôle |
+|---|---|---|---|
+| `POST` | `/api/device/link` | aucune | Démarrer une liaison |
+| `POST` | `/api/device/link/token` | `device_code` | Attendre la validation, recevoir le jeton |
+| `GET` | `/api/device/state` | jeton | Stock, libellés, badges, réglages, firmware attendu |
+| `POST` | `/api/device/takes` | jeton | Envoyer les prises en attente (idempotent) |
+| `POST` | `/api/device/status` | jeton | Batterie, version, signal Wi-Fi, badges inconnus |
+
+Le contrat est écrit une seule fois en Zod côté app. Les types Rust du firmware en sont générés, et la CI échoue si les deux divergent.
+
+## Développement
+
+```
+device/
+  ui/        écrans, compilés pour le Mac et pour l'appareil
+  sim/       rend tous les écrans en PNG sur le Mac, sans carte
+  firmware/  firmware Rust (ESP-IDF) du XIAO ESP32-S3
+  hardware/  boîtier OpenSCAD et STL
+```
+
+Les commandes passent par [`just`](https://github.com/casey/just), depuis `device/` :
+
+| Commande | Effet |
+|---|---|
+| `just setup` | Installe la toolchain Rust de l'ESP32-S3, `espflash`, `ldproxy` et `cargo-watch` |
+| `just sim` | Redessine les écrans dans `sim/out/` à chaque sauvegarde, en une seconde environ |
+| `just test` | Tests des écrans et de la logique sur le Mac |
+| `just flash` | Compile, flashe le XIAO branché en USB et ouvre le moniteur série |
+| `just api` | Lance le site en local ; l'appareil le vise si on compile avec `MATECREW_URL=http://<ip-du-mac>:3000` |
+
+On itère sur les écrans avec `just sim`. On ne flashe que pour tester le matériel, le Wi-Fi ou la liaison.
+
+La première compilation du firmware prend 10 à 20 minutes : elle compile ESP-IDF. Les suivantes prennent quelques secondes.
