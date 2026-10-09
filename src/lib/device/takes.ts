@@ -39,6 +39,7 @@ export async function applyTakes(
           ...outcome,
         },
       });
+      await markBadgeSeen(device.officeId, take.badgeUid, new Date(take.at));
       if (outcome.rejectedReason === null && take.itemId) touchedItems.add(take.itemId);
       if (outcome.rejectedReason) rejected.push({ id: take.id, reason: outcome.rejectedReason });
     } else if (known.rejectedReason) {
@@ -103,6 +104,13 @@ async function applyTake(device: AuthenticatedDevice, take: DeviceTake): Promise
 }
 
 /** Remembers badges a terminal saw so an admin can give them to members. */
+/** A known badge was tapped: its last pass moves forward, never back (takes can arrive late). */
+async function markBadgeSeen(officeId: string, rawUid: string, at: Date) {
+  const uid = normalizeBadgeUid(rawUid);
+  if (!uid) return;
+  await prisma.badge.updateMany({ where: { officeId, uid, lastSeenAt: { lt: at } }, data: { lastSeenAt: at } });
+}
+
 export async function recordBadges(officeId: string, uids: string[]) {
   const now = new Date();
   for (const uid of uids) {

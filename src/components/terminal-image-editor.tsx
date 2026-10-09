@@ -13,9 +13,12 @@ import {
   terminalImageFromPhoto,
 } from "@/app/org/[officeId]/admin/items/actions";
 
-/** Side of the picture on the terminal's 200 x 120 canvas; the panel shows it 4 times bigger. */
-const SIZE = 24;
-const CELL = 12;
+/** Side of the picture in panel pixels: what the terminal shows, pixel for pixel. */
+const SIZE = 96;
+const CELL = 4;
+/** Lines every 4 pixels: the grid of the 200 x 120 canvas the screens are laid out on. */
+const GUIDE = 4;
+const BRUSHES = [1, 2, 4];
 const PAPER = "#ECEAE3";
 const INK = "#1D1D1F";
 
@@ -55,8 +58,8 @@ function Picture({
       if (ink) context.fillRect((i % SIZE) * scale, Math.floor(i / SIZE) * scale, scale, scale);
     });
     if (grid) {
-      context.strokeStyle = "rgb(0 0 0 / 0.08)";
-      for (let k = 1; k < SIZE; k++) {
+      context.strokeStyle = "rgb(0 0 0 / 0.1)";
+      for (let k = GUIDE; k < SIZE; k += GUIDE) {
         context.beginPath();
         context.moveTo(k * scale + 0.5, 0);
         context.lineTo(k * scale + 0.5, SIZE * scale);
@@ -85,6 +88,8 @@ export function TerminalImageEditor({
   const [open, setOpen] = useState(false);
   const [pixels, setPixels] = useState(() => unpack(item.terminalBits));
   const [dither, setDither] = useState(false);
+  const [brush, setBrush] = useState(2);
+  const last = useRef<{ x: number; y: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const painting = useRef<boolean | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -94,11 +99,28 @@ export function TerminalImageEditor({
     const x = Math.floor(((event.clientX - box.left) / box.width) * SIZE);
     const y = Math.floor(((event.clientY - box.top) / box.height) * SIZE);
     if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
-    const i = y * SIZE + x;
     // The first pixel decides: on an empty one the stroke draws, on an inked one it erases.
-    painting.current ??= !pixels[i];
+    painting.current ??= !pixels[y * SIZE + x];
     const ink = painting.current;
-    if (pixels[i] !== ink) setPixels((current) => current.map((p, k) => (k === i ? ink : p)));
+    // Every point since the last one, so a quick stroke has no gaps.
+    const from = last.current ?? { x, y };
+    const steps = Math.max(Math.abs(x - from.x), Math.abs(y - from.y), 1);
+    const touched = new Set<number>();
+    for (let s = 0; s <= steps; s++) {
+      const cx = Math.round(from.x + ((x - from.x) * s) / steps);
+      const cy = Math.round(from.y + ((y - from.y) * s) / steps);
+      const top = cy - Math.floor((brush - 1) / 2);
+      const left = cx - Math.floor((brush - 1) / 2);
+      for (let dy = 0; dy < brush; dy++) {
+        for (let dx = 0; dx < brush; dx++) {
+          const px = left + dx;
+          const py = top + dy;
+          if (px >= 0 && py >= 0 && px < SIZE && py < SIZE) touched.add(py * SIZE + px);
+        }
+      }
+    }
+    last.current = { x, y };
+    setPixels((current) => current.map((p, k) => (touched.has(k) ? ink : p)));
   };
 
   const load = (result: { success: true; bits: string } | { success: false; error: string }) => {
@@ -129,7 +151,7 @@ export function TerminalImageEditor({
           aria-label={t("title")}
           className="shrink-0 overflow-hidden rounded-md border transition-colors hover:border-foreground/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Picture pixels={unpack(item.terminalBits)} scale={2} className="block size-12 [image-rendering:pixelated]" />
+          <Picture pixels={unpack(item.terminalBits)} scale={1} className="block size-12" />
         </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
@@ -147,6 +169,7 @@ export function TerminalImageEditor({
             onPointerDown={(event) => {
               event.currentTarget.setPointerCapture(event.pointerId);
               painting.current = null;
+              last.current = null;
               paint(event);
             }}
             onPointerMove={(event) => {
@@ -154,12 +177,27 @@ export function TerminalImageEditor({
             }}
             onPointerUp={() => {
               painting.current = null;
+              last.current = null;
             }}
           />
           <div className="flex min-w-40 flex-1 flex-col gap-3 text-sm">
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">{t("onTerminal")}</div>
-              <Picture pixels={pixels} scale={4} className="rounded border [image-rendering:pixelated]" />
+              <Picture pixels={pixels} scale={1} className="rounded border" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="mr-1 text-xs text-muted-foreground">{t("brush")}</span>
+              {BRUSHES.map((size) => (
+                <Button
+                  key={size}
+                  size="xs"
+                  variant={brush === size ? "default" : "outline"}
+                  onClick={() => setBrush(size)}
+                  aria-label={t("brushSize", { size })}
+                >
+                  {size}
+                </Button>
+              ))}
             </div>
             <input
               ref={fileInput}

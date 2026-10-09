@@ -25,6 +25,7 @@ use esp_idf_svc::{
     wifi::{BlockingWifi, EspWifi},
 };
 use matecrew_core::{
+    claim::{self, Claim},
     contract::{DeviceState, StatusReport},
     flow::{Context, Effect, Event, Flow, Screen},
     queue::Queue,
@@ -153,9 +154,12 @@ fn app() -> Result<()> {
         None => link(&wifi, &mut screen, &store, &site)?,
     };
 
+    let claim_key = claim::key(&token);
     let api = Api::with_token(&site, token);
     remote::poll_commands(api.clone(), sender.clone())?;
     Terminal {
+        site: site.clone(),
+        claim_key,
         mirror: remote::Mirror::start(api.clone())?,
         api,
         state: store.state()?,
@@ -270,6 +274,9 @@ fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<St
 /// A linked terminal: runs the take flow on the inputs, and syncs.
 struct Terminal {
     api: Api,
+    /// For the links that claim an unknown badge: the site and the token's hash.
+    site: String,
+    claim_key: [u8; 32],
     mirror: remote::Mirror,
     wifi: Wifi,
     screen: Panel,
@@ -362,6 +369,7 @@ impl Terminal {
             unix: Some(now()).filter(|t| *t > CLOCK_SET_AFTER),
             state: self.state.as_ref(),
             random: (u64::from(unsafe { esp_random() }) << 32) | u64::from(unsafe { esp_random() }),
+            claim: self.state.as_ref().map(|state| Claim { site: &self.site, device_id: &state.device.id, key: &self.claim_key }),
         };
         for effect in self.flow.handle(event, cx) {
             match effect {

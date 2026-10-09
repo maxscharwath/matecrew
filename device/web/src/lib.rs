@@ -12,6 +12,7 @@
 
 use matecrew_ui::frame::{Frame, BYTES};
 use matecrew_core::{
+    claim::Claim,
     contract::DeviceState,
     flow::{Context, Event, Flow, Screen},
 };
@@ -41,6 +42,27 @@ pub struct Input {
     pub now_ms: u64,
     pub unix: Option<i64>,
     pub random: u64,
+    /// To sign the link that claims an unknown badge.
+    #[serde(default)]
+    pub claim: Option<ClaimInput>,
+}
+
+/// The site, and the SHA-256 of the token in hex, as the page computes it.
+#[derive(Deserialize)]
+pub struct ClaimInput {
+    pub site: String,
+    pub key: String,
+}
+
+fn hex32(hex: &str) -> Option<[u8; 32]> {
+    let mut out = [0u8; 32];
+    if hex.len() != 64 {
+        return None;
+    }
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
 }
 
 pub fn draw(frame: &mut Frame, view: &View) {
@@ -115,8 +137,13 @@ pub unsafe extern "C" fn set_state(ptr: *mut u8, len: usize) -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn handle(ptr: *mut u8, len: usize) -> i32 {
     let Some(input) = take_json::<Input>(ptr, len) else { return -1 };
+    let key = input.claim.as_ref().and_then(|c| hex32(&c.key));
     let effects = STATE.with_borrow(|state| {
-        let cx = Context { now_ms: input.now_ms, unix: input.unix, state: state.as_ref(), random: input.random };
+        let claim = match (&input.claim, &key, state) {
+            (Some(c), Some(key), Some(state)) => Some(Claim { site: &c.site, device_id: &state.device.id, key }),
+            _ => None,
+        };
+        let cx = Context { now_ms: input.now_ms, unix: input.unix, state: state.as_ref(), random: input.random, claim };
         FLOW.with_borrow_mut(|flow| flow.handle(input.event, cx))
     });
     let json = serde_json::to_vec(&effects).unwrap_or_default();

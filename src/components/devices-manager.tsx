@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import Link from "next/link";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BatteryLow, BatteryMedium, ChevronDown, Cpu, Nfc, Plus } from "lucide-react";
+import { BatteryLow, BatteryMedium, Cpu, Nfc, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,15 @@ interface DeviceRow {
   frameHash: string | null;
 }
 
-type BadgeRow = { id: string; uid: string; lastSeenAt: string; user: { id: string; name: string } | null };
+type BadgeRow = {
+  id: string;
+  uid: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Takes the terminals recorded with it. */
+  takes: number;
+  user: { id: string; name: string } | null;
+};
 
 interface Props {
   readonly officeId: string;
@@ -140,14 +148,19 @@ function DeviceTile({ officeId, device }: { officeId: string; device: DeviceRow 
   );
 }
 
-/** Badges the terminals read that nobody owns yet; the assigned ones folded away. */
+/** Value of the holder select that means "nobody". */
+const NOBODY = "__nobody";
+
+/**
+ * Every badge a terminal has read, last pass first. Members link their own
+ * badge by scanning the QR the terminal shows for an unknown one; the select
+ * is for an admin to assign, reassign or remove one.
+ */
 function Badges({ officeId, badges, members }: { officeId: string; badges: BadgeRow[]; members: Props["members"] }) {
   const t = useTranslations("devices");
   const format = useFormatter();
+  const now = useNow({ updateInterval: 60_000 });
   const [pending, startTransition] = useTransition();
-  const [showAssigned, setShowAssigned] = useState(false);
-  const unassigned = badges.filter((b) => !b.user);
-  const assigned = badges.filter((b) => b.user);
 
   const assign = (badgeId: string, userId: string | null) =>
     startTransition(async () => {
@@ -156,31 +169,44 @@ function Badges({ officeId, badges, members }: { officeId: string; badges: Badge
       else toast.error(result.error);
     });
 
-  if (badges.length === 0) return null;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Nfc className="size-5" /> {t("badgesTitle")}
         </CardTitle>
-        {unassigned.length > 0 && <CardDescription>{t("badgesSubtitle")}</CardDescription>}
+        <CardDescription>{t("badgesSubtitle")}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {unassigned.length > 0 && (
+      <CardContent>
+        {badges.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("badgesEmpty")}</p>
+        ) : (
           <ul className="divide-y">
-            {unassigned.map((badge) => (
-              <li key={badge.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                <div>
-                  <div className="font-mono text-sm">{badge.uid}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {t("badgeSeen", { when: format.dateTime(new Date(badge.lastSeenAt), { dateStyle: "short", timeStyle: "short" }) })}
+            {badges.map((badge) => (
+              <li key={badge.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className={cn("font-medium", !badge.user && "text-muted-foreground")}>
+                    {badge.user?.name ?? t("badgeUnassigned")}
                   </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t("badgeLastPass", { when: format.relativeTime(new Date(badge.lastSeenAt), now) })}
+                    {" · "}
+                    {t("badgeTakes", { count: badge.takes })}
+                    {" · "}
+                    {t("badgeFirstSeen", { when: format.dateTime(new Date(badge.firstSeenAt), { dateStyle: "short" }) })}
+                  </div>
+                  <div className="font-mono text-[11px] text-muted-foreground">{badge.uid}</div>
                 </div>
-                <Select disabled={pending} onValueChange={(userId) => assign(badge.id, userId)}>
-                  <SelectTrigger className="w-56">
+                <Select
+                  disabled={pending}
+                  value={badge.user?.id ?? NOBODY}
+                  onValueChange={(value) => assign(badge.id, value === NOBODY ? null : value)}
+                >
+                  <SelectTrigger className="w-48">
                     <SelectValue placeholder={t("assignTo")} />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={NOBODY}>{t("badgeUnassigned")}</SelectItem>
                     {members.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.name}
@@ -191,29 +217,6 @@ function Badges({ officeId, badges, members }: { officeId: string; badges: Badge
               </li>
             ))}
           </ul>
-        )}
-        {assigned.length > 0 && (
-          <>
-            <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => setShowAssigned(!showAssigned)}>
-              <ChevronDown className={cn("transition-transform", showAssigned && "rotate-180")} />
-              {t("assignedBadges", { count: assigned.length })}
-            </Button>
-            {showAssigned && (
-              <ul className="divide-y">
-                {assigned.map((badge) => (
-                  <li key={badge.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                    <span>{badge.user?.name}</span>
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">{badge.uid}</span>
-                      <Button size="sm" variant="ghost" disabled={pending} onClick={() => assign(badge.id, null)}>
-                        {t("unassign")}
-                      </Button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
         )}
       </CardContent>
     </Card>

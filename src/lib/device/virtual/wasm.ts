@@ -16,7 +16,7 @@ export type FlowScreen =
   | { type: "leave"; name: string }
   | { type: "taken"; name: string; item: string; image: string }
   | { type: "summary"; name: string; today: number; week: number; month: number }
-  | { type: "unknownBadge"; uid: string }
+  | { type: "unknownBadge"; uid: string; claimUrl: string | null }
   | { type: "notReady" }
   | { type: "noItems" };
 
@@ -74,7 +74,16 @@ export class DeviceWasm {
     if (this.call("set_state", state) !== 0) throw new Error("set_state: the state does not match device/core");
   }
 
-  handle(event: FlowEvent, context: { nowMs: number; unix: number | null; random: number }): Effect[] {
+  handle(
+    event: FlowEvent,
+    context: {
+      nowMs: number;
+      unix: number | null;
+      random: number;
+      /** The site, and the SHA-256 of the token in hex: signs the link that claims an unknown badge. */
+      claim: { site: string; key: string } | null;
+    },
+  ): Effect[] {
     const len = this.call("handle", { event, ...context });
     if (len < 0) throw new Error(`handle: bad event ${JSON.stringify(event)}`);
     const bytes = new Uint8Array(this.exports.memory.buffer, this.exports.output_ptr(), len);

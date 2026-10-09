@@ -14,7 +14,7 @@ export default async function DevicesPage({ params }: Props) {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations("devices");
 
-  const [devices, badges, members] = await Promise.all([
+  const [devices, badges, members, takesByBadge] = await Promise.all([
     prisma.device.findMany({
       where: { officeId },
       orderBy: { createdAt: "asc" },
@@ -30,15 +30,21 @@ export default async function DevicesPage({ params }: Props) {
     }),
     prisma.badge.findMany({
       where: { officeId },
-      orderBy: [{ userId: { sort: "asc", nulls: "first" } }, { lastSeenAt: "desc" }],
-      select: { id: true, uid: true, lastSeenAt: true, user: { select: { id: true, name: true } } },
+      orderBy: { lastSeenAt: "desc" },
+      select: { id: true, uid: true, firstSeenAt: true, lastSeenAt: true, user: { select: { id: true, name: true } } },
     }),
     prisma.membership.findMany({
       where: { officeId },
       orderBy: { user: { name: "asc" } },
       select: { user: { select: { id: true, name: true } } },
     }),
+    prisma.deviceTake.groupBy({
+      by: ["badgeUid"],
+      where: { device: { officeId }, rejectedReason: null },
+      _count: { _all: true },
+    }),
   ]);
+  const takes = new Map(takesByBadge.map((row) => [row.badgeUid, row._count._all]));
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -50,7 +56,14 @@ export default async function DevicesPage({ params }: Props) {
         officeId={officeId}
         linkUrl={`${getBaseUrl()}/link`}
         members={members.map((m) => m.user)}
-        badges={badges.map((b) => ({ id: b.id, uid: b.uid, lastSeenAt: b.lastSeenAt.toISOString(), user: b.user }))}
+        badges={badges.map((b) => ({
+          id: b.id,
+          uid: b.uid,
+          firstSeenAt: b.firstSeenAt.toISOString(),
+          lastSeenAt: b.lastSeenAt.toISOString(),
+          takes: takes.get(b.uid) ?? 0,
+          user: b.user,
+        }))}
         devices={devices.map((d) => ({
           id: d.id,
           name: d.name,

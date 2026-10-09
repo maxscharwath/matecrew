@@ -1013,7 +1013,7 @@
     "terminalImage": {
       "title": "Terminal picture",
       "titleFor": "Terminal picture · {name}",
-      "hint": "24 × 24 black and white pixels, shown 4 times bigger on the terminal. Click to draw or erase, drag to paint. An imported picture is scaled to 24 × 24; a drawing at 24, 48 or 96 px keeps its pixels.",
+      "hint": "96 × 96 black and white pixels: exactly what the terminal shows. Click to draw or erase, drag to paint. An imported picture is scaled to 96 × 96; pixel art at 24, 48 or 96 px keeps its pixels.",
       "onTerminal": "On the terminal",
       "import": "Import a picture",
       "dither": "Dither (for a photo)",
@@ -1023,7 +1023,9 @@
       "reset": "Back to the photo",
       "save": "Save",
       "saved": "Terminal picture saved",
-      "noPhoto": "This item has no photo."
+      "noPhoto": "This item has no photo.",
+      "brush": "Brush",
+      "brushSize": "{size} px brush"
     }
   },
   "oauthConsent": {

@@ -1,17 +1,23 @@
 /**
- * 1-bit pictures for the terminal: product photos dithered to pixel art, the
- * default can when an item has none, and the stock chart. Bits are packed
- * like the panel: row after row, most significant bit first, 1 = ink.
+ * 1-bit pictures for the terminal: item pictures, the default can when an
+ * item has none, and the stock chart. Bits are packed like the panel: row
+ * after row, most significant bit first, 1 = ink.
  */
 import sharp from "sharp";
 import { downloadFile } from "@/lib/storage";
 
 export type Bitmap = { width: number; height: number; bits: Uint8Array };
 
-/** Side of an item picture, in the 200 x 120 canvas the screens are drawn on. */
-export const ITEM_IMAGE_SIZE = 24;
-/** An item picture packed: 24 x 24 bits. */
+/**
+ * Side of an item picture in panel pixels. It takes 24 x 24 pixels of the
+ * 200 x 120 canvas the screens are laid out on, which the panel shows 4
+ * times bigger: a 96 x 96 picture keeps all its detail there.
+ */
+export const ITEM_IMAGE_SIZE = 96;
 export const ITEM_IMAGE_BYTES = (ITEM_IMAGE_SIZE * ITEM_IMAGE_SIZE) / 8;
+/** Pictures saved before they were 96 px: 24 x 24. */
+const SMALL_IMAGE_SIZE = 24;
+const SMALL_IMAGE_BYTES = (SMALL_IMAGE_SIZE * SMALL_IMAGE_SIZE) / 8;
 
 export function blank(width: number, height: number): Bitmap {
   return { width, height, bits: new Uint8Array(Math.ceil((width * height) / 8)) };
@@ -59,9 +65,35 @@ export async function toPngDataUrl(b: Bitmap): Promise<string> {
   return `data:image/png;base64,${png.toString("base64")}`;
 }
 
-/** The default picture: a can with a dithered label. */
+/** Each pixel of `b` as a `factor` x `factor` block. */
+export function enlarge(b: Bitmap, factor: number): Bitmap {
+  const out = blank(b.width * factor, b.height * factor);
+  for (let y = 0; y < out.height; y++) {
+    for (let x = 0; x < out.width; x++) if (get(b, Math.floor(x / factor), Math.floor(y / factor))) set(out, x, y);
+  }
+  return out;
+}
+
+/** `b` shrunk by `factor`: a block becomes ink when at least half of it is. */
+export function shrink(b: Bitmap, factor: number): Bitmap {
+  const out = blank(b.width / factor, b.height / factor);
+  for (let y = 0; y < out.height; y++) {
+    for (let x = 0; x < out.width; x++) {
+      let ink = 0;
+      for (let dy = 0; dy < factor; dy++) for (let dx = 0; dx < factor; dx++) if (get(b, x * factor + dx, y * factor + dy)) ink++;
+      if (ink * 2 >= factor * factor) set(out, x, y);
+    }
+  }
+  return out;
+}
+
+/** The default picture: a pixel-art can with a dithered label, at 96 px. */
 export function canIcon(): Bitmap {
-  const b = blank(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
+  return enlarge(smallCan(), ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
+}
+
+function smallCan(): Bitmap {
+  const b = blank(SMALL_IMAGE_SIZE, SMALL_IMAGE_SIZE);
   const line = (x0: number, x1: number, y: number) => {
     for (let x = x0; x <= x1; x++) set(b, x, y);
   };
@@ -93,12 +125,12 @@ async function load(imageKey: string): Promise<Buffer> {
 }
 
 /**
- * Any picture as an item's 24 x 24: dithered for a photo, a plain threshold
- * for a drawing. A drawing already at 24, 48, 96... px keeps its pixels.
+ * Any picture as an item's 96 x 96: dithered for a photo, a plain threshold
+ * for a drawing. Pixel art at 24, 48 or 96 px keeps its pixels.
  */
 export async function pictureToBitmap(source: Buffer, mode: "dither" | "threshold"): Promise<Bitmap> {
   const { width = 0, height = 0 } = await sharp(source).metadata();
-  const pixelArt = width > 0 && width === height && width % ITEM_IMAGE_SIZE === 0;
+  const pixelArt = width > 0 && width === height && width <= ITEM_IMAGE_SIZE && ITEM_IMAGE_SIZE % width === 0;
   const { data } = await sharp(source)
     .flatten({ background: "#ffffff" })
     .resize(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE, {
@@ -119,7 +151,7 @@ export async function pictureToBitmap(source: Buffer, mode: "dither" | "threshol
 }
 
 /**
- * The item's photo at 24 x 24, or null when it has none or it cannot be read.
+ * The item's photo at 96 x 96, or null when it has none or it cannot be read.
  * A plain threshold: on product photos it keeps the outline and some of the
  * label, where dithering at this size is noise.
  */
@@ -140,9 +172,18 @@ export async function photoBitmap(imageKey: string | null): Promise<Bitmap | nul
  * What the terminal shows for an item: its own black and white picture,
  * else its photo in black and white, else the default can.
  */
+/** The 24 x 24 the terminal's own screens still draw (the picker, a take). */
+export function smallImage(b: Bitmap): Bitmap {
+  return shrink(b, ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
+}
+
 export async function itemImage(imageKey: string | null, terminalImage?: Uint8Array | null): Promise<Bitmap> {
   if (terminalImage?.length === ITEM_IMAGE_BYTES) {
     return { width: ITEM_IMAGE_SIZE, height: ITEM_IMAGE_SIZE, bits: Uint8Array.from(terminalImage) };
+  }
+  if (terminalImage?.length === SMALL_IMAGE_BYTES) {
+    const small = { width: SMALL_IMAGE_SIZE, height: SMALL_IMAGE_SIZE, bits: Uint8Array.from(terminalImage) };
+    return enlarge(small, ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
   }
   return (await photoBitmap(imageKey)) ?? canIcon();
 }

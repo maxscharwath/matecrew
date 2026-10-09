@@ -65,6 +65,11 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function randomHex(bytes: number): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -85,6 +90,8 @@ export class VirtualDevice {
   private frameUpload: { busy: boolean; next: Uint8Array | null } = { busy: false, next: null };
   private logId = 0;
   private partials = 0;
+  /** SHA-256 of the token in hex, for the badge claim links. */
+  private claimKey: string | null = null;
   private lastFull: number | null = null;
 
   private sensors = { batteryMv: 4000, wifiRssi: -55 };
@@ -131,6 +138,7 @@ export class VirtualDevice {
     this.run = new AbortController();
     this.wasm.reset();
     this.state = null;
+    this.claimKey = null;
     this.clock = null;
     this.etag = null;
     this.update({ phase: "booting", link: null });
@@ -278,6 +286,7 @@ export class VirtualDevice {
       this.update({ queue: this.stored.queue });
     }
 
+    if (!this.claimKey && this.stored.token) this.claimKey = await sha256Hex(this.stored.token);
     const state = (await (await this.api("GET", "/api/device/state")).json()) as DeviceState;
     this.state = state;
     this.wasm.setState(state);
@@ -335,7 +344,8 @@ export class VirtualDevice {
     }
     const now = performance.now();
     const unix = this.clock ? Math.floor((this.clock.serverMs + now - this.clock.at) / 1000) : null;
-    const effects = this.wasm.handle(event, { nowMs: Math.floor(now), unix, random: Math.floor(Math.random() * 2 ** 53) });
+    const claim = this.claimKey ? { site: location.origin, key: this.claimKey } : null;
+    const effects = this.wasm.handle(event, { nowMs: Math.floor(now), unix, random: Math.floor(Math.random() * 2 ** 53), claim });
     if (event.type !== "tick" || effects.length > 0) {
       this.log("flow", `${JSON.stringify(event)} → ${effects.map((e) => e.type).join(", ") || "rien"}`);
     }

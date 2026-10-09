@@ -415,16 +415,35 @@ function MainScreen({ data }: { data: ScreenData }) {
   );
 }
 
+/**
+ * The screen at the panel's resolution: the 200 x 120 layout scaled 4 times.
+ * The pixel fonts land on whole pixels, and pictures keep their own
+ * resolution (96 x 96 for an item) instead of 4 x 4 blocks.
+ */
 export async function renderScreenPng(data: ScreenData): Promise<Buffer> {
-  const image = new ImageResponse(<MainScreen data={data} />, {
-    width: W,
-    height: H,
-    fonts: await loadFonts(),
-  });
+  const image = new ImageResponse(
+    (
+      <div style={{ display: "flex", width: SCREEN_WIDTH, height: SCREEN_HEIGHT, background: PAPER }}>
+        {/* Satori scales around the centre whatever transformOrigin says: move the result back to the corner. */}
+        <div
+          style={{
+            display: "flex",
+            width: W,
+            height: H,
+            flexShrink: 0,
+            transform: `translate(${(W * (SCALE - 1)) / 2}px, ${(H * (SCALE - 1)) / 2}px) scale(${SCALE})`,
+          }}
+        >
+          <MainScreen data={data} />
+        </div>
+      </div>
+    ),
+    { width: SCREEN_WIDTH, height: SCREEN_HEIGHT, fonts: await loadFonts() },
+  );
   return Buffer.from(await image.arrayBuffer());
 }
 
-/** Thresholds the 200 x 120 render and scales it x4 into the panel's packed format. */
+/** Thresholds the render into the panel's packed format. */
 export async function renderScreenBits(data: ScreenData): Promise<Buffer> {
   const { data: gray } = await sharp(await renderScreenPng(data))
     .flatten({ background: PAPER })
@@ -433,13 +452,8 @@ export async function renderScreenBits(data: ScreenData): Promise<Buffer> {
     .toBuffer({ resolveWithObject: true });
 
   const bits = Buffer.alloc((SCREEN_WIDTH * SCREEN_HEIGHT) / 8);
-  for (let y = 0; y < SCREEN_HEIGHT; y++) {
-    for (let x = 0; x < SCREEN_WIDTH; x++) {
-      if (gray[Math.floor(y / SCALE) * W + Math.floor(x / SCALE)] < 128) {
-        const i = y * SCREEN_WIDTH + x;
-        bits[i >> 3] |= 0x80 >> (i & 7);
-      }
-    }
+  for (let i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+    if (gray[i] < 128) bits[i >> 3] |= 0x80 >> (i & 7);
   }
   return bits;
 }

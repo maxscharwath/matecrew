@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
-import { itemImage, stockChart, toPngDataUrl, patternSample } from "@/lib/device/bitmap";
+import { itemImage, smallImage, stockChart, toPngDataUrl, patternSample } from "@/lib/device/bitmap";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
 import type { DeviceState } from "@/lib/device/contract";
 import { CHART_HEIGHT, CHART_WIDTH, type ScreenData } from "@/lib/device/screen";
@@ -104,7 +104,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       right: { action: "RETURN", itemId: null, label: labels.right },
     },
     items: await Promise.all(
-      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64((await itemImage(i.imageKey, i.terminalImage)).bits) })),
+      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits) })),
     ),
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
     syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),

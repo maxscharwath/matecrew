@@ -303,19 +303,29 @@ where
     footer(px, "Le terminal redémarre tout seul à la fin")
 }
 
-/// The badge is not assigned to anyone yet. The terminal reports it to the
-/// site, where an admin can give it to its owner.
-pub fn unknown_badge_screen<D>(d: &mut D, uid: &str) -> Result<(), D::Error>
+/// The badge is not assigned to anyone yet. With a claim link, its owner
+/// scans the QR and links it to their account; without one (no sync yet), an
+/// admin assigns it on the site.
+pub fn unknown_badge_screen<D>(d: &mut D, uid: &str, claim_url: Option<&str>) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     let px = &mut Pixelated::new(d, SCALE);
-    frame(px, "matécrew", Status::None)?;
-    icons::WARNING.draw(px, Point::new(W / 2 - icons::WARNING.width() / 2, CONTENT_TOP + 4))?;
-    centered(px, &PRIMARY, "Badge inconnu", W / 2, CONTENT_TOP + 34)?;
-    for (i, line) in wrap(&SECONDARY, "Un admin peut l'attribuer sur le site, dans Admin > Appareils.", W - 40).iter().enumerate() {
-        centered(px, &SECONDARY, line, W / 2, CONTENT_TOP + 48 + 10 * i as i32)?;
-    }
+    frame(px, "Badge inconnu", Status::None)?;
+    let Some(url) = claim_url else {
+        icons::WARNING.draw(px, Point::new(W / 2 - icons::WARNING.width() / 2, CONTENT_TOP + 4))?;
+        centered(px, &PRIMARY, "Badge inconnu", W / 2, CONTENT_TOP + 34)?;
+        for (i, line) in wrap(&SECONDARY, "Un admin peut l'attribuer sur le site, dans Admin > Appareils.", W - 40).iter().enumerate() {
+            centered(px, &SECONDARY, line, W / 2, CONTENT_TOP + 48 + 10 * i as i32)?;
+        }
+        return footer(px, uid);
+    };
+    let qr = qr_panel(px, url, Point::new(3, CONTENT_TOP))?;
+    let x = qr.top_left.x + qr.size.width as i32 + 6;
+    let width = W - x - 3;
+    title_bar(px, Point::new(x, CONTENT_TOP), width, "C'EST TON BADGE ?")?;
+    let y = paragraph(px, &PRIMARY, "Scanne pour le lier à ton compte.", x + 1, CONTENT_TOP + 26, width - 2)?;
+    paragraph(px, &SECONDARY, "Ensuite, repasse-le : il te reconnaîtra.", x + 1, y + 4, width - 2)?;
     footer(px, uid)
 }
 
@@ -349,7 +359,7 @@ where
         Screen::Leave { name } => leave_screen(d, name),
         Screen::Taken { name, item, image } => taken_screen(d, name, item, decode_base64(image).as_deref()),
         Screen::Summary { name, today, week, month } => summary_screen(d, name, *today, *week, *month),
-        Screen::UnknownBadge { uid } => unknown_badge_screen(d, uid),
+        Screen::UnknownBadge { uid, claim_url } => unknown_badge_screen(d, uid, claim_url.as_deref()),
         Screen::NotReady => error_screen(d, "Pas encore prêt", "Le terminal attend sa première synchro avec le site."),
         Screen::NoItems => error_screen(d, "Rien à prendre", "Aucun article n'est actif sur le site."),
     }

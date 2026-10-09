@@ -107,3 +107,14 @@ export async function revokeMcpConnectionAction(
   revalidatePath("/profile");
   return { success: true };
 }
+
+/** A member unlinks one of their own badges; the next tap shows its claim QR again. */
+export async function unlinkMyBadge(badgeId: string): Promise<{ success: boolean }> {
+  const session = await requireSession();
+  const updated = await prisma.badge.updateMany({
+    where: { id: badgeId, userId: session.user.id },
+    data: { userId: null },
+  });
+  revalidatePath("/profile");
+  return { success: updated.count > 0 };
+}

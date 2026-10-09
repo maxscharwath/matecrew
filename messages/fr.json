@@ -1013,7 +1013,7 @@
     "terminalImage": {
       "title": "Image du terminal",
       "titleFor": "Image du terminal · {name}",
-      "hint": "24 × 24 pixels en noir et blanc, affichés 4 fois plus grands sur le terminal. Clique pour dessiner ou effacer, glisse pour peindre. Une image importée est réduite à 24 × 24 ; un dessin de 24, 48 ou 96 px garde ses pixels.",
+      "hint": "96 × 96 pixels en noir et blanc : exactement ce que montre le terminal. Clique pour dessiner ou effacer, glisse pour peindre. Une image importée est réduite à 96 × 96 ; du pixel art en 24, 48 ou 96 px garde ses pixels.",
       "onTerminal": "Sur le terminal",
       "import": "Importer une image",
       "dither": "Tramer (pour une photo)",
@@ -1023,7 +1023,9 @@
       "reset": "Revenir à la photo",
       "save": "Enregistrer",
       "saved": "Image du terminal enregistrée",
-      "noPhoto": "Cet article n'a pas de photo."
+      "noPhoto": "Cet article n'a pas de photo.",
+      "brush": "Pinceau",
+      "brushSize": "Pinceau de {size} px"
     }
   },
   "oauthConsent": {

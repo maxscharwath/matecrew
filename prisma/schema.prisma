@@ -272,7 +272,8 @@ model Item {
   office            Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
   name              String
   imageKey          String?
-  /// The badge terminal's picture: 24 x 24 pixels, packed 1-bit (1 = ink).
+  /// The badge terminal's picture: 96 x 96 pixels, packed 1-bit (1 = ink);
+  /// 24 x 24 for pictures saved before.
   /// Drawn by hand or imported; without it the terminal uses the photo in black and white.
   terminalImage     Bytes?
   active            Boolean  @default(true)

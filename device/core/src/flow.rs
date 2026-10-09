@@ -9,6 +9,7 @@
 //! week and this month.
 
 use crate::{
+    claim::Claim,
     contract::{Action, DeviceState, Side, Take},
     time,
 };
@@ -22,6 +23,8 @@ pub const PICK_MS: u64 = 20_000;
 pub const MESSAGE_MS: u64 = 5_000;
 /// How long the consumption summary stays.
 pub const SUMMARY_MS: u64 = 10_000;
+/// How long an unknown badge's claim QR stays.
+pub const CLAIM_MS: u64 = 30_000;
 
 /// In JSON: `{"type":"key","side":"left"}`, `{"type":"badge","uid":"04A1…"}`, `{"type":"tick"}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +48,8 @@ pub struct Context<'a> {
     pub state: Option<&'a DeviceState>,
     /// Fresh random bits for a take id.
     pub random: u64,
+    /// To sign the link that claims an unknown badge; None shows only the UID.
+    pub claim: Option<Claim<'a>>,
 }
 
 /// In JSON: `{"type":"pick","name":"Alex","item":"Maté Zero","stock":12,"image":"…","index":1,"count":3}`.
@@ -60,7 +65,12 @@ pub enum Screen {
     Leave { name: String },
     Taken { name: String, item: String, image: String },
     Summary { name: String, today: u32, week: u32, month: u32 },
-    UnknownBadge { uid: String },
+    /// `claim_url` lets the person link the badge to their account by scanning it.
+    UnknownBadge {
+        uid: String,
+        #[serde(default)]
+        claim_url: Option<String>,
+    },
     /// No state or no clock yet: the first sync has not happened.
     NotReady,
     /// The office has no active item.
@@ -172,11 +182,13 @@ impl Flow {
         // ask_for_badge only gets here with a state.
         let Some(state) = cx.state else { return vec![show(Screen::Main)] };
         let Some(badge) = state.badge(&uid) else {
-            self.message(cx, MESSAGE_MS);
+            // Time to find the phone and scan.
+            self.message(cx, CLAIM_MS);
+            let claim_url = cx.claim.zip(cx.unix).map(|(claim, unix)| claim.url(&uid, unix));
             return vec![
                 beep(Beep::Error),
                 Effect::NoteUnknownBadge { uid: uid.clone() },
-                show(Screen::UnknownBadge { uid }),
+                show(Screen::UnknownBadge { uid, claim_url }),
             ];
         };
         match side {
@@ -261,7 +273,7 @@ mod tests {
     }
 
     fn cx(state: &DeviceState, now_ms: u64) -> Context<'_> {
-        Context { now_ms, unix: Some(1_791_570_300), state: Some(state), random: 0xabc }
+        Context { now_ms, unix: Some(1_791_570_300), state: Some(state), random: 0xabc, claim: None }
     }
 
     fn badge(uid: &str) -> Event {
@@ -270,6 +282,10 @@ mod tests {
 
     fn key(side: Side) -> Event {
         Event::Key { side }
+    }
+
+    fn key_event(side: Side) -> Event {
+        key(side)
     }
 
     fn pick(item: &str, stock: i64, index: u32) -> Effect {
@@ -354,10 +370,24 @@ mod tests {
             [
                 beep(Beep::Error),
                 Effect::NoteUnknownBadge { uid: "04FFFFFFFFFFFF".into() },
-                show(Screen::UnknownBadge { uid: "04FFFFFFFFFFFF".into() }),
+                show(Screen::UnknownBadge { uid: "04FFFFFFFFFFFF".into(), claim_url: None }),
             ]
         );
-        assert_eq!(flow.handle(Event::Tick, cx(&s, 6_000)), [show(Screen::Main)]);
+        assert_eq!(flow.handle(Event::Tick, cx(&s, 1_000 + CLAIM_MS)), [show(Screen::Main)]);
+    }
+
+    #[test]
+    fn an_unknown_badge_gets_a_signed_link_to_claim_it() {
+        let s = state();
+        let key = crate::claim::key("mcd_test-token");
+        let claim = Claim { site: "http://localhost:3000", device_id: "dev1", key: &key };
+        let mut flow = Flow::default();
+        flow.handle(key_event(Side::Left), Context { claim: Some(claim), ..cx(&s, 0) });
+        let effects = flow.handle(badge("04A1B2C3D4E5F6FF"), Context { claim: Some(claim), ..cx(&s, 1_000) });
+        let Effect::Show { screen: Screen::UnknownBadge { claim_url: Some(url), .. } } = &effects[2] else {
+            panic!("no claim link in {effects:?}");
+        };
+        assert!(url.starts_with("http://localhost:3000/badge?d=dev1&u=04A1B2C3D4E5F6FF&t=1791570300&s="));
     }
 
     #[test]
