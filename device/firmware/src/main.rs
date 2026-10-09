@@ -6,6 +6,7 @@ mod api;
 mod buzzer;
 mod console;
 mod display;
+mod epd;
 mod keys;
 mod nfc;
 mod portal;

@@ -20,10 +20,12 @@ use u8g2_fonts::{
 };
 
 pub mod captive;
+pub mod frame;
 pub mod form;
 mod icons;
 mod pixelated;
 
+pub use frame::Frame;
 pub use pixelated::Pixelated;
 
 /// Panel size in physical pixels.

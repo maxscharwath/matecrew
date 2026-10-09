@@ -84,20 +84,20 @@ pub fn start_setup_access_point(wifi: &mut Wifi) -> Result<SetupAccessPoint> {
     wifi.start()?;
     wifi.wait_netif_up()?;
     let ip = wifi.wifi().ap_netif().get_ip_info()?.ip;
-    announce_captive_portal(wifi, ip)?;
+    announce_dns(wifi, ip)?;
     Ok(SetupAccessPoint { ssid, password, ip: ip.to_string(), networks })
 }
 
-/// Tells phones over DHCP to use the device as DNS server and where the
-/// portal is (option 114, RFC 8910), so recent iOS and Android open it
-/// without waiting for their connectivity check.
-fn announce_captive_portal(wifi: &Wifi, ip: std::net::Ipv4Addr) -> Result<()> {
+/// Tells phones over DHCP to use the device as DNS server, so their
+/// connectivity check lands on the portal.
+///
+/// No DHCP option 114 (RFC 8910): iOS reads it when it rejoins a network and
+/// then expects the JSON Captive Portal API (RFC 8908) over HTTPS at that
+/// address. An HTML page there kept the portal from opening.
+fn announce_dns(wifi: &Wifi, ip: std::net::Ipv4Addr) -> Result<()> {
     use esp_idf_svc::handle::RawHandle;
     use esp_idf_svc::sys::*;
     let netif = wifi.wifi().ap_netif().handle();
-    // The DHCP server keeps the pointer for its whole life: leak it on purpose.
-    let uri: &'static std::ffi::CStr =
-        Box::leak(std::ffi::CString::new(format!("http://{ip}"))?.into_boxed_c_str());
     // OFFER_DNS from dhcpserver.h: announce our own address as DNS server.
     let mut offer_dns: u8 = 0x02;
     let mut dns = esp_netif_dns_info_t {
@@ -106,7 +106,7 @@ fn announce_captive_portal(wifi: &Wifi, ip: std::net::Ipv4Addr) -> Result<()> {
             type_: ESP_IPADDR_TYPE_V4 as u8,
         },
     };
-    // SAFETY: valid netif handle; the option values live long enough (the URI forever).
+    // SAFETY: valid netif handle; the option values are copied before the calls return.
     unsafe {
         esp_netif_dhcps_stop(netif);
         esp!(esp_netif_dhcps_option(
@@ -117,13 +117,6 @@ fn announce_captive_portal(wifi: &Wifi, ip: std::net::Ipv4Addr) -> Result<()> {
             1,
         ))?;
         esp!(esp_netif_set_dns_info(netif, esp_netif_dns_type_t_ESP_NETIF_DNS_MAIN, &mut dns))?;
-        esp!(esp_netif_dhcps_option(
-            netif,
-            esp_netif_dhcp_option_mode_t_ESP_NETIF_OP_SET,
-            esp_netif_dhcp_option_id_t_ESP_NETIF_CAPTIVEPORTAL_URI,
-            uri.as_ptr() as *mut core::ffi::c_void,
-            uri.to_bytes().len() as u32,
-        ))?;
         esp!(esp_netif_dhcps_start(netif))?;
     }
     Ok(())

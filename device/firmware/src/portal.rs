@@ -1,12 +1,15 @@
 //! Captive portal of the setup access point. DNS answers every name with the
-//! device's address and every unknown page redirects to the form, which is
-//! what makes iOS and Android open the settings page on their own.
+//! device's address and every unknown page redirects to the form: the phone's
+//! connectivity check (captive.apple.com, connectivitycheck.gstatic.com...)
+//! gets a redirect instead of its expected answer, so iOS and Android open the
+//! settings page on their own. Every DNS question and page is logged, to see
+//! on the serial monitor what a phone tried.
 
 use anyhow::Result;
 use embedded_svc::http::{Headers, Method};
 use embedded_svc::io::{Read, Write};
 use esp_idf_svc::http::server::{Configuration, EspHttpServer};
-use matecrew_ui::captive::dns_reply;
+use matecrew_ui::captive::{dns_reply, question};
 use matecrew_ui::form::{escape_html, field, parse_urlencoded};
 use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::mpsc::Sender;
@@ -38,6 +41,11 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
     let mut server = EspHttpServer::new(&Configuration {
         uri_match_wildcard: true,
         stack_size: 10 * 1024,
+        // A phone opens many connections at once when it joins. lwIP has 10
+        // sockets and the server keeps 3 for itself; the oldest is dropped
+        // when they run out.
+        max_open_sockets: 7,
+        lru_purge_enable: true,
         ..Default::default()
     })?;
 
@@ -63,12 +71,14 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, saved: Sender<WifiCredentials>
         // Connectivity checks ask for other hosts (captive.apple.com,
         // connectivitycheck.gstatic.com...). Answering them with a redirect
         // tells the phone it is behind a portal, and it opens ours.
-        let on_our_host = req.header("host").is_some_and(|h| h == host);
-        let path = req.uri().split('?').next().unwrap_or("/");
-        if !on_our_host || path != "/" {
+        let asked = req.header("host").unwrap_or("").to_owned();
+        let path = req.uri().split('?').next().unwrap_or("/").to_owned();
+        if asked != host || path != "/" {
+            log::info!("portal: http://{asked}{path} → 302 {home}");
             req.into_response(302, Some("Found"), &[("location", &home), ("cache-control", "no-store")])?;
             return Ok(());
         }
+        log::info!("portal: page served");
         req.into_response(200, None, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")])?
             .write_all(page.as_bytes())?;
         Ok(())
@@ -83,6 +93,9 @@ fn answer_dns(ip: Ipv4Addr) -> Result<()> {
     let mut buf = [0u8; 512];
     loop {
         let (len, from) = socket.recv_from(&mut buf)?;
+        if let Some((name, qtype)) = question(&buf[..len]) {
+            log::info!("portal: dns {name} type {qtype} from {}", from.ip());
+        }
         if let Some(reply) = dns_reply(&buf[..len], ip) {
             socket.send_to(&reply, from)?;
         }

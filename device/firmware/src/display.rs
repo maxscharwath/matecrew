@@ -1,31 +1,36 @@
 //! The 7.5" panel behind the ePaper Driver Board for XIAO.
+//!
+//! Screens are drawn into a frame in memory, then only what changed is sent:
+//! nothing when the frame is the same, a partial refresh of the changed
+//! rectangle otherwise. A full refresh, slower and flashing, clears the
+//! ghosting partial refreshes leave: at the first screen, then on the main
+//! screen after FULL_EVERY partial ones or FULL_AFTER.
 
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use core::convert::Infallible;
-use embedded_graphics::{draw_target::ColorConverted, pixelcolor::BinaryColor, prelude::*};
-use epd_waveshare::{
-    color::Color,
-    epd7in5_v2::{Epd7in5, HEIGHT, WIDTH},
-    graphics::VarDisplay,
-    prelude::*,
-};
+use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_idf_svc::hal::{
-    delay::Delay,
-    gpio::{AnyIOPin, Gpio1, Gpio2, Gpio3, Gpio4, Gpio7, Gpio9, Input, Output, PinDriver, Pull},
-    spi::{config::Config, SpiDeviceDriver, SpiDriver, SpiDriverConfig, SPI2},
+    gpio::{AnyIOPin, Gpio1, Gpio2, Gpio3, Gpio4, Gpio7, Gpio9, PinDriver, Pull},
+    spi::{config::Config, SpiDeviceDriver, SpiDriverConfig, SPI2},
     units::FromValueType,
 };
+use matecrew_ui::frame::{self, Frame};
+use std::time::{Duration, Instant};
 
-pub type Canvas<'a, 'b> = ColorConverted<'a, VarDisplay<'b, Color>, BinaryColor>;
+use crate::epd::Epd;
 
-type Spi = SpiDeviceDriver<'static, SpiDriver<'static>>;
-type Epd = Epd7in5<Spi, PinDriver<'static, Input>, PinDriver<'static, Output>, PinDriver<'static, Output>, Delay>;
+pub type Canvas = Frame;
+
+const FULL_EVERY: u32 = 40;
+const FULL_AFTER: Duration = Duration::from_secs(60 * 60);
 
 pub struct Screen {
     epd: Epd,
-    spi: Spi,
-    delay: Delay,
-    buffer: Vec<u8>,
+    /// What the panel shows.
+    shown: Vec<u8>,
+    next: Frame,
+    partials: u32,
+    last_full: Option<Instant>,
 }
 
 pub struct Pins {
@@ -42,66 +47,63 @@ impl Screen {
     /// XIAO D-pins: RST D0, CS D1, BUSY D2, DC D3, SCK D8, MOSI D10. No MISO:
     /// D9 is the right touch key.
     pub fn new(pins: Pins) -> Result<Self> {
-        let mut spi = SpiDeviceDriver::new_single(
+        let spi = SpiDeviceDriver::new_single(
             pins.spi,
             pins.sck,
             pins.mosi,
             Option::<AnyIOPin>::None,
             Some(pins.cs),
             &SpiDriverConfig::new(),
-            &Config::new().baudrate(4u32.MHz().into()),
+            &Config::new().baudrate(10u32.MHz().into()),
         )?;
-        let busy = PinDriver::input(pins.busy, Pull::Floating)?;
-        let dc = PinDriver::output(pins.dc)?;
-        let rst = PinDriver::output(pins.rst)?;
-        let mut delay = Delay::new_default();
-        let mut epd = Epd7in5::new(&mut spi, busy, dc, rst, &mut delay, None)?;
-        epd.sleep(&mut spi, &mut delay)?;
-        Ok(Self { epd, spi, delay, buffer: vec![0u8; (WIDTH / 8 * HEIGHT) as usize] })
+        let epd = Epd::new(
+            spi,
+            PinDriver::input(pins.busy, Pull::Floating)?,
+            PinDriver::output(pins.dc)?,
+            PinDriver::output(pins.rst)?,
+        );
+        Ok(Self { epd, shown: vec![0; frame::BYTES], next: Frame::new(), partials: 0, last_full: None })
     }
 
-    /// Draws a screen from `matecrew_ui` and refreshes the whole panel.
+    /// Draws a screen from `matecrew_ui`: a partial refresh of what changed.
     pub fn show(&mut self, draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>) -> Result<()> {
-        let mut display = VarDisplay::<Color>::new(WIDTH, HEIGHT, &mut self.buffer, false)
-            .map_err(|e| anyhow!("display buffer: {e:?}"))?;
-        let _ = draw(&mut display.color_converted());
-        self.refresh()
+        let _ = self.next.clear(BinaryColor::Off);
+        let _ = draw(&mut self.next);
+        self.present(false)
     }
 
-    /// Draws the server's 1-bit bitmap: rows top to bottom, MSB first, 1 = ink.
+    /// Draws the site's main screen: rows top to bottom, MSB first, 1 = ink.
+    /// The moment to clear the ghosting with a full refresh, when it is due.
     pub fn show_bits(&mut self, bits: &[u8]) -> Result<()> {
-        if bits.len() != (WIDTH / 8 * HEIGHT) as usize {
-            return Err(anyhow!("screen bitmap is {} bytes", bits.len()));
+        if bits.len() != frame::BYTES {
+            bail!("screen bitmap is {} bytes", bits.len());
         }
-        let width = WIDTH as usize;
-        self.show(|canvas| {
-            canvas.draw_iter(bits.iter().enumerate().flat_map(|(byte_index, byte)| {
-                (0..8).map(move |bit| {
-                    let index = byte_index * 8 + bit;
-                    let point = Point::new((index % width) as i32, (index / width) as i32);
-                    let ink = byte & (0x80 >> bit) != 0;
-                    Pixel(point, if ink { BinaryColor::On } else { BinaryColor::Off })
-                })
-            }))
-        })
+        self.next.bits.copy_from_slice(bits);
+        let due = self.partials >= FULL_EVERY || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
+        self.present(due)
     }
 
     /// What the panel shows, in the format of the site's screen: 1 = ink.
     pub fn frame(&self) -> &[u8] {
-        &self.buffer
+        &self.shown
     }
 
-    fn refresh(&mut self) -> Result<()> {
-        // epd-waveshare encodes black as 0, but this panel, set up the way
-        // Waveshare's driver does it, reads 1 as black. Every screen redraws
-        // the whole buffer, so flipping it in place is safe, and afterwards
-        // the buffer holds 1 = ink, like the site's bitmaps.
-        for byte in &mut self.buffer {
-            *byte = !*byte;
+    fn present(&mut self, full: bool) -> Result<()> {
+        let started = Instant::now();
+        let changed = frame::changed(&self.shown, &self.next.bits);
+        if self.last_full.is_none() || full {
+            self.epd.full(&self.next.bits)?;
+            self.partials = 0;
+            self.last_full = Some(Instant::now());
+            log::info!("display: full refresh in {} ms", started.elapsed().as_millis());
+        } else if let Some(window) = changed {
+            self.epd.partial(window, &self.shown, &self.next.bits)?;
+            self.partials += 1;
+            log::info!("display: {} x {} at {},{} in {} ms", window.width, window.height, window.x, window.y, started.elapsed().as_millis());
+        } else {
+            return Ok(());
         }
-        self.epd.wake_up(&mut self.spi, &mut self.delay)?;
-        self.epd.update_and_display_frame(&mut self.spi, &self.buffer, &mut self.delay)?;
-        self.epd.sleep(&mut self.spi, &mut self.delay)?;
+        self.shown.copy_from_slice(&self.next.bits);
         Ok(())
     }
 }

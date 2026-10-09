@@ -42,6 +42,28 @@ pub fn dns_reply(query: &[u8], ip: Ipv4Addr) -> Option<Vec<u8>> {
     Some(reply)
 }
 
+/// The name and type a DNS query asks for, for the log: ("captive.apple.com", 1).
+pub fn question(query: &[u8]) -> Option<(String, u16)> {
+    let mut name = String::new();
+    let mut at = 12;
+    loop {
+        let label = *query.get(at)? as usize;
+        at += 1;
+        if label == 0 {
+            break;
+        }
+        if label & 0xC0 != 0 {
+            return None;
+        }
+        if !name.is_empty() {
+            name.push('.');
+        }
+        name.push_str(&String::from_utf8_lossy(query.get(at..at + label)?));
+        at += label;
+    }
+    Some((name, u16::from_be_bytes([*query.get(at)?, *query.get(at + 1)?])))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +103,11 @@ mod tests {
         response[2] |= 0x80;
         assert!(dns_reply(&response, Ipv4Addr::LOCALHOST).is_none());
         assert!(dns_reply(&[1, 2, 3], Ipv4Addr::LOCALHOST).is_none());
+    }
+
+    #[test]
+    fn reads_the_question() {
+        assert_eq!(question(&query(28)), Some(("captive.apple.com".to_owned(), 28)));
+        assert_eq!(question(&[0; 5]), None);
     }
 }

@@ -110,8 +110,9 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 - Commandes depuis `device/` : `just sim`, `just test`, `just flash`, `just build`, `just api` (voir le `README.md`).
 - Itérer sur les écrans avec `just sim`, ne flasher que pour le matériel, le Wi-Fi ou la liaison.
-- Le XIAO se flashe par son USB-C (`/dev/cu.usbmodem…`) sans toucher aux boutons ; `espflash` gère le reset USB.
-- En deep sleep, le port USB disparaît : réveiller avec une touche, ou maintenir B, appuyer sur R, relâcher B.
+- Le XIAO se flashe par son USB-C (`/dev/cu.usbmodem…`) ; `espflash` gère le reset USB.
+- Le XIAO n'a aucun bouton accessible et la batterie est soudée sans interrupteur : pas de B + R, et débrancher l'USB ne le redémarre pas. Le flash ne passe que par le reset USB : un firmware qui casse l'USB-Serial-JTAG ou plante avant qu'il démarre rend l'appareil inflashable. Tester d'abord dans le terminal virtuel.
+- En deep sleep, le port USB disparaît : réveiller avec une touche.
 - Les binaires sortent dans le `target-dir` partagé de Cargo (`~/.cargo/shared-target`), pas dans `device/firmware/target`.
 
 ## Ordre de travail

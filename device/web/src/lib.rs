@@ -10,9 +10,7 @@
 //!   are at `output_ptr` and the return value is their length.
 //! - `deadline`: when to send the next tick, -1 for none.
 
-mod frame;
-
-use frame::{Frame, BYTES};
+use matecrew_ui::frame::{Frame, BYTES};
 use matecrew_core::{
     contract::DeviceState,
     flow::{Context, Event, Flow, Screen},
