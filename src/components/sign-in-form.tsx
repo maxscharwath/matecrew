@@ -25,7 +25,7 @@ export function SignInForm({ oauthProviders, allowedDomain, passwordEnabled, red
   const t = useTranslations();
   // A different can each visit: whichever label chance hands out.
   const [label] = useState(
-    () => MATE_LABELS[Math.floor(Math.random() * MATE_LABELS.length)],
+    () => MATE_LABELS[crypto.getRandomValues(new Uint32Array(1))[0] % MATE_LABELS.length],
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

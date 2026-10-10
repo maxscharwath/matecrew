@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma } from "@/lib/prisma";
 import { stockDeltaOps } from "@/lib/stock";
 
 export type CancelOutcome = "cancelled" | "not_found" | "not_yours" | "already_cancelled";
@@ -25,9 +25,22 @@ export async function cancelConsumptionEntry({
   if (entry.userId !== userId) return "not_yours";
   if (entry.cancelledAt) return "already_cancelled";
 
-  await prisma.$transaction([
-    prisma.consumptionEntry.update({ where: { id: entryId }, data: { cancelledAt: new Date() } }),
-    ...stockDeltaOps({ officeId, itemId: entry.itemId, delta: entry.qty, reason: "UNSERVED", note, userId }),
-  ]);
+  // Read above, one atomic batch here. The guard only cancels an entry that is
+  // still live, so a double tap cannot put its can back twice.
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.consumptionEntry.updateMany({
+          where: { id: entryId, cancelledAt: null },
+          data: { cancelledAt: new Date() },
+        }),
+        1,
+      ),
+      ...stockDeltaOps(db, { officeId, itemId: entry.itemId, delta: entry.qty, reason: "UNSERVED", note, userId }),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return "already_cancelled";
+    throw error;
+  }
   return "cancelled";
 }

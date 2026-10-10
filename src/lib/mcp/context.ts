@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@/generated/prisma/client";
+import { roleList, rolesSelect } from "@/lib/membership-roles";
 
 /**
  * Authorization for MCP callers.
@@ -96,18 +97,21 @@ export async function listMemberships(
   const memberships = await prisma.membership.findMany({
     where: { userId: actor.userId },
     select: {
-      roles: true,
+      ...rolesSelect,
       office: { select: { id: true, name: true } },
     },
     orderBy: { office: { name: "asc" } },
   });
-  return memberships.map((m) => ({
-    officeId: m.office.id,
-    officeName: m.office.name,
-    roles: m.roles,
-    isAdmin: m.roles.includes("ADMIN"),
-    isDefault: m.office.id === actor.defaultOfficeId,
-  }));
+  return memberships.map((m) => {
+    const roles = roleList(m);
+    return {
+      officeId: m.office.id,
+      officeName: m.office.name,
+      roles,
+      isAdmin: roles.includes("ADMIN"),
+      isDefault: m.office.id === actor.defaultOfficeId,
+    };
+  });
 }
 
 /**
@@ -126,7 +130,7 @@ export async function resolveOffice(
   const memberships = await prisma.membership.findMany({
     where: { userId: actor.userId },
     select: {
-      roles: true,
+      ...rolesSelect,
       office: {
         select: {
           id: true,
@@ -185,8 +189,8 @@ export async function resolveOffice(
     lowStockThreshold: match.office.lowStockThreshold,
     slackChannelId: match.office.slackChannelId,
     slackChannelLabel: match.office.slackChannelLabel,
-    roles: match.roles,
-    isAdmin: match.roles.includes("ADMIN"),
+    roles: roleList(match),
+    isAdmin: roleList(match).includes("ADMIN"),
   };
 }
 

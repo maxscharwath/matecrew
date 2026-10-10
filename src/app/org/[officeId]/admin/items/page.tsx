@@ -5,6 +5,7 @@ import { resolveItemImageUrl } from "@/lib/storage";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
 import { itemImage } from "@/lib/device/bitmap";
 import { ItemsManager } from "@/components/items-manager";
+import { TerminalPhotoBackfill } from "@/components/terminal-photo-backfill";
 
 interface Props {
   readonly params: Promise<{ officeId: string }>;
@@ -28,6 +29,7 @@ export default async function ItemsPage({ params }: Props) {
         name: true,
         imageKey: true,
         terminalImage: true,
+        terminalPhoto: true,
         active: true,
         isDefault: true,
         volumeMl: true,
@@ -41,12 +43,12 @@ export default async function ItemsPage({ params }: Props) {
     }),
   ]);
 
-  const rows = await Promise.all(items.map(async (i) => ({
+  const rows = items.map((i) => ({
     id: i.id,
     name: i.name,
     imageUrl: resolveItemImageUrl(i.imageKey),
     // What the badge terminal shows for it.
-    terminalBits: Buffer.from((await itemImage(i.imageKey, i.terminalImage)).bits).toString("base64"),
+    terminalBits: Buffer.from(itemImage(i.terminalImage, i.terminalPhoto).bits).toString("base64"),
     terminalCustom: i.terminalImage !== null,
     active: i.active,
     isDefault: i.isDefault,
@@ -57,7 +59,9 @@ export default async function ItemsPage({ params }: Props) {
     consumptionCount: i._count.consumptionEntries,
     lowStockThreshold: i.lowStockThreshold,
     color: i.color,
-  })));
+  }));
+  // Photos stored before terminal pictures were computed at upload.
+  const missingTerminalPhotos = items.filter((i) => i.imageKey && !i.terminalPhoto).length;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -65,6 +69,7 @@ export default async function ItemsPage({ params }: Props) {
         <h1 className="text-2xl font-bold">{t("items.title")}</h1>
         <p className="mt-1 text-muted-foreground">{t("items.subtitle")}</p>
       </div>
+      {missingTerminalPhotos > 0 && <TerminalPhotoBackfill officeId={officeId} count={missingTerminalPhotos} />}
       <ItemsManager
         officeId={officeId}
         items={rows}

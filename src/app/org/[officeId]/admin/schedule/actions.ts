@@ -5,7 +5,6 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { timeToMinutes, SCHEDULE_STEP_MINUTES } from "@/lib/date";
-import { trySyncSessionSchedules } from "@/lib/schedule-sync";
 type ActionResult = { success: true } | { success: false; error: string };
 
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -94,7 +93,6 @@ export async function addSession(
     },
   });
 
-  await trySyncSessionSchedules();
   revalidatePath(`/org/${officeId}/admin/schedule`);
   return { success: true };
 }
@@ -116,7 +114,6 @@ export async function removeSession(
 
   await prisma.mateSession.delete({ where: { id: sessionId } });
 
-  await trySyncSessionSchedules();
   revalidatePath(`/org/${officeId}/admin/schedule`);
   return { success: true };
 }
@@ -160,7 +157,6 @@ export async function updateSession(
     },
   });
 
-  await trySyncSessionSchedules();
   revalidatePath(`/org/${officeId}/admin/schedule`);
   return { success: true };
 }
@@ -205,7 +201,6 @@ export async function copyDaySchedule(
     }
   }
 
-  await trySyncSessionSchedules();
   revalidatePath(`/org/${officeId}/admin/schedule`);
   return { success: true };
 }

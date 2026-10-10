@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, newId, prisma } from "@/lib/prisma";
 import { LINK_POLL_INTERVAL_SECONDS, newDeviceToken, sha256 } from "@/lib/device/codes";
 import {
   linkTokenRequest,
@@ -39,30 +39,38 @@ export async function POST(request: Request) {
 
   const token = newDeviceToken();
   const office = link.office;
-  const device = await prisma.$transaction(async (tx) => {
-    // Redeem first so two racing polls cannot both create a device.
-    const redeemed = await tx.deviceLink.updateMany({
-      where: { id: link.id, redeemedAt: null },
-      data: { redeemedAt: now },
-    });
-    if (redeemed.count === 0) return null;
-    const defaultItem = await tx.item.findFirst({
-      where: { officeId: office.id, active: true },
-      orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
-      select: { id: true },
-    });
-    return tx.device.create({
-      data: {
-        officeId: office.id,
-        name: link.deviceName ?? "Terminal",
-        hardwareId: link.hardwareId,
-        tokenHash: sha256(token),
-        linkedById: link.approvedById,
-        leftItemId: defaultItem?.id ?? null,
-      },
-    });
+  const defaultItem = await prisma.item.findFirst({
+    where: { officeId: office.id, active: true },
+    orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+    select: { id: true },
   });
-  if (!device) return linkError("invalid_grant");
+  const device = {
+    id: newId(),
+    officeId: office.id,
+    name: link.deviceName ?? "Terminal",
+    hardwareId: link.hardwareId,
+    tokenHash: sha256(token),
+    linkedById: link.approvedById,
+    leftItemId: defaultItem?.id ?? null,
+  };
+  // Redeeming the link and creating the device are one atomic batch. The
+  // guard redeems only a link nobody redeemed yet, so of two racing polls
+  // exactly one creates a device; the other's batch is rolled back whole.
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.deviceLink.updateMany({
+          where: { id: link.id, redeemedAt: null },
+          data: { redeemedAt: now },
+        }),
+        1,
+      ),
+      db.device.createMany({ data: [device] }),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return linkError("invalid_grant");
+    throw error;
+  }
 
   const body: LinkTokenResponse = {
     access_token: token,

@@ -58,6 +58,27 @@ export function PaymentLineRow({
     });
   }
 
+  let amountColor = isPay
+    ? "text-red-600 dark:text-red-400"
+    : "text-emerald-600 dark:text-emerald-400";
+  if (isPaid) amountColor = "text-muted-foreground";
+
+  const pendingAction = readOnly ? (
+    <Badge variant="outline" className="whitespace-nowrap">
+      {t("pendingLabel")}
+    </Badge>
+  ) : (
+    <Button
+      size="sm"
+      variant={isPay ? "default" : "outline"}
+      disabled={isPending}
+      onClick={handleMarkPaid}
+    >
+      <Check className="size-4" />
+      {isPay ? t("markAsPaid") : t("confirmReceived")}
+    </Button>
+  );
+
   return (
     <div
       className={cn(
@@ -94,11 +115,7 @@ export function PaymentLineRow({
       <p
         className={cn(
           "flex items-center gap-1 text-base font-semibold tabular-nums",
-          isPaid
-            ? "text-muted-foreground"
-            : isPay
-              ? "text-red-600 dark:text-red-400"
-              : "text-emerald-600 dark:text-emerald-400",
+          amountColor,
         )}
       >
         <DirectionIcon className="size-4 shrink-0" />
@@ -110,20 +127,8 @@ export function PaymentLineRow({
           <Check className="size-4" />
           {t("paidLabel")}
         </span>
-      ) : readOnly ? (
-        <Badge variant="outline" className="whitespace-nowrap">
-          {t("pendingLabel")}
-        </Badge>
       ) : (
-        <Button
-          size="sm"
-          variant={isPay ? "default" : "outline"}
-          disabled={isPending}
-          onClick={handleMarkPaid}
-        >
-          <Check className="size-4" />
-          {isPay ? t("markAsPaid") : t("confirmReceived")}
-        </Button>
+        pendingAction
       )}
     </div>
   );

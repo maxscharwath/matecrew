@@ -2,9 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULE_STEP_MINUTES, timeToMinutes } from "@/lib/date";
-import { trySyncSessionSchedules } from "@/lib/schedule-sync";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
-import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
 import { DAY_NAMES, dayOfWeekArg, officeArg, timeArg } from "@/lib/mcp/schemas";
 
@@ -102,8 +100,6 @@ export function registerAdminScheduleTools(server: McpServer): void {
         select: { id: true },
       });
 
-      // Keeps the QStash crons that fire the Slack messages in step with the DB.
-      await notifyQuietly("schedule-sync", () => trySyncSessionSchedules());
 
       return {
         ok: true,
@@ -186,7 +182,6 @@ export function registerAdminScheduleTools(server: McpServer): void {
         select: { id: true, dayOfWeek: true, startTime: true, cutoffTime: true, label: true },
       });
 
-      await notifyQuietly("schedule-sync", () => trySyncSessionSchedules());
 
       return {
         ok: true,
@@ -229,7 +224,6 @@ export function registerAdminScheduleTools(server: McpServer): void {
       }
 
       await prisma.mateSession.delete({ where: { id: sessionId } });
-      await notifyQuietly("schedule-sync", () => trySyncSessionSchedules());
 
       return {
         ok: true,

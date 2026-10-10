@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@/generated/prisma/client";
+import { rolesSelect, withRoleList } from "@/lib/membership-roles";
 
 // Cached internal helpers — deduplicated within a single React request
 const getSessionInternal = cache(async () => {
@@ -11,13 +12,16 @@ const getSessionInternal = cache(async () => {
 });
 
 const getMembershipInternal = cache(async (userId: string, officeId: string) => {
-  return prisma.membership.findUnique({
+  const membership = await prisma.membership.findUnique({
     where: { userId_officeId: { userId, officeId } },
     include: {
+      ...rolesSelect,
       user: true,
       office: { select: { id: true, name: true, lowStockThreshold: true } },
     },
   });
+  // Callers read `membership.roles` as a plain Role[].
+  return membership ? withRoleList(membership) : null;
 });
 
 /**
@@ -71,11 +75,13 @@ export async function getOptionalMembership(officeId: string) {
  * Get all memberships for a user (for the org switcher).
  */
 export const getUserMemberships = cache(async (userId: string) => {
-  return prisma.membership.findMany({
+  const memberships = await prisma.membership.findMany({
     where: { userId },
     include: {
+      ...rolesSelect,
       office: { select: { id: true, name: true } },
     },
     orderBy: { office: { name: "asc" } },
   });
+  return memberships.map(withRoleList);
 });

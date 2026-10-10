@@ -242,6 +242,8 @@ function ItemChoice({
   if (choices.length <= 1) {
     const only = choices[0];
     const soldOut = !!only && only.stockQty <= 0;
+    let label = isPending ? t('request.inProgress') : singleLabel;
+    if (soldOut) label = t('request.outOfStock');
     return (
       <Button
         size="lg"
@@ -250,11 +252,7 @@ function ItemChoice({
         onClick={() => only && onPick(only.id)}
       >
         <CupSoda className="mr-2 h-5 w-5" />
-        {soldOut
-          ? t('request.outOfStock')
-          : isPending
-            ? t('request.inProgress')
-            : singleLabel}
+        {label}
       </Button>
     );
   }
@@ -310,15 +308,15 @@ function EmptyState({
   readonly onRequest: (itemId: string) => void;
 }) {
   const t = useTranslations();
+  let prompt = t('request.ordersClosed');
+  if (!cutoffPassed) {
+    prompt = items.filter((i) => i.stockQty > 0).length > 1
+      ? t('request.pickYourMate')
+      : t('request.wantMateToday');
+  }
   return (
     <div className="space-y-4">
-      <p className="text-muted-foreground">
-        {cutoffPassed
-          ? t('request.ordersClosed')
-          : items.filter((i) => i.stockQty > 0).length > 1
-            ? t('request.pickYourMate')
-            : t('request.wantMateToday')}
-      </p>
+      <p className="text-muted-foreground">{prompt}</p>
       <ItemChoice
         items={items}
         isPending={isPending}

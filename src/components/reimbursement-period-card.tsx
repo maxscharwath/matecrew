@@ -69,6 +69,36 @@ interface Share {
   netOwed: number;
 }
 
+type BalanceSide = "owes" | "owed" | "settled";
+
+/** Which way a share's balance leans, ignoring sub-cent rounding. */
+function balanceSide(netOwed: number): BalanceSide {
+  if (netOwed > 0.01) return "owes";
+  if (netOwed < -0.01) return "owed";
+  return "settled";
+}
+
+const BALANCE_STYLES = {
+  owes: {
+    row: "bg-red-50/50 dark:bg-red-950/10",
+    amount: "font-medium text-red-600 dark:text-red-400",
+    badge: "destructive",
+    label: "common.owes",
+  },
+  owed: {
+    row: "bg-green-50/50 dark:bg-green-950/10",
+    amount: "font-medium text-green-600 dark:text-green-400",
+    badge: "default",
+    label: "common.owed",
+  },
+  settled: {
+    row: "",
+    amount: "text-muted-foreground",
+    badge: "secondary",
+    label: "common.settled",
+  },
+} as const satisfies Record<BalanceSide, unknown>;
+
 interface ReimbursementPeriodCardProps {
   readonly officeId: string;
   readonly period: {
@@ -336,69 +366,50 @@ export function ReimbursementPeriodCard({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {shares.map((s) => (
-                      <TableRow
-                        key={s.userName}
-                        className={
-                          s.netOwed > 0.01
-                            ? "bg-red-50/50 dark:bg-red-950/10"
-                            : s.netOwed < -0.01
-                              ? "bg-green-50/50 dark:bg-green-950/10"
-                              : ""
-                        }
-                      >
-                        <TableCell className="font-medium">
-                          {s.userName}
-                        </TableCell>
-                        <TableCell className="text-center tabular-nums">
-                          {s.qty}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {s.costShare.toFixed(2)}
-                          {Math.abs(s.lossShare) > 0.005 && (
-                            <span className="block text-xs text-muted-foreground">
-                              {t("reimbursements.ofWhichLoss", {
-                                amount: s.lossShare.toFixed(2),
-                              })}
+                    {shares.map((s) => {
+                      const balance = BALANCE_STYLES[balanceSide(s.netOwed)];
+                      return (
+                        <TableRow
+                          key={s.userName}
+                          className={balance.row}
+                        >
+                          <TableCell className="font-medium">
+                            {s.userName}
+                          </TableCell>
+                          <TableCell className="text-center tabular-nums">
+                            {s.qty}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {s.costShare.toFixed(2)}
+                            {Math.abs(s.lossShare) > 0.005 && (
+                              <span className="block text-xs text-muted-foreground">
+                                {t("reimbursements.ofWhichLoss", {
+                                  amount: s.lossShare.toFixed(2),
+                                })}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {s.amountPaid.toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                className={`tabular-nums ${balance.amount}`}
+                              >
+                                CHF {Math.abs(s.netOwed).toFixed(2)}
+                              </span>
+                              <Badge
+                                variant={balance.badge}
+                                className="text-[10px] px-1.5 py-0"
+                              >
+                                {t(balance.label)}
+                              </Badge>
                             </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {s.amountPaid.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              className={`tabular-nums ${
-                                s.netOwed > 0.01
-                                  ? "font-medium text-red-600 dark:text-red-400"
-                                  : s.netOwed < -0.01
-                                    ? "font-medium text-green-600 dark:text-green-400"
-                                    : "text-muted-foreground"
-                              }`}
-                            >
-                              CHF {Math.abs(s.netOwed).toFixed(2)}
-                            </span>
-                            <Badge
-                              variant={
-                                s.netOwed > 0.01
-                                  ? "destructive"
-                                  : s.netOwed < -0.01
-                                    ? "default"
-                                    : "secondary"
-                              }
-                              className="text-[10px] px-1.5 py-0"
-                            >
-                              {s.netOwed > 0.01
-                                ? t('common.owes')
-                                : s.netOwed < -0.01
-                                  ? t('common.owed')
-                                  : t('common.settled')}
-                            </Badge>
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                   <TableFooter>
                     <TableRow>

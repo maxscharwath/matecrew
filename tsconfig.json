@@ -19,6 +19,7 @@
       }
     ],
     "paths": {
+      "@/platform/active": ["./src/platform/node/index.ts"],
       "@/*": ["./src/*"]
     }
   },
@@ -30,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "device"]
+  "exclude": ["node_modules", "device", ".open-next", ".wrangler"]
 }

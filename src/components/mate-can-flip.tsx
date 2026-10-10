@@ -16,6 +16,45 @@ interface Props {
 
 type Game = "flip" | "knockdown";
 
+/** The pyramid's scoreboard: cans down, level, shots left and the outcome. */
+function KnockdownScore({
+  knock,
+  points,
+}: {
+  readonly knock: KnockdownReport | null;
+  readonly points: number;
+}) {
+  const t = useTranslations("can");
+  let outcome: string;
+  if (knock?.result === "cleared") {
+    outcome = t("knockCleared");
+  } else if (knock?.result === "failed") {
+    outcome = t("knockFailed", { down: knock.down, total: knock.total });
+  } else {
+    outcome = t("knockHint");
+  }
+  return (
+    <>
+      <p className="text-4xl font-semibold text-white tabular-nums">
+        {t("knockScore", {
+          down: knock?.down ?? 0,
+          total: knock?.total ?? 6,
+        })}
+      </p>
+      <p className="text-white/80 tabular-nums">
+        {t("knockLevel", { level: knock?.level ?? 1, rows: knock?.rows ?? 3 })}
+        {" · "}
+        {t("knockShots", { shots: knock?.shotsLeft ?? 5 })}
+        {" · "}
+        {t("points", { points })}
+      </p>
+      <p className={cn(knock?.result && "font-medium text-white")}>
+        {outcome}
+      </p>
+    </>
+  );
+}
+
 /**
  * The games: the bottle flip and the can pyramid, on one stage, with the
  * scores and the flip leaderboard. The scene only reports outcomes; what they
@@ -116,28 +155,7 @@ export function MateCanFlip({ board: initial, signedIn }: Props) {
             </p>
           </>
         ) : (
-          <>
-            <p className="text-4xl font-semibold text-white tabular-nums">
-              {t("knockScore", {
-                down: knock?.down ?? 0,
-                total: knock?.total ?? 6,
-              })}
-            </p>
-            <p className="text-white/80 tabular-nums">
-              {t("knockLevel", { level: knock?.level ?? 1, rows: knock?.rows ?? 3 })}
-              {" · "}
-              {t("knockShots", { shots: knock?.shotsLeft ?? 5 })}
-              {" · "}
-              {t("points", { points: knockTotal })}
-            </p>
-            <p className={cn(knock?.result && "font-medium text-white")}>
-              {knock?.result === "cleared"
-                ? t("knockCleared")
-                : knock?.result === "failed"
-                  ? t("knockFailed", { down: knock.down, total: knock.total })
-                  : t("knockHint")}
-            </p>
-          </>
+          <KnockdownScore knock={knock} points={knockTotal} />
         )}
       </div>
 

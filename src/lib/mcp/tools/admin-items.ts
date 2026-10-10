@@ -1,20 +1,21 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
-import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
+import { BatchConflictError, commitBatch, expectRows, newId, prisma } from "@/lib/prisma";
+import { findByIdOrName } from "@/lib/mcp/name-match";
+import { McpToolError, resolveAdminOffice, type OfficeScope } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
 
 /** Finds an item in the office by id or name, or explains what does exist. */
 async function requireItem(officeId: string, item: string) {
   const wanted = item.trim();
-  const match = await prisma.item.findFirst({
-    where: {
-      officeId,
-      OR: [{ id: wanted }, { name: { equals: wanted, mode: "insensitive" } }],
-    },
-    select: { id: true, name: true, active: true, isDefault: true },
-  });
+  const match = findByIdOrName(
+    await prisma.item.findMany({
+      where: { officeId },
+      select: { id: true, name: true, active: true, isDefault: true },
+    }),
+    wanted,
+  );
   if (!match) {
     const available = await prisma.item.findMany({
       where: { officeId },
@@ -84,19 +85,30 @@ export function registerAdminItemTools(server: McpServer): void {
         _max: { sortOrder: true },
       });
 
-      const created = await prisma.item.create({
-        data: {
-          officeId: scope.officeId,
-          name: trimmed,
-          sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
-          ...(volumeMl === undefined ? {} : { volumeMl }),
-          ...(sugarGrams === undefined ? {} : { sugarGrams }),
-          ...(caffeineMg === undefined ? {} : { caffeineMg }),
-          // Every item needs its own stock pool from the start.
-          stock: { create: { officeId: scope.officeId, currentQty: 0 } },
-        },
-        select: { id: true, name: true },
-      });
+      // Every item needs its own stock pool from the start: both rows in one
+      // atomic batch. A same-named item created since the check above is a
+      // unique-key conflict that rolls it back.
+      const created = { id: newId(), name: trimmed };
+      try {
+        await commitBatch((db) => [
+          db.item.createMany({
+            data: [
+              {
+                ...created,
+                officeId: scope.officeId,
+                sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+                ...(volumeMl === undefined ? {} : { volumeMl }),
+                ...(sugarGrams === undefined ? {} : { sugarGrams }),
+                ...(caffeineMg === undefined ? {} : { caffeineMg }),
+              },
+            ],
+          }),
+          db.stock.createMany({ data: [{ officeId: scope.officeId, itemId: created.id, currentQty: 0 }] }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        throw new McpToolError(`${scope.officeName} already has an item called "${trimmed}".`);
+      }
 
       return {
         ok: true,
@@ -156,62 +168,10 @@ export function registerAdminItemTools(server: McpServer): void {
     ) => {
       const scope = await resolveAdminOffice(actor, office);
       const target = await requireItem(scope.officeId, item);
+      const change = { name, active, isDefault, sortOrder, volumeMl, sugarGrams, caffeineMg };
 
-      if (name !== undefined) {
-        const trimmed = name.trim();
-        const clash = await prisma.item.findUnique({
-          where: { officeId_name: { officeId: scope.officeId, name: trimmed } },
-          select: { id: true },
-        });
-        if (clash && clash.id !== target.id) {
-          throw new McpToolError(
-            `Another item in ${scope.officeName} is already called "${trimmed}".`,
-          );
-        }
-      }
-
-      if (active === false && target.isDefault) {
-        throw new McpToolError(
-          `${target.name} is the office default item, so it cannot be retired. Make another item the default first.`,
-        );
-      }
-      if (isDefault === true && (active === false || !target.active)) {
-        throw new McpToolError(
-          `${target.name} is retired, so it cannot be the default. Set active: true in the same call to restore it.`,
-        );
-      }
-
-      const data = {
-        ...(name === undefined ? {} : { name: name.trim() }),
-        ...(active === undefined ? {} : { active }),
-        ...(sortOrder === undefined ? {} : { sortOrder }),
-        ...(volumeMl === undefined ? {} : { volumeMl }),
-        ...(sugarGrams === undefined ? {} : { sugarGrams }),
-        ...(caffeineMg === undefined ? {} : { caffeineMg }),
-      };
-
-      if (Object.keys(data).length === 0 && isDefault !== true) {
-        throw new McpToolError(
-          "Nothing to change — pass at least one field to update.",
-        );
-      }
-
-      // Clearing the old default and setting the new one must be atomic, or a
-      // failure in between would leave the office with no default item.
-      await prisma.$transaction([
-        ...(isDefault === true
-          ? [
-              prisma.item.updateMany({
-                where: { officeId: scope.officeId, isDefault: true },
-                data: { isDefault: false },
-              }),
-            ]
-          : []),
-        prisma.item.update({
-          where: { id: target.id },
-          data: { ...data, ...(isDefault === true ? { isDefault: true } : {}) },
-        }),
-      ]);
+      await assertItemChange(scope, target, change);
+      await commitItemChange(scope, target, change);
 
       const updated = await prisma.item.findUniqueOrThrow({
         where: { id: target.id },
@@ -230,4 +190,86 @@ export function registerAdminItemTools(server: McpServer): void {
       return { ok: true, item: updated, message: `Updated ${updated.name}.` };
     },
   );
+}
+
+interface ItemChange {
+  readonly name?: string;
+  readonly active?: boolean;
+  readonly isDefault?: boolean;
+  readonly sortOrder?: number;
+  readonly volumeMl?: number;
+  readonly sugarGrams?: number;
+  readonly caffeineMg?: number;
+}
+
+type TargetItem = Awaited<ReturnType<typeof requireItem>>;
+
+/** Refuses a change that would clash on name, retire the default, or make a retired item the default. */
+async function assertItemChange(scope: OfficeScope, target: TargetItem, change: ItemChange): Promise<void> {
+  if (change.name !== undefined) {
+    const trimmed = change.name.trim();
+    const clash = await prisma.item.findUnique({
+      where: { officeId_name: { officeId: scope.officeId, name: trimmed } },
+      select: { id: true },
+    });
+    if (clash && clash.id !== target.id) {
+      throw new McpToolError(`Another item in ${scope.officeName} is already called "${trimmed}".`);
+    }
+  }
+  if (change.active === false && target.isDefault) {
+    throw new McpToolError(
+      `${target.name} is the office default item, so it cannot be retired. Make another item the default first.`,
+    );
+  }
+  if (change.isDefault === true && (change.active === false || !target.active)) {
+    throw new McpToolError(
+      `${target.name} is retired, so it cannot be the default. Set active: true in the same call to restore it.`,
+    );
+  }
+}
+
+/** The columns a change writes: only the fields that were passed. */
+function itemColumns(change: ItemChange) {
+  const { name, active, sortOrder, volumeMl, sugarGrams, caffeineMg } = change;
+  return Object.fromEntries(
+    Object.entries({ name: name?.trim(), active, sortOrder, volumeMl, sugarGrams, caffeineMg }).filter(
+      ([, value]) => value !== undefined,
+    ),
+  );
+}
+
+/**
+ * Writes the change in one atomic batch: clearing the old default and setting
+ * the new one land together, or the office could end up with no default. The
+ * guard only updates the item while its active/default flags are the ones the
+ * checks above saw; changed in between, the batch is rolled back.
+ */
+async function commitItemChange(scope: OfficeScope, target: TargetItem, change: ItemChange): Promise<void> {
+  const data = itemColumns(change);
+  const makeDefault = change.isDefault === true;
+  if (Object.keys(data).length === 0 && !makeDefault) {
+    throw new McpToolError("Nothing to change — pass at least one field to update.");
+  }
+
+  try {
+    await commitBatch((db) => [
+      ...(makeDefault
+        ? [db.item.updateMany({ where: { officeId: scope.officeId, isDefault: true }, data: { isDefault: false } })]
+        : []),
+      expectRows(
+        db.item.updateMany({
+          where: { id: target.id, active: target.active, isDefault: target.isDefault },
+          data: { ...data, ...(makeDefault ? { isDefault: true } : {}) },
+        }),
+        1,
+      ),
+    ]);
+  } catch (error) {
+    if (!(error instanceof BatchConflictError)) throw error;
+    throw new McpToolError(
+      error.reason === "unique"
+        ? `Another item in ${scope.officeName} is already called "${change.name?.trim()}".`
+        : `${target.name} was changed by someone else meanwhile. Read it again and retry.`,
+    );
+  }
 }

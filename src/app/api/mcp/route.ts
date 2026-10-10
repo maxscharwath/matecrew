@@ -18,11 +18,6 @@ import { MCP_INSTRUCTIONS, registerMateCrewTools } from "@/lib/mcp/server";
  * how a client discovers where to send the user to sign in.
  */
 
-// Prisma needs Node APIs, so this cannot run on the edge.
-export const runtime = "nodejs";
-// A tool that walks several months of reimbursements can outrun the 10s default.
-export const maxDuration = 60;
-
 const handler = createMcpHandler(registerMateCrewTools, {
   serverInfo: { name: "matecrew", version: "1.0.0" },
   instructions: MCP_INSTRUCTIONS,

@@ -21,7 +21,8 @@ const encoder = new TextEncoder();
 function base64url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  // `=` only ever appears as the trailing padding of base64.
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function unbase64url(text: string): Uint8Array<ArrayBuffer> | null {

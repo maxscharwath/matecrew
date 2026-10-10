@@ -24,9 +24,7 @@ export async function getSidebarData() {
   const activeMembership = memberships.find(
     (m) => m.office.id === lastOfficeId,
   );
-  const isAdmin = activeMembership
-    ? (activeMembership as { roles: string[] }).roles.includes("ADMIN")
-    : false;
+  const isAdmin = activeMembership?.roles.includes("ADMIN") ?? false;
 
   return {
     officeId: lastOfficeId ?? "",

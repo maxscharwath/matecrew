@@ -65,7 +65,7 @@ export default async function ProfilePage() {
           }),
         }))}
         adminOffices={memberships
-          .filter((m) => (m as { roles: string[] }).roles.includes("ADMIN"))
+          .filter((m) => m.roles.includes("ADMIN"))
           .map((m) => m.office.name)}
       />
     </div>

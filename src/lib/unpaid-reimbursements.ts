@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { fromCents, toCents } from "@/lib/money";
 
 /// Money the user still owes in one office, for one currency. An office can
 /// appear twice if its lines were frozen under different currencies.
@@ -25,7 +26,7 @@ export async function getUnpaidDebts(userId: string): Promise<UnpaidDebt[]> {
       },
     },
     select: {
-      amount: true,
+      amountCents: true,
       currency: true,
       period: {
         select: {
@@ -36,7 +37,8 @@ export async function getUnpaidDebts(userId: string): Promise<UnpaidDebt[]> {
     },
   });
 
-  const byOfficeAndCurrency = new Map<string, UnpaidDebt>();
+  // Summed in integer cents, converted to francs once at the end.
+  const byOfficeAndCurrency = new Map<string, Omit<UnpaidDebt, "amount"> & { cents: number }>();
 
   for (const line of lines) {
     const { officeId, office } = line.period;
@@ -44,30 +46,31 @@ export async function getUnpaidDebts(userId: string): Promise<UnpaidDebt[]> {
     const existing = byOfficeAndCurrency.get(key);
 
     if (existing) {
-      existing.amount += line.amount.toNumber();
+      existing.cents += line.amountCents;
       existing.lineCount += 1;
     } else {
       byOfficeAndCurrency.set(key, {
         officeId,
         officeName: office.name,
         currency: line.currency,
-        amount: line.amount.toNumber(),
+        cents: line.amountCents,
         lineCount: 1,
       });
     }
   }
 
-  // Rounding noise on Decimal sums would otherwise surface a "CHF 0.00" debt.
+  // Cents sum exactly: anything above zero is a real debt.
   return [...byOfficeAndCurrency.values()]
-    .filter((d) => d.amount > 0.01)
-    .sort((a, b) => b.amount - a.amount);
+    .filter((d) => d.cents > 0)
+    .sort((a, b) => b.cents - a.cents)
+    .map(({ cents, ...debt }) => ({ ...debt, amount: fromCents(cents) }));
 }
 
 /// Totals per currency, so the headline never adds CHF to EUR.
 export function totalsByCurrency(debts: UnpaidDebt[]): Map<string, number> {
-  const totals = new Map<string, number>();
+  const cents = new Map<string, number>();
   for (const debt of debts) {
-    totals.set(debt.currency, (totals.get(debt.currency) ?? 0) + debt.amount);
+    cents.set(debt.currency, (cents.get(debt.currency) ?? 0) + toCents(debt.amount));
   }
-  return totals;
+  return new Map([...cents].map(([currency, total]) => [currency, fromCents(total)]));
 }

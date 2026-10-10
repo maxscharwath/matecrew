@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch } from "@/lib/prisma";
 import { authenticateDevice, unauthorized } from "@/lib/device/auth";
 import { FRAME_BYTES, frameHash } from "@/lib/device/commands";
 
@@ -14,10 +14,16 @@ export async function PUT(request: Request) {
   if (bits.length !== FRAME_BYTES) {
     return Response.json({ error: "invalid_request", expected: FRAME_BYTES, got: bits.length }, { status: 400 });
   }
-  const frame = { bits, hash: frameHash(bits), drawnAt: new Date() };
-  await prisma.$transaction([
-    prisma.deviceFrame.upsert({ where: { deviceId: device.id }, create: { deviceId: device.id, ...frame }, update: frame }),
-    prisma.device.update({ where: { id: device.id }, data: { lastSeenAt: frame.drawnAt } }),
+  const hash = frameHash(bits);
+  const drawnAt = new Date();
+  // One atomic batch: the frame (an upsert in one statement, standard on SQLite
+  // and Postgres) and the time the terminal was last seen. Nothing is read.
+  await commitBatch((db) => [
+    db.$executeRaw`INSERT INTO "DeviceFrame" ("deviceId", "bits", "hash", "drawnAt")
+      VALUES (${device.id}, ${bits}, ${hash}, ${drawnAt})
+      ON CONFLICT ("deviceId")
+      DO UPDATE SET "bits" = excluded."bits", "hash" = excluded."hash", "drawnAt" = excluded."drawnAt"`,
+    db.device.updateMany({ where: { id: device.id }, data: { lastSeenAt: drawnAt } }),
   ]);
   return new Response(null, { status: 204 });
 }

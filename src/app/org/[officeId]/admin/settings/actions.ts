@@ -6,8 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { sendSlackMessage, buildTestMessage } from "@/lib/slack";
-import { deleteFile } from "@/lib/storage";
-import { trySyncSessionSchedules } from "@/lib/schedule-sync";
+import { platform } from "@/platform";
 import { getTranslations } from "next-intl/server";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -41,11 +40,6 @@ export async function updateOffice(
 
   const data = parsed.data;
 
-  const before = await prisma.office.findUnique({
-    where: { id: officeId },
-    select: { timezone: true, slackChannelId: true },
-  });
-
   try {
     await prisma.office.update({
       where: { id: officeId },
@@ -65,16 +59,6 @@ export async function updateOffice(
       return { success: false, error: t('errors.officeNameExists') };
     }
     throw e;
-  }
-
-  // Timezone shifts UTC slot for every session; slack channel toggles whether
-  // the office is included in the desired schedule set at all.
-  const newSlackId = data.slackChannelId || null;
-  if (
-    before?.timezone !== data.timezone ||
-    before?.slackChannelId !== newSlackId
-  ) {
-    await trySyncSessionSchedules();
   }
 
   revalidatePath(`/org/${officeId}/admin/settings`);
@@ -127,11 +111,10 @@ export async function deleteOffice(officeId: string): Promise<ActionResult> {
     b.invoices.map((i) => i.storageKey)
   );
 
-  await Promise.allSettled(storageKeys.map((key) => deleteFile(key)));
+  await Promise.allSettled(storageKeys.map((key) => platform.storage.delete(key)));
 
   // Cascade delete handles all related records (see schema onDelete: Cascade)
   await prisma.office.delete({ where: { id: officeId } });
 
-  await trySyncSessionSchedules();
   redirect("/");
 }

@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { ShieldCheck, Wrench, BarChart3, CupSoda } from "lucide-react";
 import { getOptionalSession } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -62,7 +63,7 @@ export default async function OAuthConsentPage({
   // An MCP token acts as the user, so what it can reach is exactly the user's
   // own access — including admin powers in offices where they are an admin.
   const adminOffices = await prisma.membership.findMany({
-    where: { userId: session.user.id, roles: { has: "ADMIN" } },
+    where: { userId: session.user.id, ...hasRoleWhere("ADMIN") },
     select: { office: { select: { name: true } } },
     orderBy: { office: { name: "asc" } },
   });

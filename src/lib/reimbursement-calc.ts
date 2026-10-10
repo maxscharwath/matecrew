@@ -99,6 +99,15 @@ interface ItemTotals {
   lossCost: number;
 }
 
+/** Net cans drunk by everyone whose net consumption is positive. */
+function drinkingWeight(byUser: ReadonlyMap<string, UserTotals>): number {
+  let totalWeight = 0;
+  for (const totals of byUser.values()) {
+    if (totals.qty > 0) totalWeight += totals.qty;
+  }
+  return totalWeight;
+}
+
 /**
  * The period arithmetic, over an already-built ledger.
  *
@@ -171,10 +180,7 @@ export function sliceLedger(
   // Shrinkage is shared out by how much each person drank. Someone whose net
   // consumption is zero or negative (more cancellations than cans) carries none
   // of it rather than being credited for the loss.
-  let totalWeight = 0;
-  for (const totals of byUser.values()) {
-    if (totals.qty > 0) totalWeight += totals.qty;
-  }
+  const totalWeight = drinkingWeight(byUser);
   const billable = totalWeight > 0;
   const unallocatedLossCost = billable ? 0 : lossCost;
 

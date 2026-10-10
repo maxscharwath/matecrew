@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch, prisma } from "@/lib/prisma";
 
 /**
  * The MCP clients a given user has connected, and how to disconnect them.
@@ -55,10 +55,11 @@ export async function revokeMcpConnection(
   userId: string,
   clientId: string,
 ): Promise<boolean> {
-  const [tokens] = await prisma.$transaction([
-    prisma.oauthAccessToken.deleteMany({ where: { userId, clientId } }),
+  // Both deletes in one atomic batch; nothing read, nothing to guard.
+  const [tokens] = await commitBatch((db) => [
+    db.oauthAccessToken.deleteMany({ where: { userId, clientId } }),
     // Without this the next authorize would skip the consent screen.
-    prisma.oauthConsent.deleteMany({ where: { userId, clientId } }),
+    db.oauthConsent.deleteMany({ where: { userId, clientId } }),
   ]);
-  return tokens.count > 0;
+  return tokens > 0;
 }

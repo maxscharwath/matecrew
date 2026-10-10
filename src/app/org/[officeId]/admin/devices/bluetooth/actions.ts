@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
 import { requireSession } from "@/lib/auth-utils";
 import { LINK_TTL_SECONDS, newDeviceCode, newUserCode, sha256 } from "@/lib/device/codes";
 
@@ -10,11 +11,11 @@ const hardwareId = z.string().regex(/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/);
 
 async function requireAdmin(officeId: string) {
   const session = await requireSession();
-  const membership = await prisma.membership.findUnique({
-    where: { userId_officeId: { userId: session.user.id, officeId } },
-    select: { roles: true },
+  const admin = await prisma.membership.findFirst({
+    where: { userId: session.user.id, officeId, ...hasRoleWhere("ADMIN") },
+    select: { id: true },
   });
-  return membership?.roles.includes("ADMIN") ? session.user.id : null;
+  return admin ? session.user.id : null;
 }
 
 /**
@@ -58,6 +59,18 @@ export async function prepareBluetoothLink(input: { officeId: string; hardwareId
     },
   });
   return { ok: true, secret, expiresIn: LINK_TTL_SECONDS };
+}
+
+/** This office's terminal with this hardware id, for a terminal already linked: its console. */
+export async function officeTerminal(input: { officeId: string; hardwareId: string }): Promise<{ id: string; name: string } | null> {
+  const parsed = z.object({ officeId: z.string().min(1), hardwareId }).safeParse(input);
+  if (!parsed.success) return null;
+  if (!(await requireAdmin(parsed.data.officeId))) return null;
+  return prisma.device.findFirst({
+    where: { officeId: parsed.data.officeId, hardwareId: parsed.data.hardwareId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, name: true },
+  });
 }
 
 /** The terminal linked since `since` with this hardware id, once it redeemed its link. */

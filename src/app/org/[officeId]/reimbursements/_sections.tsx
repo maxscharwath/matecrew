@@ -2,6 +2,7 @@ import { cache } from "react";
 import { Eye, CupSoda, Banknote, CircleCheckBig, Wallet } from "lucide-react";
 import { getTranslations, getLocale } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
+import { fromCents } from "@/lib/money";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { buildCostingLedger } from "@/lib/costing";
 import { calculateReimbursements, sliceLedger } from "@/lib/reimbursement-calc";
@@ -96,7 +97,8 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
         direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
         otherUserName: other.name,
         otherUserImage: resolveAvatarUrl(other.image),
-        amount: l.amount.toNumber(),
+        amount: fromCents(l.amountCents),
+        amountCents: l.amountCents,
         status: l.status,
       };
     });
@@ -113,14 +115,19 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
     };
   });
 
-  const totalOwed = periodsWithData
-    .flatMap((p) => p.lines)
-    .filter((l) => l.direction === "pay" && l.status === "PENDING")
-    .reduce((sum, l) => sum + l.amount, 0);
-  const totalOwedToYou = periodsWithData
-    .flatMap((p) => p.lines)
-    .filter((l) => l.direction === "receive" && l.status === "PENDING")
-    .reduce((sum, l) => sum + l.amount, 0);
+  // Summed in integer cents, converted to francs once.
+  const totalOwed = fromCents(
+    periodsWithData
+      .flatMap((p) => p.lines)
+      .filter((l) => l.direction === "pay" && l.status === "PENDING")
+      .reduce((sum, l) => sum + l.amountCents, 0),
+  );
+  const totalOwedToYou = fromCents(
+    periodsWithData
+      .flatMap((p) => p.lines)
+      .filter((l) => l.direction === "receive" && l.status === "PENDING")
+      .reduce((sum, l) => sum + l.amountCents, 0),
+  );
   const netBalance = totalOwedToYou - totalOwed;
 
   return { periodsWithData, totalOwed, totalOwedToYou, netBalance };
@@ -240,8 +247,8 @@ export async function PendingPaymentsSection({ officeId, userId }: SectionProps)
 
   const toPay = pending.filter((p) => p.line.direction === "pay");
   const toReceive = pending.filter((p) => p.line.direction === "receive");
-  const owedTotal = toPay.reduce((sum, p) => sum + p.line.amount, 0);
-  const owedToYouTotal = toReceive.reduce((sum, p) => sum + p.line.amount, 0);
+  const owedTotal = fromCents(toPay.reduce((sum, p) => sum + p.line.amountCents, 0));
+  const owedToYouTotal = fromCents(toReceive.reduce((sum, p) => sum + p.line.amountCents, 0));
   const netBalance = owedToYouTotal - owedTotal;
 
   return (

@@ -1,11 +1,18 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
 import { itemImage, withOpacity } from "@/lib/device/bitmap";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
-import { deviceTheme, type DeviceState, type DeviceScreen } from "@/lib/device/contract";
+import { deviceTheme, type DeviceState, type DeviceScreen, type DeviceTheme } from "@/lib/device/contract";
+import { parseSyncTimes } from "@/lib/device/sync-times";
+
+/** The theme of terminals that have none of their own: `DEVICE_UI_THEME`, else paper. */
+export function defaultDeviceTheme(): DeviceTheme {
+  return deviceTheme.catch("paper").parse(platform.env.get("DEVICE_UI_THEME") ?? "paper");
+}
 
 /** Below this the terminal and the site warn that it needs charging. */
 export const LOW_BATTERY_MV = 3500;
@@ -15,7 +22,7 @@ export const PREPARATION_MINUTES = 90;
 /** Interim app download until per-device apps: `DEVICE_UI_APP` names one of `device/dist/*.dui`. */
 const DOWNLOADABLE_APPS = ["hello", "showcase"] as const;
 export function downloadableApp(): (typeof DOWNLOADABLE_APPS)[number] | null {
-  const app = process.env.DEVICE_UI_APP;
+  const app = platform.env.get("DEVICE_UI_APP");
   return DOWNLOADABLE_APPS.find((name) => name === app) ?? null;
 }
 /** Days of stock on the main screen's chart, today included. */
@@ -45,8 +52,8 @@ async function loadItems(officeId: string) {
     select: {
       id: true,
       name: true,
-      imageKey: true,
       terminalImage: true,
+      terminalPhoto: true,
       lowStockThreshold: true,
       stock: { where: { officeId }, select: { currentQty: true } },
     },
@@ -84,19 +91,20 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     device: { id: device.id, name: device.name },
     office: { name: office.name, timezone: office.timezone, locale: office.locale },
     keys: { left: { label: labels.left }, right: { label: labels.right } },
-    items: await Promise.all(
-      ordered.map(async (i) => {
-        const drawn = await itemImage(i.imageKey, i.terminalImage);
-        return { id: i.id, name: i.name, stock: i.qty, picture: base64(withOpacity(drawn)) };
-      }),
-    ),
+    items: ordered.map((i) => ({
+      id: i.id,
+      name: i.name,
+      stock: i.qty,
+      picture: base64(withOpacity(itemImage(i.terminalImage, i.terminalPhoto))),
+    })),
     // Names only: what each one drank stays on the site (`/api/device/account`).
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "" })),
-    syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
+    syncTimes: await syncTimes(office.id, office.timezone, parseSyncTimes(device.syncTimes)),
     serverTime: new Date().toISOString(),
     screen: await buildScreenData(device, { items, labels }),
     appUrl: downloadableApp() ? "/api/device/ui" : null,
-    theme: deviceTheme.catch("paper").parse(process.env.DEVICE_UI_THEME ?? "paper"),
+    // Its own, set in its console's settings, else the site's default.
+    theme: deviceTheme.catch(defaultDeviceTheme()).parse(device.theme ?? defaultDeviceTheme()),
     firmware: release && {
       version: release.version,
       url: `/api/device/firmware/${encodeURIComponent(release.version)}`,
@@ -147,17 +155,17 @@ async function preparation(officeId: string, timezone: string) {
     where: { officeId, date: getTodayDate(), mateSessionId: session.id, status: "REQUESTED" },
     orderBy: { createdAt: "asc" },
     select: {
-      item: { select: { id: true, name: true, imageKey: true, terminalImage: true } },
+      item: { select: { id: true, name: true, terminalImage: true, terminalPhoto: true } },
       user: { select: { name: true } },
     },
   });
   if (requests.length === 0) return null;
-  const byItem = new Map<string, { name: string; imageKey: string | null; terminalImage: Uint8Array | null; names: string[] }>();
+  const byItem = new Map<string, { name: string; terminalImage: Uint8Array | null; terminalPhoto: Uint8Array | null; names: string[] }>();
   for (const r of requests) {
     const entry = byItem.get(r.item.id) ?? {
       name: r.item.name,
-      imageKey: r.item.imageKey,
       terminalImage: r.item.terminalImage,
+      terminalPhoto: r.item.terminalPhoto,
       names: [],
     };
     entry.names.push(r.user.name.split(" ")[0]);
@@ -196,17 +204,12 @@ export async function buildScreenData(
     wifiBars: wifiBars(device.wifiRssi),
     batteryPercent: batteryPercent(device.batteryMv),
     batteryLowLabel: device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
-    items: await Promise.all(
-      items.map(async (i, index) => {
-        const drawn = await itemImage(i.imageKey, i.terminalImage);
-        return {
-          name: i.name,
-          stock: i.qty,
-          low: i.qty <= thresholds[index],
-          picture: base64(withOpacity(drawn)),
-        };
-      }),
-    ),
+    items: items.map((i, index) => ({
+      name: i.name,
+      stock: i.qty,
+      low: i.qty <= thresholds[index],
+      picture: base64(withOpacity(itemImage(i.terminalImage, i.terminalPhoto))),
+    })),
     chart:
       items.length > 0
         ? {
@@ -218,17 +221,12 @@ export async function buildScreenData(
     preparation: prep && {
       title: prep.label ? t("preparationOf", { label: prep.label }) : t("preparation"),
       total: t("toPrepare", { count: prep.total }),
-      items: await Promise.all(
-        prep.items.map(async (i) => {
-          const drawn = await itemImage(i.imageKey, i.terminalImage);
-          return {
-            name: i.name,
-            count: i.names.length,
-            names: i.names.join(", "),
-            picture: base64(withOpacity(drawn)),
-          };
-        }),
-      ),
+      items: prep.items.map((i) => ({
+        name: i.name,
+        count: i.names.length,
+        names: i.names.join(", "),
+        picture: base64(withOpacity(itemImage(i.terminalImage, i.terminalPhoto))),
+      })),
       sessionId: prep.sessionId,
       serveLabel: t("serve"),
     },

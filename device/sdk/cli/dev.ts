@@ -92,10 +92,10 @@ export async function dev(args: string[]): Promise<void> {
     if (RUST.test(path)) engineChanged = true;
     else if (!SOURCES.test(path)) return;
     clearTimeout(timer);
-    timer = setTimeout(() => {
+    timer = setTimeout(async () => {
       const engine = engineChanged;
       engineChanged = false;
-      void (engine ? rebuildEngine() : Promise.all(apps.map(rebuild)));
+      await (engine ? rebuildEngine() : Promise.all(apps.map(rebuild)));
     }, 60);
   });
 

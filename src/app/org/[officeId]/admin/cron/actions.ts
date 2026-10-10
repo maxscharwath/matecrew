@@ -4,24 +4,28 @@ import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { sendSessionNotifications } from "@/lib/notifications";
-import { calculateReimbursements } from "@/lib/reimbursement-calc";
-import { sendSlackMessage, buildMonthlyBillMessage } from "@/lib/slack";
+import { closeMonthlyReimbursements } from "@/lib/monthly-reimbursement";
+import { pruneExpiredOauthTokens } from "@/lib/mcp/token-cleanup";
+import type { ScheduleName } from "@/jobs/schedules";
 
 type TriggerResult =
   | { success: true; message: string }
   | { success: false; error: string };
 
+/** Runs a scheduled task now, limited to this office where the task is per office. */
 export async function triggerCron(
   officeId: string,
-  cronId: string,
+  cronId: ScheduleName,
 ): Promise<TriggerResult> {
   await requireOrgRoles(officeId, "ADMIN");
 
   switch (cronId) {
-    case "daily-request":
+    case "session-notifications":
       return triggerSessionNotifications(officeId);
     case "monthly-reimbursement":
       return triggerMonthlyReimbursement(officeId);
+    case "oauth-token-prune":
+      return triggerTokenPrune();
     default: {
       const t = await getTranslations();
       return { success: false, error: t('errors.cronUnknown') };
@@ -69,77 +73,26 @@ async function triggerSessionNotifications(officeId: string): Promise<TriggerRes
 
 async function triggerMonthlyReimbursement(officeId: string): Promise<TriggerResult> {
   const t = await getTranslations();
+  const { closed, offices } = await closeMonthlyReimbursements({ now: new Date(), officeId });
+  const { month, year } = closed;
+  const outcome = offices.get(officeId);
 
-  const now = new Date();
-  const prevMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() - 1, 1));
-  const month = prevMonth.getUTCMonth() + 1;
-  const year = prevMonth.getUTCFullYear();
-  const startDate = prevMonth;
-  const endDate = new Date(Date.UTC(year, month, 0));
-
-  const existing = await prisma.reimbursementPeriod.findUnique({
-    where: {
-      officeId_year_month: { officeId, year, month },
-    },
-  });
-
-  if (existing) {
-    return {
-      success: false,
-      error: t('errors.periodAlreadyExists', { month, year }),
-    };
+  switch (outcome?.status) {
+    case "created":
+      return outcome.statementsQueued
+        ? { success: true, message: t('errors.periodCreated', { month, year, lines: outcome.lines }) }
+        : { success: false, error: t('errors.statementsNotQueued', { month, year }) };
+    case "exists":
+      return { success: false, error: t('errors.periodAlreadyExists', { month, year }) };
+    case "failed":
+      return { success: false, error: outcome.error };
+    default:
+      return { success: false, error: t('errors.noConsumptionForPeriod', { month, year }) };
   }
+}
 
-  const result = await calculateReimbursements(officeId, startDate, endDate);
-
-  if (result.totalConsumption === 0 && result.totalCost === 0) {
-    return {
-      success: false,
-      error: t('errors.noConsumptionForPeriod', { month, year }),
-    };
-  }
-
-  await prisma.reimbursementPeriod.create({
-    data: {
-      officeId,
-      month,
-      year,
-      startDate,
-      endDate,
-      lines: {
-        create: result.lines.map((l) => ({
-          fromUserId: l.fromUserId,
-          toUserId: l.toUserId,
-          amount: l.amount,
-          currency: "CHF",
-        })),
-      },
-    },
-  });
-
-  const office = await prisma.office.findUniqueOrThrow({
-    where: { id: officeId },
-    select: { name: true, slackChannelId: true, locale: true },
-  });
-
-  if (office.slackChannelId) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const { blocks, fallback } = await buildMonthlyBillMessage({
-      officeName: office.name,
-      month,
-      year,
-      totalConsumption: result.totalConsumption,
-      totalCost: result.totalCost,
-      consumers: result.shares.length,
-      appUrl,
-      officeId,
-      locale: office.locale,
-    });
-    await sendSlackMessage(office.slackChannelId, blocks, fallback);
-  }
-
-  return {
-    success: true,
-    message: t('errors.periodCreated', { month, year, lines: result.lines.length }),
-  };
+async function triggerTokenPrune(): Promise<TriggerResult> {
+  const t = await getTranslations();
+  const { deleted } = await pruneExpiredOauthTokens();
+  return { success: true, message: t('errors.oauthTokensPruned', { count: deleted }) };
 }

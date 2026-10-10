@@ -1,5 +1,6 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch, expectRows, guardedChunks, prisma, retryOnConflict } from "@/lib/prisma";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { platform } from "@/platform";
 import { stockDeltaOps } from "@/lib/stock";
 
 export type ServeSessionResult =
@@ -14,14 +15,25 @@ export type ServeSessionResult =
  * button — the latter has no authenticated office membership, so the caller
  * supplies the user that should be attributed for the stock movement (null
  * when the Slack clicker can't be linked to a MateCrew user).
+ *
+ * Reads the pending requests, then commits everything in one atomic batch.
+ * The guard requires every one of them to still be REQUESTED; if a runner or
+ * the Slack button served or cancelled one in between, nothing is written and
+ * the whole thing runs again on fresh data.
  */
-export async function serveSession(opts: {
-  officeId: string;
-  mateSessionId: string | null;
-  date: Date;
-  actingUserId: string | null;
-  movementNote?: string;
-}): Promise<ServeSessionResult> {
+export function serveSession(opts: ServeSessionOptions): Promise<ServeSessionResult> {
+  return retryOnConflict(() => serveOnce(opts));
+}
+
+interface ServeSessionOptions {
+  readonly officeId: string;
+  readonly mateSessionId: string | null;
+  readonly date: Date;
+  readonly actingUserId: string | null;
+  readonly movementNote?: string;
+}
+
+async function serveOnce(opts: ServeSessionOptions): Promise<ServeSessionResult> {
   const pending = await prisma.dailyRequest.findMany({
     where: {
       officeId: opts.officeId,
@@ -42,25 +54,28 @@ export async function serveSession(opts: {
     else byItem.set(r.itemId, [r]);
   }
 
-  const ops = [
-    prisma.dailyRequest.updateMany({
-      where: { id: { in: pending.map((r) => r.id) } },
-      data: { status: "SERVED" },
-    }),
-    ...pending.map((r) =>
-      prisma.consumptionEntry.create({
-        data: {
-          officeId: opts.officeId,
-          userId: r.userId,
-          itemId: r.itemId,
-          date: r.date,
-          qty: 1,
-          source: "DAILY_REQUEST",
-        },
-      }),
+  await commitBatch((db) => [
+    ...guardedChunks(pending.map((r) => r.id)).map((ids) =>
+      expectRows(
+        db.dailyRequest.updateMany({
+          where: { id: { in: ids }, status: "REQUESTED" },
+          data: { status: "SERVED" },
+        }),
+        ids.length,
+      ),
     ),
+    db.consumptionEntry.createMany({
+      data: pending.map((r) => ({
+        officeId: opts.officeId,
+        userId: r.userId,
+        itemId: r.itemId,
+        date: r.date,
+        qty: 1,
+        source: "DAILY_REQUEST" as const,
+      })),
+    }),
     ...[...byItem.entries()].flatMap(([itemId, reqs]) =>
-      stockDeltaOps({
+      stockDeltaOps(db, {
         officeId: opts.officeId,
         itemId,
         delta: -reqs.length,
@@ -69,12 +84,10 @@ export async function serveSession(opts: {
         userId: opts.actingUserId,
       }),
     ),
-  ];
-
-  await prisma.$transaction(ops);
+  ]);
 
   for (const itemId of byItem.keys()) {
-    checkAndAlertLowStock(opts.officeId, itemId).catch(() => {});
+    platform.runInBackground(checkAndAlertLowStock(opts.officeId, itemId), "low-stock alert");
   }
 
   return { kind: "ok", servedCount: pending.length };

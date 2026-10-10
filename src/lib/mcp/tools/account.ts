@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
+import { sameName } from "@/lib/mcp/name-match";
 import { getCurrentTimeInTimezone, getTodayDate, toISODateString } from "@/lib/date";
 import { notifyAdminsOfJoinRequest } from "@/lib/notify-join-request";
 import { listMemberships, McpToolError, resolveOffice } from "@/lib/mcp/context";
@@ -138,10 +139,8 @@ export function registerAccountTools(server: McpServer): void {
       idempotent: true,
     },
     async ({ officeName }, { actor }) => {
-      const office = await prisma.office.findFirst({
-        where: { name: { equals: officeName.trim(), mode: "insensitive" } },
-        select: { id: true, name: true },
-      });
+      const offices = await prisma.office.findMany({ select: { id: true, name: true } });
+      const office = offices.find((o) => sameName(o.name, officeName));
       if (!office) {
         throw new McpToolError(
           `No office named "${officeName}" exists. Office names must match exactly — ask a colleague for the exact name.`,

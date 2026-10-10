@@ -37,8 +37,12 @@ export const auth = betterAuth({
   // OAuth `issuer`, and it throws if the option is unset.
   baseURL: getBaseUrl(),
 
+  // `prisma` resolves the request's client on each call, so holding it from
+  // module load is fine. No `transaction`: Better Auth's writes are single
+  // statements, and atomic multi-row writes go through `commitBatch`.
   database: prismaAdapter(prisma, {
-    provider: "postgresql",
+    provider: "sqlite",
+    transaction: false,
   }),
 
   databaseHooks: {

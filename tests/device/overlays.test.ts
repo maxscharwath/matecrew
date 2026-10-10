@@ -14,7 +14,7 @@ test("system notifications overlay built-in screens, expire offline and clear on
   globalThis.fetch = (async () =>
     new Response(bytes, {
       headers: { "Content-Type": "application/wasm" },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
   const app = await DeviceWasm.load();
   const idle = app.render(LINKED);
   assert.equal(app.notify("Bonjour !", 1000, 100), true);
@@ -40,7 +40,7 @@ test("toasts expire offline and dialogs capture input until one confirmation or 
   globalThis.fetch = (async () =>
     new Response(bytes, {
       headers: { "Content-Type": "application/wasm" },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
   const app = await DeviceWasm.load();
   app.loadShowcase();
   // Nine pages after home: the hardware page (transport taps are 200 × 120).

@@ -1,6 +1,6 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch, newId, prisma, retryOnConflict } from "@/lib/prisma";
 import { sumStockQty } from "@/lib/items";
-import { stockDeltaOps } from "@/lib/stock";
+import { stockDeltaOps, stockUnchanged } from "@/lib/stock";
 import { gapOf, summarizeGaps } from "@/lib/stock-gaps";
 
 /**
@@ -45,11 +45,9 @@ type RecordStockCountResult =
   | { ok: true; result: StockCountResult }
   | { ok: false; reason: "unknown_item" | "duplicate_item"; itemId: string };
 
-/** Thrown inside the transaction so Prisma rolls back; caught at the boundary. */
-class UnknownItemError extends Error {
-  constructor(readonly itemId: string) {
-    super(`Unknown item ${itemId}`);
-  }
+interface ReadLine extends CountedLine {
+  /** The pool level the line was computed from; undefined when the item had no pool row. */
+  readonly readQty: number | undefined;
 }
 
 /**
@@ -78,73 +76,85 @@ export async function recordStockCount(opts: {
     seen.add(c.itemId);
   }
 
-  // Expected quantities are read inside the transaction that writes the gap.
-  // A round served between the read and the write would otherwise be billed as
-  // shrinkage and deducted from stock a second time.
-  let outcome: { lines: CountedLine[]; gaps: CountedLine[] };
-  try {
-    outcome = await prisma.$transaction(async (tx) => {
-      const items = await tx.item.findMany({
-        where: { officeId, id: { in: [...seen] } },
-        select: { id: true, name: true, stock: { select: { currentQty: true } } },
-      });
-      const byId = new Map(items.map((i) => [i.id, i]));
-
-      const lines: CountedLine[] = [];
-      for (const c of counts) {
-        const item = byId.get(c.itemId);
-        if (!item) throw new UnknownItemError(c.itemId);
-        const expectedQty = sumStockQty(item.stock);
-        lines.push({
-          itemId: item.id,
-          itemName: item.name,
-          expectedQty,
-          countedQty: c.countedQty,
-          delta: gapOf(expectedQty, c.countedQty),
-        });
-      }
-
-      const gaps = lines.filter((l) => l.delta !== 0);
-
-      await tx.stockCount.create({
-        data: {
-          officeId,
-          countedAt,
-          countedByUserId: userId,
-          note,
-          lines: {
-            create: lines.map((l) => ({
-              itemId: l.itemId,
-              expectedQty: l.expectedQty,
-              countedQty: l.countedQty,
-              delta: l.delta,
-            })),
-          },
-        },
-      });
-      await Promise.all(
-        gaps.flatMap((l) =>
-          stockDeltaOps({
-            officeId,
-            itemId: l.itemId,
-            delta: l.delta,
-            reason: "INVENTORY",
-            note,
-            userId,
-            client: tx,
-          }),
-        ),
-      );
-
-      return { lines, gaps };
-    });
-  } catch (e) {
-    if (e instanceof UnknownItemError) {
-      return { ok: false, reason: "unknown_item", itemId: e.itemId };
-    }
-    throw e;
+  // Expected quantities are read, the gaps computed, then the count, its lines
+  // and the stock movements are written in one atomic batch. Its guards require
+  // every pool with a gap to still be at the level read: a round served in
+  // between would otherwise be billed as shrinkage and deducted from stock a
+  // second time. Then the batch is rolled back and the count reconciled again.
+  const outcome = await retryOnConflict(() => reconcile(officeId, userId, counts, note, countedAt));
+  if ("unknownItemId" in outcome) {
+    return { ok: false, reason: "unknown_item", itemId: outcome.unknownItemId };
   }
 
   const { lines, gaps } = outcome;
   return { ok: true, result: { lines, gaps, ...summarizeGaps(gaps) } };
+}
+
+/** One read-compute-commit pass of `recordStockCount`. */
+async function reconcile(
+  officeId: string,
+  userId: string,
+  counts: readonly CountedItem[],
+  note: string | null,
+  countedAt: Date,
+): Promise<{ lines: CountedLine[]; gaps: CountedLine[] } | { unknownItemId: string }> {
+  const items = await prisma.item.findMany({
+    where: { officeId, id: { in: counts.map((c) => c.itemId) } },
+    select: { id: true, name: true, stock: { where: { officeId }, select: { currentQty: true } } },
+  });
+  const byId = new Map(items.map((i) => [i.id, i]));
+
+  const read: ReadLine[] = [];
+  for (const c of counts) {
+    const item = byId.get(c.itemId);
+    if (!item) return { unknownItemId: c.itemId };
+    const expectedQty = sumStockQty(item.stock);
+    read.push({
+      itemId: item.id,
+      itemName: item.name,
+      expectedQty,
+      countedQty: c.countedQty,
+      delta: gapOf(expectedQty, c.countedQty),
+      readQty: item.stock.length === 0 ? undefined : expectedQty,
+    });
+  }
+
+  const gapsRead = read.filter((l) => l.delta !== 0);
+  const countId = newId();
+  await commitBatch((db) => [
+    ...gapsRead.map((l) => stockUnchanged(db, officeId, l.itemId, l.readQty)),
+    db.stockCount.createMany({
+      data: [{ id: countId, officeId, countedAt, countedByUserId: userId, note }],
+    }),
+    db.stockCountLine.createMany({
+      data: read.map((l) => ({
+        countId,
+        itemId: l.itemId,
+        expectedQty: l.expectedQty,
+        countedQty: l.countedQty,
+        delta: l.delta,
+      })),
+    }),
+    ...gapsRead.flatMap((l) =>
+      stockDeltaOps(db, {
+        officeId,
+        itemId: l.itemId,
+        delta: l.delta,
+        reason: "INVENTORY",
+        note,
+        userId,
+      }),
+    ),
+  ]);
+
+  const lines = read.map(
+    (l): CountedLine => ({
+      itemId: l.itemId,
+      itemName: l.itemName,
+      expectedQty: l.expectedQty,
+      countedQty: l.countedQty,
+      delta: l.delta,
+    }),
+  );
+  return { lines, gaps: lines.filter((l) => l.delta !== 0) };
 }

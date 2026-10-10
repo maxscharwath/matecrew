@@ -32,6 +32,7 @@ import { refreshSlackSessionMessage } from "@/lib/notifications";
 import { serveSession } from "@/lib/serve-session";
 import { getCurrentTimeInTimezone } from "@/lib/date";
 import { revalidatePath } from "next/cache";
+import { platform } from "@/platform";
 
 interface InteractionPayload {
   type: string;
@@ -288,111 +289,81 @@ async function handleMarkServed(
   return new Response(null, { status: 200 });
 }
 
-export async function POST(request: Request) {
-  const rawBody = await request.text();
-  const isValid = verifySlackSignature(
-    rawBody,
-    request.headers.get("x-slack-request-timestamp"),
-    request.headers.get("x-slack-signature"),
-  );
-  if (!isValid) {
-    return Response.json({ error: "Invalid signature" }, { status: 401 });
+type ActionContext = NonNullable<ReturnType<typeof decodeActionValue>>;
+type ActionKind = "request" | "pick" | "manage" | "cancel" | "markServed";
+
+function actionKind(actionId: string): ActionKind | null {
+  if (actionId === SLACK_REQUEST_ACTION_ID || actionId.startsWith(`${SLACK_REQUEST_ACTION_ID}:`)) {
+    return "request";
   }
+  if (actionId === SLACK_PICK_ACTION_ID) return "pick";
+  if (actionId === SLACK_MANAGE_ACTION_ID) return "manage";
+  if (actionId === SLACK_CANCEL_ACTION_ID) return "cancel";
+  if (actionId === SLACK_MARK_SERVED_ACTION_ID) return "markServed";
+  return null;
+}
 
-  const form = new URLSearchParams(rawBody);
-  const raw = form.get("payload");
+function parsePayload(rawBody: string): InteractionPayload | Response {
+  const raw = new URLSearchParams(rawBody).get("payload");
   if (!raw) return badRequest("Missing payload");
-
-  let payload: InteractionPayload;
   try {
-    payload = JSON.parse(raw) as InteractionPayload;
+    return JSON.parse(raw) as InteractionPayload;
   } catch {
     return badRequest("Invalid payload JSON");
   }
+}
 
-  if (payload.type !== "block_actions") {
-    return Response.json({});
-  }
-
-  const action = payload.actions?.[0];
-  if (!action) return Response.json({});
-  const isRequest =
-    action.action_id === SLACK_REQUEST_ACTION_ID ||
-    action.action_id.startsWith(`${SLACK_REQUEST_ACTION_ID}:`);
-  const isPick = action.action_id === SLACK_PICK_ACTION_ID;
-  const isManage = action.action_id === SLACK_MANAGE_ACTION_ID;
-  const isCancel = action.action_id === SLACK_CANCEL_ACTION_ID;
-  const isMarkServed = action.action_id === SLACK_MARK_SERVED_ACTION_ID;
-  if (!isRequest && !isPick && !isManage && !isCancel && !isMarkServed) {
-    return Response.json({});
-  }
-
-  // Buttons carry the context in `value`; a select carries it per option.
-  const rawValue = action.selected_option?.value ?? action.value;
-  if (!rawValue) return badRequest("Missing action value");
-  const ctx = decodeActionValue(rawValue);
-  if (!ctx) return badRequest("Invalid action value");
-
-  const dateObj = new Date(`${ctx.date}T00:00:00.000Z`);
-  if (Number.isNaN(dateObj.getTime())) return badRequest("Invalid date");
-
-  if (isMarkServed) {
-    return handleMarkServed(ctx, dateObj, payload);
-  }
-
-  const office = await prisma.office.findUnique({
-    where: { id: ctx.officeId },
-    select: { locale: true },
-  });
-  const locale = office?.locale ?? "fr";
-
-  const user = await resolveUser(payload.user.id);
-
-  if (!user) {
-    if (isCancel) {
-      const { blocks } = await buildConnectErrorMessage({
-        locale,
-        reason: "unknown",
-      });
-      return ephemeral(payload, blocks, "Unknown error");
-    }
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const token = createSlackLinkToken({
-      slackUserId: payload.user.id,
-      slackUsername: payload.user.name ?? "",
-      officeId: ctx.officeId,
-      mateSessionId: ctx.mateSessionId,
-      itemId: ctx.itemId,
-      date: ctx.date,
-      responseUrl: payload.response_url,
+/** A Slack user with no MateCrew account: offers a signed link to connect, except for a cancel. */
+async function promptToLink(
+  payload: InteractionPayload,
+  ctx: ActionContext,
+  locale: string,
+  kind: ActionKind,
+): Promise<Response> {
+  if (kind === "cancel") {
+    const { blocks } = await buildConnectErrorMessage({
+      locale,
+      reason: "unknown",
     });
-    const connectUrl = `${appUrl}/slack/link?token=${encodeURIComponent(token)}`;
-    const { blocks } = await buildConnectSlackMessage({ connectUrl, locale });
-    return ephemeral(payload, blocks, "Connect your Slack to MateCrew");
+    return ephemeral(payload, blocks, "Unknown error");
   }
+  const token = createSlackLinkToken({
+    slackUserId: payload.user.id,
+    slackUsername: payload.user.name ?? "",
+    officeId: ctx.officeId,
+    mateSessionId: ctx.mateSessionId,
+    itemId: ctx.itemId,
+    date: ctx.date,
+    responseUrl: payload.response_url,
+  });
+  const connectUrl = `${platform.env.baseUrl()}/slack/link?token=${encodeURIComponent(token)}`;
+  const { blocks } = await buildConnectSlackMessage({ connectUrl, locale });
+  return ephemeral(payload, blocks, "Connect your Slack to MateCrew");
+}
 
-  // "Manage my order": no write, just show the private view.
-  if (isManage) {
-    const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
-    return ephemeral(payload, blocks, fallback);
-  }
-
-  const result: RequestResult | CancelResult =
-    isRequest || isPick
-      ? await createMateRequest({
-          userId: user.id,
-          officeId: ctx.officeId,
-          mateSessionId: ctx.mateSessionId,
-          date: dateObj,
-          itemId: ctx.itemId,
-        })
-      : await cancelMateRequest({
-          userId: user.id,
-          officeId: ctx.officeId,
-          mateSessionId: ctx.mateSessionId,
-          date: dateObj,
-        });
+/** Places or cancels the order, then refreshes the channel message and the private view. */
+async function changeOrder(
+  payload: InteractionPayload,
+  userId: string,
+  ctx: ActionContext,
+  dateObj: Date,
+  locale: string,
+  ordering: boolean,
+): Promise<Response> {
+  const result: RequestResult | CancelResult = ordering
+    ? await createMateRequest({
+        userId,
+        officeId: ctx.officeId,
+        mateSessionId: ctx.mateSessionId,
+        date: dateObj,
+        itemId: ctx.itemId,
+      })
+    : await cancelMateRequest({
+        userId,
+        officeId: ctx.officeId,
+        mateSessionId: ctx.mateSessionId,
+        date: dateObj,
+      });
 
   const fromEphemeral = payload.container?.is_ephemeral === true;
 
@@ -415,12 +386,65 @@ export async function POST(request: Request) {
 
   if (fromEphemeral) {
     // The pick/cancel came from the manage view — refresh it in place.
-    await refreshManageView(payload, user.id, ctx, dateObj, locale);
-  } else if (isRequest || isPick) {
+    await refreshManageView(payload, userId, ctx, dateObj, locale);
+  } else if (ordering) {
     // Ordered from the channel message: confirm privately with the manage view.
-    const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
+    const { blocks, fallback } = await buildManageView(userId, ctx, dateObj, locale);
     return ephemeral(payload, blocks, fallback);
   }
 
   return new Response(null, { status: 200 });
+}
+
+export async function POST(request: Request) {
+  const rawBody = await request.text();
+  const isValid = verifySlackSignature(
+    rawBody,
+    request.headers.get("x-slack-request-timestamp"),
+    request.headers.get("x-slack-signature"),
+  );
+  if (!isValid) {
+    return Response.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const payload = parsePayload(rawBody);
+  if (payload instanceof Response) return payload;
+
+  if (payload.type !== "block_actions") {
+    return Response.json({});
+  }
+
+  const action = payload.actions?.[0];
+  const kind = action ? actionKind(action.action_id) : null;
+  if (!action || !kind) return Response.json({});
+
+  // Buttons carry the context in `value`; a select carries it per option.
+  const rawValue = action.selected_option?.value ?? action.value;
+  if (!rawValue) return badRequest("Missing action value");
+  const ctx = decodeActionValue(rawValue);
+  if (!ctx) return badRequest("Invalid action value");
+
+  const dateObj = new Date(`${ctx.date}T00:00:00.000Z`);
+  if (Number.isNaN(dateObj.getTime())) return badRequest("Invalid date");
+
+  if (kind === "markServed") {
+    return handleMarkServed(ctx, dateObj, payload);
+  }
+
+  const office = await prisma.office.findUnique({
+    where: { id: ctx.officeId },
+    select: { locale: true },
+  });
+  const locale = office?.locale ?? "fr";
+
+  const user = await resolveUser(payload.user.id);
+  if (!user) return promptToLink(payload, ctx, locale, kind);
+
+  // "Manage my order": no write, just show the private view.
+  if (kind === "manage") {
+    const { blocks, fallback } = await buildManageView(user.id, ctx, dateObj, locale);
+    return ephemeral(payload, blocks, fallback);
+  }
+
+  return changeOrder(payload, user.id, ctx, dateObj, locale, kind === "request" || kind === "pick");
 }

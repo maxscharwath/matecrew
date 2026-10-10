@@ -22,9 +22,6 @@ import { prisma } from "@/lib/prisma";
  * `[...all]` catch-all; both hand off to the same `auth.handler`.
  */
 
-// Prisma needs Node APIs, so this cannot run on the edge.
-export const runtime = "nodejs";
-
 /**
  * Returns the request Better Auth should see: the same one, unless its
  * `redirect_uri` needs reconciling with the client's registration.

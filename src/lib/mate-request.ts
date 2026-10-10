@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isSessionOpen } from "@/lib/session-utils";
 import { resolveItemId } from "@/lib/items";
+import { toUtcDay } from "@/lib/date";
 import { resolveAvatarUrl, resolveItemImageUrl } from "@/lib/storage";
 
 export type RequestResult =
@@ -67,13 +68,15 @@ async function validateContext(opts: {
  * Registers a maté request (idempotent). Shared by the webapp server action
  * and the Slack interaction handler.
  */
-export async function createMateRequest(opts: {
+export async function createMateRequest(input: {
   userId: string;
   officeId: string;
   mateSessionId: string | null;
   date: Date;
   itemId?: string | null;
 }): Promise<RequestResult> {
+  // The day may come from a client: keep it a plain day, as the column stores.
+  const opts = { ...input, date: toUtcDay(input.date) };
   const validation = await validateContext(opts);
   if (!validation.ok) return validation.reason;
 
@@ -118,12 +121,13 @@ export async function createMateRequest(opts: {
 /**
  * Cancels a maté request (idempotent). Refuses once served.
  */
-export async function cancelMateRequest(opts: {
+export async function cancelMateRequest(input: {
   userId: string;
   officeId: string;
   mateSessionId: string | null;
   date: Date;
 }): Promise<CancelResult> {
+  const opts = { ...input, date: toUtcDay(input.date) };
   const validation = await validateContext(opts);
   if (!validation.ok) return validation.reason;
 

@@ -2,17 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import {
-  uploadFile,
-  buildInvoiceKey,
-  internalFileUrl,
-  deleteFile,
-} from "@/lib/storage";
+import { buildInvoiceKey, internalFileUrl } from "@/lib/storage";
+import { platform } from "@/platform";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { stockDeltaOps } from "@/lib/stock";
-import { roundCents } from "@/lib/money";
+import { toCents } from "@/lib/money";
 import { getTranslations } from "next-intl/server";
 
 const ALLOWED_MIME_TYPES = [
@@ -81,12 +77,10 @@ export async function createPurchaseBatch(
   const lineData = lines.map((l) => ({
     itemId: l.itemId,
     qty: l.qty,
-    unitPrice: roundCents(l.total / l.qty),
-    lineTotal: roundCents(l.total),
+    unitPriceCents: toCents(l.total / l.qty),
+    lineTotalCents: toCents(l.total),
   }));
-  const totalPrice = roundCents(
-    lineData.reduce((sum, l) => sum + l.lineTotal, 0),
-  );
+  const totalPriceCents = lineData.reduce((sum, l) => sum + l.lineTotalCents, 0);
 
   // Extract and validate files
   const files = formData.getAll("invoices") as File[];
@@ -121,7 +115,7 @@ export async function createPurchaseBatch(
     for (const file of validFiles) {
       const key = buildInvoiceKey(batchId, file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
-      await uploadFile({ key, body: buffer, contentType: file.type });
+      await platform.storage.put(key, buffer, { contentType: file.type });
       uploadedKeys.push(key);
       invoiceRecords.push({
         storageKey: key,
@@ -130,26 +124,32 @@ export async function createPurchaseBatch(
       });
     }
 
-    // Create purchase as ORDERED — stock is added when marked as delivered
-    await prisma.purchaseBatch.create({
-      data: {
-        id: batchId,
-        officeId,
-        status: "ORDERED",
-        purchasedAt,
-        orderedByUserId: membership.userId,
-        paidByUserId,
-        totalPrice,
-        notes: notes || null,
-        lines: { create: lineData },
-        invoices: {
-          create: invoiceRecords,
-        },
-      },
-    });
+    // Create purchase as ORDERED — stock is added when marked as delivered.
+    // One atomic batch: the order, its lines and its invoices land together
+    // or not at all (the id is ours, so the lines can point at it).
+    await commitBatch((db) => [
+      db.purchaseBatch.createMany({
+        data: [
+          {
+            id: batchId,
+            officeId,
+            status: "ORDERED",
+            purchasedAt,
+            orderedByUserId: membership.userId,
+            paidByUserId,
+            totalPriceCents,
+            notes: notes || null,
+          },
+        ],
+      }),
+      db.purchaseLine.createMany({ data: lineData.map((l) => ({ ...l, batchId })) }),
+      ...(invoiceRecords.length > 0
+        ? [db.invoiceFile.createMany({ data: invoiceRecords.map((r) => ({ ...r, purchaseBatchId: batchId })) })]
+        : []),
+    ]);
   } catch (e) {
     // Cleanup orphan uploads on failure
-    await Promise.allSettled(uploadedKeys.map(deleteFile));
+    await Promise.allSettled(uploadedKeys.map((key) => platform.storage.delete(key)));
     throw e;
   }
 
@@ -184,26 +184,44 @@ export async function markDelivered(
     qtyByItem.set(line.itemId, (qtyByItem.get(line.itemId) ?? 0) + line.qty);
   }
 
-  await prisma.$transaction([
-    prisma.purchaseBatch.update({
-      where: { id: batchId },
-      data: { status: "DELIVERED", deliveredAt: new Date() },
-    }),
-    ...[...qtyByItem.entries()].flatMap(([itemId, qty]) =>
-      stockDeltaOps({
-        officeId,
-        itemId,
-        delta: qty,
-        reason: "PURCHASE",
-        note: `Delivery received: ${qty} units`,
-        userId: membership.userId,
-      }),
-    ),
-  ]);
+  // Read above, one atomic batch here. Guard: the order flips to DELIVERED
+  // only if it is still ORDERED, so two clicks racing cannot add its cans to
+  // stock twice — the second batch is rolled back whole.
+  const now = new Date();
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.purchaseBatch.updateMany({
+          where: { id: batchId, status: "ORDERED" },
+          data: { status: "DELIVERED", deliveredAt: now },
+        }),
+        1,
+      ),
+      ...[...qtyByItem.entries()].flatMap(([itemId, qty]) =>
+        stockDeltaOps(
+          db,
+          {
+            officeId,
+            itemId,
+            delta: qty,
+            reason: "PURCHASE",
+            note: `Delivery received: ${qty} units`,
+            userId: membership.userId,
+          },
+          now,
+        ),
+      ),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) {
+      return { success: false, error: t('errors.alreadyDelivered') };
+    }
+    throw error;
+  }
 
   // Stock increased — reset low stock alerts if applicable
   for (const itemId of qtyByItem.keys()) {
-    checkAndAlertLowStock(officeId, itemId).catch(() => {});
+    platform.runInBackground(checkAndAlertLowStock(officeId, itemId), "low-stock alert");
   }
 
   revalidatePath(`/org/${officeId}/admin/purchases`);

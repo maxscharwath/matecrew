@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
 
 /**
  * Who may read a stored file.
@@ -32,11 +33,11 @@ async function isOfficeAdmin(
   userId: string,
   officeId: string,
 ): Promise<boolean> {
-  const membership = await prisma.membership.findUnique({
-    where: { userId_officeId: { userId, officeId } },
-    select: { roles: true },
+  const admin = await prisma.membership.findFirst({
+    where: { userId, officeId, ...hasRoleWhere("ADMIN") },
+    select: { id: true },
   });
-  return membership?.roles.includes("ADMIN") ?? false;
+  return admin !== null;
 }
 
 async function isOfficeMember(

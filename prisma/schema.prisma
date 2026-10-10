@@ -1,10 +1,16 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "cloudflare"
+  moduleFormat = "esm"
 }
 
+// Kept to the subset every relational provider shares (no scalar lists, no
+// Decimal, no native date types, no provider-specific query modes), so moving
+// to another database is a provider switch plus a new baseline migration.
+// See src/platform/README.md.
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 // ─── Enums ──────────────────────────────────────────────
@@ -276,6 +282,9 @@ model Item {
   /// 24 x 24 for pictures saved before.
   /// Drawn by hand or imported; without it the terminal uses the photo in black and white.
   terminalImage     Bytes?
+  /// The photo as the terminal's 96 x 96 1-bit picture, computed when the photo
+  /// is uploaded; the terminal shows it when terminalImage is null.
+  terminalPhoto     Bytes?
   active            Boolean  @default(true)
   isDefault         Boolean  @default(false)
   sortOrder         Int      @default(0)
@@ -309,15 +318,25 @@ model Item {
 }
 
 model Membership {
-  id        String   @id @default(cuid())
+  id        String           @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   officeId  String
-  office    Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  roles     Role[]   @default([USER])
-  createdAt DateTime @default(now())
+  office    Office           @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  /// At least one. Read and written through `@/lib/membership-roles`.
+  roles     MembershipRole[]
+  createdAt DateTime         @default(now())
 
   @@unique([userId, officeId])
+}
+
+/// One role a member holds in an office: a row per (membership, role).
+model MembershipRole {
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role         Role
+
+  @@id([membershipId, role])
 }
 
 model JoinRequest {
@@ -340,10 +359,13 @@ model MateSession {
   startTime               String // HH:mm — session opens & notification sent
   cutoffTime              String // HH:mm — requests close
   label                   String? // e.g. "Matin", "Après-midi"
-  lastNotifiedDate        DateTime? @db.Date // idempotency: skip if already notified today
+  /// Local day (UTC midnight, see `@/lib/date`) of the last notification:
+  /// idempotency, skip if already notified today.
+  lastNotifiedDate        DateTime?
   lastNotifiedMessageTs   String? // Slack message ts, used to chat.update the live message when requests change
   lastNotifiedChannelId   String?
-  cutoffNotifiedDate      DateTime? @db.Date
+  /// Local day (UTC midnight) of the last cutoff message.
+  cutoffNotifiedDate      DateTime?
   cutoffNotifiedMessageTs String?
   cutoffNotifiedChannelId String?
 
@@ -357,7 +379,8 @@ model MateSession {
 
 model DailyRequest {
   id            String        @id @default(cuid())
-  date          DateTime      @db.Date
+  /// Local day, stored as UTC midnight (see `@/lib/date`).
+  date          DateTime
   officeId      String
   office        Office        @relation(fields: [officeId], references: [id], onDelete: Cascade)
   userId        String
@@ -441,8 +464,9 @@ model StockCountLine {
   @@index([countId])
 }
 
-/// A purchase order. Can span several item types via its `lines`; `totalPrice`
-/// is the order total (sum of the line totals).
+/// A purchase order. Can span several item types via its `lines`;
+/// `totalPriceCents` is the order total (sum of the line totals).
+/// Money is stored as integer cents everywhere (see `@/lib/money`).
 model PurchaseBatch {
   id              String         @id @default(cuid())
   officeId        String
@@ -454,7 +478,7 @@ model PurchaseBatch {
   orderedBy       User           @relation("OrderedBy", fields: [orderedByUserId], references: [id])
   paidByUserId    String
   paidBy          User           @relation("PaidBy", fields: [paidByUserId], references: [id])
-  totalPrice      Decimal        @db.Decimal(10, 2)
+  totalPriceCents Int
   notes           String?
   createdAt       DateTime       @default(now())
 
@@ -467,14 +491,14 @@ model PurchaseBatch {
 
 /// A single item line within a purchase order.
 model PurchaseLine {
-  id        String        @id @default(cuid())
-  batchId   String
-  batch     PurchaseBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  itemId    String
-  item      Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  qty       Int
-  unitPrice Decimal       @db.Decimal(10, 2)
-  lineTotal Decimal       @db.Decimal(10, 2)
+  id             String        @id @default(cuid())
+  batchId        String
+  batch          PurchaseBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  itemId         String
+  item           Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  qty            Int
+  unitPriceCents Int
+  lineTotalCents Int
 
   @@index([batchId])
   @@index([itemId])
@@ -498,7 +522,8 @@ model ConsumptionEntry {
   user            User              @relation(fields: [userId], references: [id])
   itemId          String
   item            Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  date            DateTime          @db.Date
+  /// Local day, stored as UTC midnight (see `@/lib/date`).
+  date            DateTime
   qty             Int               @default(1)
   source          ConsumptionSource @default(DAILY_REQUEST)
   purchaseBatchId String?
@@ -519,8 +544,9 @@ model ReimbursementPeriod {
   office           Office    @relation(fields: [officeId], references: [id], onDelete: Cascade)
   month            Int // 1-12
   year             Int // e.g. 2026
-  startDate        DateTime  @db.Date
-  endDate          DateTime  @db.Date
+  /// First and last local day of the period, stored as UTC midnight.
+  startDate        DateTime
+  endDate          DateTime
   createdAt        DateTime  @default(now())
   /// When each member was last emailed their own statement for this period.
   /// Null means never: both the monthly cron and the admin button read it
@@ -554,17 +580,17 @@ model StatementDelivery {
 }
 
 model ReimbursementLine {
-  id         String              @id @default(cuid())
-  periodId   String
-  period     ReimbursementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
-  fromUserId String
-  fromUser   User                @relation("ReimbursementFrom", fields: [fromUserId], references: [id])
-  toUserId   String
-  toUser     User                @relation("ReimbursementTo", fields: [toUserId], references: [id])
-  amount     Decimal             @db.Decimal(10, 2)
-  currency   String              @default("CHF")
-  status     PaymentStatus       @default(PENDING)
-  paidAt     DateTime?
+  id          String              @id @default(cuid())
+  periodId    String
+  period      ReimbursementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  fromUserId  String
+  fromUser    User                @relation("ReimbursementFrom", fields: [fromUserId], references: [id])
+  toUserId    String
+  toUser      User                @relation("ReimbursementTo", fields: [toUserId], references: [id])
+  amountCents Int
+  currency    String              @default("CHF")
+  status      PaymentStatus       @default(PENDING)
+  paidAt      DateTime?
 
   // The unpaid-invoices banner queries this on every signed-in page render.
   @@index([fromUserId, status])
@@ -611,8 +637,14 @@ model Device {
   rightItemId String?
   rightItem   Item?           @relation("DeviceRightItem", fields: [rightItemId], references: [id], onDelete: SetNull)
   rightLabel  String?
-  /// Local times ("HH:MM", office timezone) at which the terminal syncs.
-  syncTimes   String[]        @default(["08:00", "12:00", "15:00", "18:00"])
+  /// Local times ("HH:MM", office timezone) at which the terminal syncs,
+  /// comma-separated; read through `parseSyncTimes` in `@/lib/device/sync-times`.
+  syncTimes   String          @default("08:00,12:00,15:00,18:00")
+  /// The terminal's language ("fr", "en"); null follows the office's. `authenticateDevice`
+  /// hands it on as `office.locale`, so every text the terminal gets is in it.
+  locale      String?
+  /// Its screens' theme (`deviceTheme` in src/lib/device/contract.ts); null is the site's default.
+  theme       String?
 
   firmwareVersion String?
   batteryMv       Int?

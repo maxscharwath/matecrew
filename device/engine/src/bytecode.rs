@@ -510,7 +510,10 @@ fn inflate(packed: &[u8]) -> Result<Vec<u8>, &'static str> {
         return Err("bytecode size limit");
     }
     let mut out = vec![0; size];
-    let mut state = DecompressorOxide::new();
+    // About 11 KB of Huffman tables: on the heap, as `decompress_to_vec` does. On the stack they
+    // came on top of the terminal's main loop at each screen change and overflowed its 32 KB
+    // (the purchases screen, the deepest, restarted the terminal).
+    let mut state = Box::<DecompressorOxide>::default();
     let (status, read, written) = decompress(
         &mut state,
         stream,

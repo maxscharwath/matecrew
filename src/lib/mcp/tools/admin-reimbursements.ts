@@ -7,15 +7,12 @@ import {
   backfillReimbursementPeriods,
   syncReimbursementPeriod,
 } from "@/lib/reimbursement-periods";
-import {
-  buildSettlementKey,
-  buildUserSettlementKey,
-  deleteFile,
-} from "@/lib/storage";
+import { buildSettlementKey, buildUserSettlementKey } from "@/lib/storage";
+import { platform } from "@/platform";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
-import { roundCents } from "@/lib/money";
+import { fromCents, roundCents } from "@/lib/money";
 
 const monthArg = z.number().int().min(1).max(12).describe("Month, 1-12.");
 const yearArg = z.number().int().min(2000).max(2100).describe("Four-digit year.");
@@ -60,9 +57,9 @@ export function registerAdminReimbursementTools(server: McpServer): void {
       return {
         office: scope.officeName,
         periods: periods.map((p) => {
-          const outstanding = p.lines
+          const outstandingCents = p.lines
             .filter((l) => l.status === "PENDING")
-            .reduce((sum, l) => sum + l.amount.toNumber(), 0);
+            .reduce((sum, l) => sum + l.amountCents, 0);
           return {
             periodId: p.id,
             label: `${p.year}-${String(p.month).padStart(2, "0")}`,
@@ -70,16 +67,14 @@ export function registerAdminReimbursementTools(server: McpServer): void {
             year: p.year,
             startDate: toISODateString(p.startDate),
             endDate: toISODateString(p.endDate),
-            totalAmount: roundCents(
-              p.lines.reduce((sum, l) => sum + l.amount.toNumber(), 0),
-            ),
-            outstanding: roundCents(outstanding),
+            totalAmount: fromCents(p.lines.reduce((sum, l) => sum + l.amountCents, 0)),
+            outstanding: fromCents(outstandingCents),
             allSettled: p.lines.every((l) => l.status === "PAID"),
             lines: p.lines.map((l) => ({
               lineId: l.id,
               from: l.fromUser.name,
               to: l.toUser.name,
-              amount: l.amount,
+              amount: fromCents(l.amountCents),
               currency: l.currency,
               status: l.status,
               paidAt: l.paidAt,
@@ -269,7 +264,7 @@ export function registerAdminReimbursementTools(server: McpServer): void {
 
       return {
         ok: true,
-        message: `${line.amount.toNumber()} ${line.currency} from ${line.fromUser.name} to ${line.toUser.name} is pending again.`,
+        message: `${fromCents(line.amountCents)} ${line.currency} from ${line.fromUser.name} to ${line.toUser.name} is pending again.`,
       };
     },
   );
@@ -311,16 +306,15 @@ export function registerAdminReimbursementTools(server: McpServer): void {
         period.lines.flatMap((l) => [l.fromUserId, l.toUserId]),
       );
 
-      await prisma.$transaction([
-        prisma.reimbursementLine.deleteMany({ where: { periodId } }),
-        prisma.reimbursementPeriod.delete({ where: { id: periodId } }),
-      ]);
+      // One statement, so atomic on its own: the period's lines and statement
+      // deliveries go with it (ON DELETE CASCADE).
+      await prisma.reimbursementPeriod.delete({ where: { id: periodId } });
 
       // Cached settlement PDFs would otherwise outlive the period.
       await Promise.allSettled([
-        deleteFile(buildSettlementKey(periodId)),
+        platform.storage.delete(buildSettlementKey(periodId)),
         ...[...affectedUserIds].map((uid) =>
-          deleteFile(buildUserSettlementKey(periodId, uid)),
+          platform.storage.delete(buildUserSettlementKey(periodId, uid)),
         ),
       ]);
 

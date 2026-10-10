@@ -13,10 +13,6 @@ interface Props {
   readonly params: Promise<{ officeId: string }>;
 }
 
-// The manual statement send and the reminder run inside this segment's
-// request, and a PDF per member takes longer than the default window allows.
-export const maxDuration = 60;
-
 export default async function ReimbursementsPage({ params }: Props) {
   const { officeId } = await params;
   await requireOrgRoles(officeId, "ADMIN");

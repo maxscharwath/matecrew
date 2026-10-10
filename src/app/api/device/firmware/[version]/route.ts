@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { downloadFile } from "@/lib/storage";
+import { platform } from "@/platform";
 import { authenticateDevice, unauthorized } from "@/lib/device/auth";
 
 /**
@@ -15,8 +15,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ vers
   const release = await prisma.firmwareRelease.findUnique({ where: { version } });
   if (!release) return Response.json({ error: "not_found" }, { status: 404 });
 
-  const { body } = await downloadFile(release.storageKey);
-  return new Response(Buffer.isBuffer(body) ? new Uint8Array(body) : body, {
+  const image = await platform.storage.get(release.storageKey);
+  if (!image) return Response.json({ error: "not_found" }, { status: 404 });
+  return new Response(image.body, {
     headers: {
       "Content-Type": "application/octet-stream",
       "Content-Length": String(release.size),

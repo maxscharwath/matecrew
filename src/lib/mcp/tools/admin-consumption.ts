@@ -1,10 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma, retryOnConflict } from "@/lib/prisma";
+import { findByIdOrName } from "@/lib/mcp/name-match";
 import { getTodayDate, toISODateString } from "@/lib/date";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
-import { stockDeltaOps } from "@/lib/stock";
-import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
+import { stockAtLeast, stockDeltaOps } from "@/lib/stock";
+import { McpToolError, resolveAdminOffice, type OfficeScope } from "@/lib/mcp/context";
 import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
 import { isoDateArg, officeArg, parseIsoDate } from "@/lib/mcp/schemas";
@@ -53,125 +54,21 @@ export function registerAdminConsumptionTools(server: McpServer): void {
       const scope = await resolveAdminOffice(actor, office);
       const deduct = deductStock ?? true;
 
-      const defaultItem = await prisma.item.findFirst({
-        where: { officeId: scope.officeId, isDefault: true },
-        select: { id: true, name: true },
-      });
-
       // Resolve and validate everything before writing anything — a partial
       // backfill is far worse than a rejected one.
-      const resolved: {
-        userId: string;
-        personName: string;
-        itemId: string;
-        itemName: string;
-        date: Date;
-        qty: number;
-      }[] = [];
+      const resolved = await resolveEntries(scope, entries);
       const deductByItem = new Map<string, number>();
-
-      for (const entry of entries) {
-        const member = await findOfficeMember(scope.officeId, entry.person);
-
-        let itemId = defaultItem?.id;
-        let itemName = defaultItem?.name;
-        if (entry.item) {
-          const wanted = entry.item.trim();
-          const item = await prisma.item.findFirst({
-            where: {
-              officeId: scope.officeId,
-              OR: [
-                { id: wanted },
-                { name: { equals: wanted, mode: "insensitive" } },
-              ],
-            },
-            select: { id: true, name: true },
-          });
-          if (!item) {
-            throw new McpToolError(
-              `No item called "${entry.item}" in ${scope.officeName}.`,
-            );
-          }
-          itemId = item.id;
-          itemName = item.name;
-        }
-        if (!itemId || !itemName) {
-          throw new McpToolError(
-            `${scope.officeName} has no default item, so every entry must name an item.`,
-          );
-        }
-
-        const date = parseIsoDate(entry.date);
-        if (date > getTodayDate()) {
-          throw new McpToolError(
-            `${entry.date} is in the future — consumption can only be recorded for today or earlier.`,
-          );
-        }
-
-        resolved.push({
-          userId: member.userId,
-          personName: member.name,
-          itemId,
-          itemName,
-          date,
-          qty: entry.qty,
-        });
-
-        if (deduct) {
-          deductByItem.set(itemId, (deductByItem.get(itemId) ?? 0) + entry.qty);
-        }
+      if (deduct) {
+        for (const r of resolved) deductByItem.set(r.itemId, (deductByItem.get(r.itemId) ?? 0) + r.qty);
       }
 
-      // Every item must have enough stock for the whole batch.
-      if (deductByItem.size > 0) {
-        const stocks = await prisma.stock.findMany({
-          where: {
-            officeId: scope.officeId,
-            itemId: { in: [...deductByItem.keys()] },
-          },
-          select: { itemId: true, currentQty: true, item: { select: { name: true } } },
-        });
-        for (const [itemId, needed] of deductByItem) {
-          const row = stocks.find((s) => s.itemId === itemId);
-          const available = row?.currentQty ?? 0;
-          if (needed > available) {
-            throw new McpToolError(
-              `Not enough ${row?.item.name ?? "stock"}: the batch needs ${needed} but only ${available} are counted. Either correct the stock first, or pass deductStock: false if these cans were already removed from the count.`,
-            );
-          }
-        }
-      }
+      await retryOnConflict(() => recordEntries(scope.officeId, resolved, deductByItem, actor.userId));
 
-      await prisma.$transaction([
-        ...resolved.map((r) =>
-          prisma.consumptionEntry.create({
-            data: {
-              officeId: scope.officeId,
-              userId: r.userId,
-              itemId: r.itemId,
-              date: r.date,
-              qty: r.qty,
-              source: "MANUAL",
-            },
-          }),
+      await Promise.all(
+        [...deductByItem.keys()].map((itemId) =>
+          notifyQuietly("low-stock", () => checkAndAlertLowStock(scope.officeId, itemId)),
         ),
-        ...[...deductByItem.entries()].flatMap(([itemId, qty]) =>
-          stockDeltaOps({
-            officeId: scope.officeId,
-            itemId,
-            delta: -qty,
-            reason: "SERVED",
-            note: `Backfilled consumption (${qty})`,
-            userId: actor.userId,
-          }),
-        ),
-      ]);
-
-      for (const itemId of deductByItem.keys()) {
-        await notifyQuietly("low-stock", () =>
-          checkAndAlertLowStock(scope.officeId, itemId),
-        );
-      }
+      );
 
       return {
         ok: true,
@@ -228,20 +125,30 @@ export function registerAdminConsumptionTools(server: McpServer): void {
         };
       }
 
-      await prisma.$transaction([
-        prisma.consumptionEntry.update({
-          where: { id: entryId },
-          data: { cancelledAt: new Date() },
-        }),
-        ...stockDeltaOps({
-          officeId: scope.officeId,
-          itemId: entry.itemId,
-          delta: entry.qty,
-          reason: "UNSERVED",
-          note: "Cancelled by admin",
-          userId: actor.userId,
-        }),
-      ]);
+      // Read above, one atomic batch here. The guard only cancels an entry
+      // that is still live, so a repeated call cannot restock twice.
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.consumptionEntry.updateMany({
+              where: { id: entryId, cancelledAt: null },
+              data: { cancelledAt: new Date() },
+            }),
+            1,
+          ),
+          ...stockDeltaOps(db, {
+            officeId: scope.officeId,
+            itemId: entry.itemId,
+            delta: entry.qty,
+            reason: "UNSERVED",
+            note: "Cancelled by admin",
+            userId: actor.userId,
+          }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        return { ok: true, status: "already_cancelled", message: "That entry was already cancelled." };
+      }
 
       return {
         ok: true,
@@ -322,4 +229,103 @@ export function registerAdminConsumptionTools(server: McpServer): void {
       };
     },
   );
+}
+
+interface ResolvedEntry {
+  readonly userId: string;
+  readonly personName: string;
+  readonly itemId: string;
+  readonly itemName: string;
+  readonly date: Date;
+  readonly qty: number;
+}
+
+interface EntryInput {
+  readonly person: string;
+  readonly item?: string;
+  readonly date: string;
+  readonly qty: number;
+}
+
+/** Resolves each entry's member, item (the office default when omitted) and day, or throws on the first invalid one. */
+async function resolveEntries(scope: OfficeScope, entries: readonly EntryInput[]): Promise<ResolvedEntry[]> {
+  const persons = [...new Set(entries.map((e) => e.person))];
+  const [items, members] = await Promise.all([
+    prisma.item.findMany({ where: { officeId: scope.officeId }, select: { id: true, name: true, isDefault: true } }),
+    Promise.all(persons.map((person) => findOfficeMember(scope.officeId, person))),
+  ]);
+  const memberOf = new Map(persons.map((person, index) => [person, members[index]]));
+  const defaultItem = items.find((i) => i.isDefault);
+  const today = getTodayDate();
+
+  return entries.map((entry) => {
+    const member = memberOf.get(entry.person);
+    if (!member) throw new McpToolError(`"${entry.person}" is not a member of ${scope.officeName}.`);
+    const item = entry.item ? findByIdOrName(items, entry.item.trim()) : defaultItem;
+    if (entry.item && !item) {
+      throw new McpToolError(`No item called "${entry.item}" in ${scope.officeName}.`);
+    }
+    if (!item) {
+      throw new McpToolError(`${scope.officeName} has no default item, so every entry must name an item.`);
+    }
+    const date = parseIsoDate(entry.date);
+    if (date > today) {
+      throw new McpToolError(
+        `${entry.date} is in the future — consumption can only be recorded for today or earlier.`,
+      );
+    }
+    return { userId: member.userId, personName: member.name, itemId: item.id, itemName: item.name, date, qty: entry.qty };
+  });
+}
+
+/**
+ * Checks every item has enough stock for the whole backfill, then records it
+ * in one atomic batch. Each pool is guarded at the level the check saw: a take
+ * in between rolls the batch back and `retryOnConflict` checks again.
+ */
+async function recordEntries(
+  officeId: string,
+  resolved: readonly ResolvedEntry[],
+  deductByItem: ReadonlyMap<string, number>,
+  actingUserId: string,
+): Promise<void> {
+  if (deductByItem.size > 0) {
+    const stocks = await prisma.stock.findMany({
+      where: { officeId, itemId: { in: [...deductByItem.keys()] } },
+      select: { itemId: true, currentQty: true, item: { select: { name: true } } },
+    });
+    for (const [itemId, needed] of deductByItem) {
+      const row = stocks.find((s) => s.itemId === itemId);
+      const available = row?.currentQty ?? 0;
+      if (needed > available) {
+        throw new McpToolError(
+          `Not enough ${row?.item.name ?? "stock"}: the batch needs ${needed} but only ${available} are counted. Either correct the stock first, or pass deductStock: false if these cans were already removed from the count.`,
+        );
+      }
+    }
+  }
+
+  await commitBatch((db) => [
+    ...[...deductByItem.entries()].map(([itemId, qty]) => stockAtLeast(db, officeId, itemId, qty)),
+    db.consumptionEntry.createMany({
+      data: resolved.map((r) => ({
+        officeId,
+        userId: r.userId,
+        itemId: r.itemId,
+        date: r.date,
+        qty: r.qty,
+        source: "MANUAL" as const,
+      })),
+    }),
+    ...[...deductByItem.entries()].flatMap(([itemId, qty]) =>
+      stockDeltaOps(db, {
+        officeId,
+        itemId,
+        delta: -qty,
+        reason: "SERVED",
+        note: `Backfilled consumption (${qty})`,
+        userId: actingUserId,
+      }),
+    ),
+  ]);
 }

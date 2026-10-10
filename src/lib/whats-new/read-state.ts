@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch, prisma, retryOnConflict } from "@/lib/prisma";
 import { ARTICLE_SLUGS } from "@/lib/whats-new/articles";
 
 /**
@@ -47,17 +47,22 @@ export async function markRead(userId: string, slug: string): Promise<void> {
   });
 }
 
+/**
+ * Reads what is already read, then inserts the rest in one batch. A concurrent
+ * read of the same article in another tab turns the insert into a unique-key
+ * conflict, which rolls it back: read again and insert what is still missing.
+ */
 export async function markAllRead(userId: string): Promise<number> {
-  const read = await getReadSlugs(userId);
-  const missing = ARTICLE_SLUGS.filter((slug) => !read.has(slug));
-  if (missing.length === 0) return 0;
+  return retryOnConflict(async () => {
+    const read = await getReadSlugs(userId);
+    const missing = ARTICLE_SLUGS.filter((slug) => !read.has(slug));
+    if (missing.length === 0) return 0;
 
-  const { count } = await prisma.articleRead.createMany({
-    data: missing.map((slug) => ({ userId, slug })),
-    // Guards against a concurrent read of the same article in another tab.
-    skipDuplicates: true,
+    const [count] = await commitBatch((db) => [
+      db.articleRead.createMany({ data: missing.map((slug) => ({ userId, slug })) }),
+    ]);
+    return count;
   });
-  return count;
 }
 
 export async function markUnread(userId: string, slug: string): Promise<void> {

@@ -6,10 +6,11 @@ Mate consumption tracking web app for offices. Track daily requests, manage stoc
 
 - **Framework**: Next.js 16 (App Router, Turbopack)
 - **Auth**: Better Auth 1.5 (email/password + Microsoft Entra ID SSO)
-- **Database**: PostgreSQL (Docker local / Neon production) + Prisma 7
+- **Database**: Cloudflare D1 (SQLite) + Prisma 7; a SQLite file through libSQL under plain Node. Atomic writes go through `commitBatch` (see `src/platform/README.md`)
 - **UI**: Tailwind CSS 4 + shadcn/ui + Recharts
-- **Storage**: Vercel Blob (default) or Cloudflare R2 (configurable via `STORAGE_PROVIDER`)
-- **Notifications**: Slack Bot API (chat.postMessage) + Upstash QStash (scheduled cron)
+- **Hosting**: Cloudflare Workers through the OpenNext adapter, behind a platform layer (`src/platform`) that also runs on plain Node
+- **Storage**: Cloudflare R2 (binding `FILES`); local disk under plain Node
+- **Notifications**: Slack Bot API (chat.postMessage), run by Cloudflare Cron Triggers and Queues (`src/jobs`)
 - **PDF**: @react-pdf/renderer for settlement exports
 - **i18n**: next-intl (French / English)
 - **Runtime**: Bun
@@ -19,7 +20,6 @@ Mate consumption tracking web app for offices. Track daily requests, manage stoc
 ### Prerequisites
 
 - [Bun](https://bun.sh) installed
-- [Docker](https://docs.docker.com/get-docker/) installed (for local Postgres + MinIO)
 
 ### Setup
 
@@ -28,9 +28,6 @@ Mate consumption tracking web app for offices. Track daily requests, manage stoc
 git clone https://github.com/<your-org>/matecrew.git
 cd matecrew
 
-# Start local services (Postgres + MinIO)
-docker compose up -d
-
 # Install dependencies
 bun install
 bun pm trust prisma @prisma/engines
@@ -38,37 +35,41 @@ bun pm trust prisma @prisma/engines
 # Generate Prisma client
 bunx prisma generate
 
-# Run migrations
-bunx prisma migrate dev
-
-# Seed initial data (offices, users, sample requests)
-bun run seed
-
-# Start dev server
+# Plain Node (`bun run dev`): a SQLite file, .data/matecrew.sqlite by default
+bun run db:migrate:sqlite
+SEED_PASSWORD=<a password for the demo accounts> bun run seed --sqlite
 bun run dev
+
+# Or the Cloudflare runtime locally (`bun run dev:cf`, `bun run preview`): local D1
+bun run db:migrate:local
+SEED_PASSWORD=<a password for the demo accounts> bun run seed
+bun run dev:cf
 ```
+
+Schema changes: edit `prisma/schema.prisma`, run `bun run db:migration <name>` to
+write `migrations/<NNNN>_<name>.sql`, then apply it as above.
 
 Open [http://localhost:3000](http://localhost:3000).
 
 ### Test Accounts (from seed)
 
-| Email | Password | Role | Offices |
-|---|---|---|---|
-| `admin@matecrew.local` | `admin123` | Admin | Lausanne + Geneve |
-| `marie@matecrew.local` | `runner123` | Runner | Lausanne |
-| `alice@matecrew.local` | `employee123` | Employee | Lausanne |
-| `bob@matecrew.local` | `employee123` | Employee | Lausanne |
-| `claire@matecrew.local` | `employee123` | Employee | Geneve |
+Every demo account has the password given in `SEED_PASSWORD`.
+
+| Email | Role | Offices |
+|---|---|---|
+| `admin@matecrew.local` | Admin | Lausanne + Geneve |
+| `marie@matecrew.local` | Runner | Lausanne |
+| `alice@matecrew.local` | Employee | Lausanne |
+| `bob@matecrew.local` | Employee | Lausanne |
+| `claire@matecrew.local` | Employee | Geneve |
 
 ### Local Services
 
 | Service | URL | Credentials |
 |---|---|---|
 | App | http://localhost:3000 | See test accounts above |
-| MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| PostgreSQL | localhost:5432 | `matecrew` / `matecrew` |
 
-MinIO provides S3-compatible storage for invoice/avatar uploads during development. The `minio-init` container automatically creates the `matecrew-invoices` bucket.
+Uploaded files (avatars, invoices, item pictures) are stored on disk under `.data/storage` in development.
 
 ## Environment Variables
 
@@ -78,8 +79,7 @@ Copy `.env.local` or create your own. All variables:
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | Postgres connection string | `postgresql://matecrew:matecrew@localhost:5432/matecrew` |
-| `DIRECT_URL` | Direct Postgres connection (migrations) | Same as DATABASE_URL |
+| `DATABASE_URL` | Plain Node only: the SQLite database (`file:` path or libSQL URL). On Cloudflare the database is the D1 binding `DB`. | `file:.data/matecrew.sqlite` |
 | `BETTER_AUTH_SECRET` | Auth secret (`openssl rand -base64 32`) | Required |
 | `BETTER_AUTH_URL` | App URL. Also published as the OAuth `issuer` for the [MCP connector](#mcp-server-claude-connector), so it must match the public origin exactly. | `http://localhost:3000` |
 | `NEXT_PUBLIC_APP_URL` | Public app URL | `http://localhost:3000` |
@@ -94,52 +94,18 @@ Example: `ALLOWED_EMAIL_DOMAINS=owt.swiss,openwt.com` blocks sign-up from any ot
 
 ### Object Storage
 
-Storage provider is selected via `STORAGE_PROVIDER` (default: `vercel-blob`).
+Files go through `platform.storage` (`src/platform/ports/storage.ts`), with the
+keys built in `src/lib/storage.ts`:
 
-**Vercel Blob** (default for production):
+- Cloudflare: the R2 bucket bound as `FILES` (`wrangler.jsonc`), no credentials.
+  `bun run preview` uses wrangler's local R2.
+- Plain Node (`bun run dev`, tests): files on disk under `LOCAL_STORAGE_DIR`
+  (default `.data/storage`).
 
-| Variable | Description |
-|---|---|
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob read/write token |
-
-**Cloudflare R2** (alternative):
-
-| Variable | Description | Default |
-|---|---|---|
-| `S3_ENDPOINT` | S3 endpoint (dev) | `http://localhost:9000` |
-| `S3_ACCESS_KEY` | S3 access key (dev) | `minioadmin` |
-| `S3_SECRET_KEY` | S3 secret key (dev) | `minioadmin` |
-| `R2_BUCKET_NAME` | Bucket name | `matecrew-invoices` |
-| `R2_ACCOUNT_ID` | Cloudflare R2 account ID (prod) | |
-| `R2_ACCESS_KEY_ID` | R2 access key (prod) | |
-| `R2_SECRET_ACCESS_KEY` | R2 secret key (prod) | |
-
-#### Never call `list()` on a read path
-
-Vercel Blob bills and rate-limits two classes of operation, and the difference
-is five-fold in price and, on Hobby, five-fold in allowance:
-
-| Class | Methods | Hobby allowance |
-|---|---|---|
-| **Advanced** | `put()`, `copy()`, `list()` | 2,000/month |
-| **Simple** | `head()`, fetching a blob by URL (cache miss) | 10,000/month |
-
-`del()` is free but still counts toward advanced *rate* limits.
-
-The adapter originally resolved each key to a URL with
-`list({ prefix: key, limit: 1 })` before downloading it, so **every avatar and
-item image on every page view cost one advanced operation**. With half a megabyte
-stored, that alone reached 2.1k/2k in a month and Vercel suspended the store —
-which surfaced as every image 404ing site-wide, not as a quota warning.
-
-`get()`, `head()` and `del()` all accept a pathname and derive the URL from the
-token's store id, so a key is sufficient and no lookup is needed. `put()` is the
-only advanced operation left, once per real upload.
-
-The other half is caching: `/api/files/[...key]` marks `avatars/` and `items/`
-`public, max-age=1y, immutable` (keys embed a UUID, so content never changes at a
-given key) which lets a shared CDN cache serve repeat views. `invoices/` and
-`reimbursements/` stay `private` and require a session.
+`/api/files/[...key]` serves them. It marks `avatars/` and `items/` as
+`public, max-age=1y, immutable`: keys embed a UUID, so the content at a key never
+changes. That lets a shared cache serve repeat views. `invoices/` and
+`reimbursements/` stay `private` and require a session plus a per-document check.
 
 ### Microsoft SSO (Optional)
 
@@ -172,14 +138,10 @@ To set up:
 6. Invite the bot to each office's Slack channel
 7. In admin settings, enter each channel's ID (right-click channel > "Copy channel ID")
 
-### Cron / QStash
+### Scheduled tasks and jobs
 
-| Variable | Description | Default |
-|---|---|---|
-| `CRON_SECRET` | Bearer token for cron endpoint authentication | `local-dev-cron-secret` |
-| `QSTASH_TOKEN` | Upstash QStash token (production scheduled cron) | |
-| `QSTASH_CURRENT_SIGNING_KEY` | QStash signature verification key | |
-| `QSTASH_NEXT_SIGNING_KEY` | QStash next signing key | |
+No variables: Cloudflare Cron Triggers and the `JOBS` Queue are bindings in
+`wrangler.jsonc`. See [Cron Setup](#cron-setup).
 
 ## Project Structure
 
@@ -202,14 +164,15 @@ src/
         stock/                       # Stock management + audit log
         purchases/                   # Purchase batches + invoice upload
         reimbursements/              # Period-based reimbursement calc + PDF
-        cron/                        # Manual cron trigger (dev)
+        cron/                        # Scheduled tasks, "run now" per office
     oauth/consent/                   # OAuth consent screen for MCP clients
     .well-known/                     # OAuth AS + protected-resource metadata
     api/
       auth/[...all]/                 # Better Auth API handler (incl. MCP OAuth)
       mcp/                           # MCP endpoint — the Claude connector URL
-      cron/daily-request/            # Daily mate request notification
-      cron/monthly-reimbursement/    # Monthly auto-reimbursement generation
+      files/[...key]/                # Stored files, with access rules
+  jobs/                              # Scheduled tasks and queued jobs (business side)
+  platform/                          # Ports and adapters: Cloudflare, Node (README inside)
   components/
     ui/                              # shadcn/ui components
     app-sidebar.tsx                  # Main navigation sidebar
@@ -241,20 +204,20 @@ src/
     auth.ts                          # Better Auth server config
     auth-client.ts                   # Better Auth client hooks
     auth-utils.ts                    # requireSession, requireRoles helpers
-    prisma.ts                        # Prisma client singleton
+    prisma.ts                        # Request's Prisma client, commitBatch (atomic writes)
     base-url.ts                      # Public origin / OAuth issuer resolution
     mcp/
       server.ts                      # Tool registration + model instructions
       context.ts                     # Actor, office scoping, per-office roles
       tool.ts                        # defineTool: auth, JSON encoding, errors
       tools/                         # One module per domain area
-    storage/                         # Pluggable storage (Vercel Blob / R2)
+    storage.ts                       # Storage keys and file URLs
     slack.ts                         # Slack Bot API messaging
     stock-alerts.ts                  # Low stock Slack alerts
     reimbursement-calc.ts            # Cost sharing + settlement algorithm
     pdf-export.tsx                   # React-PDF settlement export
     csv-export.ts                    # Reimbursement CSV export
-    qstash.ts                        # QStash client for scheduled jobs
+    monthly-reimbursement.ts         # Monthly close of every office's period
     notifications.ts                 # Notification helpers
     session-utils.ts                 # Mate session time utilities
     date.ts                          # Date/timezone helpers
@@ -270,9 +233,9 @@ messages/
   en.json                            # English translations
   fr.json                            # French translations
 prisma/
-  schema.prisma                      # Database schema
-  seed.ts                            # Development seed data
-  migrations/                        # Prisma migrations
+  schema.prisma                      # Database schema (portable subset, SQLite provider)
+  seed.ts                            # Development seed data (local D1, or --sqlite)
+migrations/                          # SQL migrations, applied by wrangler (D1) or db:migrate:sqlite
 ```
 
 ## Features
@@ -381,7 +344,7 @@ Roles are per-office (via Membership):
 
 Each office can have a Slack channel ID configured. Messages are sent via a shared Slack Bot App using `chat.postMessage`. Used for:
 
-1. **Session request message**: Posted at each session start via QStash/Cron. Users click **I want a maté** or **Cancel** directly in Slack — the handler at `/api/slack/interactions` registers the request (no browser redirect) and updates the message in place with the running list of registered users. First-time clickers whose Slack email matches a MateCrew user are auto-linked; others get an ephemeral "Connect" button that opens a signed one-time URL to `/slack/link` for an authenticated confirmation.
+1. **Session request message**: Posted at each session start by the `session-notifications` scheduled task. Users click **I want a maté** or **Cancel** directly in Slack — the handler at `/api/slack/interactions` registers the request (no browser redirect) and updates the message in place with the running list of registered users. First-time clickers whose Slack email matches a MateCrew user are auto-linked; others get an ephemeral "Connect" button that opens a signed one-time URL to `/slack/link` for an authenticated confirmation.
 2. **Low stock alert**: Sent when stock drops below the configured threshold (once per 24h)
 3. **Test message**: Sendable from admin settings to verify integration works
 
@@ -486,34 +449,69 @@ options to the metadata builder.)
 
 ### Cron Setup
 
-**Local dev**: Trigger manually from the admin cron page or via curl:
-```bash
-curl -H "Authorization: Bearer local-dev-cron-secret" http://localhost:3000/api/cron/daily-request
-```
+The scheduled tasks are listed in `src/jobs/schedules.ts` (UTC). The same cron
+expressions are in `wrangler.jsonc` `triggers.crons`, and a test checks that the
+two lists match.
 
-**Production**: Uses Upstash QStash for scheduled execution. Run the setup script:
-```bash
-bun run setup:qstash
-```
+| Task | Cron | What it does |
+|---|---|---|
+| `session-notifications` | `*/5 * * * *` | Posts each session's request message at its start and the runner alert at its cutoff. A ten-minute window and per-day dedup make it fire once per session. |
+| `oauth-token-prune` | `0 2 * * *` | Deletes MCP tokens whose refresh token has expired |
+| `monthly-reimbursement` | `0 2 1 * *` | Closes the previous month and queues one `period-statements` job per office |
+
+- **Run now**: the admin Cron page runs a task for one office.
+- **Locally**: `bun run preview` serves the Worker. To fire a cron, run
+  `curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=*/5+*+*+*+*"`.
+- **Under plain Node**: queued jobs run in-process right away.
 
 ## Deployment
 
-Deploy to [Vercel](https://vercel.com):
+The app runs on Cloudflare Workers through [OpenNext](https://opennext.js.org/cloudflare)
+(`wrangler.jsonc`, `open-next.config.ts`, worker entry
+`src/platform/cloudflare/worker.ts`).
 
 ```bash
-bunx vercel
+cp .dev.vars.example .dev.vars   # fill in; NEXTJS_ENV=development
+bun run preview                  # build with PLATFORM=cloudflare, run in workerd locally
+bun run cf-typegen               # after changing wrangler.jsonc
+bun run deploy                   # build and deploy (needs the remote resources below)
 ```
 
-The `vercel-build` script runs `prisma generate && prisma migrate deploy && next build` automatically.
+The remote resources go in the EU jurisdiction, because the data is personal:
 
-Required env vars for production:
-- `DATABASE_URL` / `DIRECT_URL` (Neon or other hosted Postgres)
-- `BETTER_AUTH_SECRET`
-- `BETTER_AUTH_URL` / `NEXT_PUBLIC_APP_URL`
-- `BLOB_READ_WRITE_TOKEN` (Vercel Blob) or R2 credentials
-- `CRON_SECRET`
-- `QSTASH_TOKEN` / `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY`
-- `SLACK_BOT_TOKEN`
-- Optionally: `SLACK_BOT_USERNAME` / `SLACK_BOT_ICON_URL`
-- Optionally: `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID`
-- Optionally: `ALLOWED_EMAIL_DOMAINS`
+```bash
+wrangler d1 create matecrew --jurisdiction eu     # paste the id into wrangler.jsonc
+wrangler r2 bucket create matecrew-files --jurisdiction eu
+wrangler queues create matecrew-jobs
+wrangler queues create matecrew-jobs-dlq
+```
+
+- **Secrets**: set each one with `wrangler secret put <NAME>`:
+  - `BETTER_AUTH_SECRET`
+  - `MICROSOFT_CLIENT_SECRET`
+  - `SLACK_BOT_TOKEN`
+  - `SLACK_SIGNING_SECRET`
+  - `RESEND_API_KEY`
+- **Vars**: the other names in `.dev.vars.example`.
+- **Build time**: `NEXT_PUBLIC_APP_URL` must also be set when building, because
+  it is inlined into the client bundle.
+
+### Database
+
+The schema is applied with wrangler from `migrations/`:
+
+```bash
+wrangler d1 migrations apply matecrew --remote
+```
+
+Copying the data from the Postgres (Neon) database is done once, with the
+connection string in `SOURCE_DATABASE_URL`. The source is only read.
+
+```bash
+bun scripts/cloudflare/copy-db.ts export                # SQL files in .data/d1-copy
+bun scripts/cloudflare/copy-db.ts apply --remote        # wrangler d1 execute, in order
+bun scripts/cloudflare/copy-db.ts verify --remote       # counts, keys and sums on both sides
+```
+
+Run it with `--local` first, against the local D1, to rehearse. Applying the
+copy again gives the same data: it clears the tables before inserting.

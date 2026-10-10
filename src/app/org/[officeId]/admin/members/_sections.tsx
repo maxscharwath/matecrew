@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { roleList, rolesSelect } from "@/lib/membership-roles";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { MembersTable } from "@/components/members-table";
 import { PendingRequestsCard } from "@/components/pending-requests-card";
@@ -92,7 +93,7 @@ export async function MembersTableSection({ officeId, currentUserId, page }: Sec
   const [memberships, memberCount] = await Promise.all([
     prisma.membership.findMany({
       where: { officeId },
-      include: { user: { select: { id: true, name: true, email: true, image: true } } },
+      include: { ...rolesSelect, user: { select: { id: true, name: true, email: true, image: true } } },
       orderBy: { user: { name: "asc" } },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -107,7 +108,7 @@ export async function MembersTableSection({ officeId, currentUserId, page }: Sec
       name: m.user.name,
       email: m.user.email,
       avatarUrl: resolveAvatarUrl(m.user.image),
-      roles: ([...m.roles] as ("ADMIN" | "USER")[]).sort((a, b) => a.localeCompare(b)),
+      roles: roleList(m),
     }))
   );
 

@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
+import { platform } from "@/platform";
 import { sendJoinRequestEmail } from "@/lib/email";
 import { buildJoinRequestMessage, sendSlackMessage } from "@/lib/slack";
 
@@ -22,7 +24,7 @@ export async function notifyAdminsOfJoinRequest(opts: {
       select: { name: true, email: true },
     }),
     prisma.membership.findMany({
-      where: { officeId: opts.officeId, roles: { has: "ADMIN" } },
+      where: { officeId: opts.officeId, ...hasRoleWhere("ADMIN") },
       select: {
         user: {
           select: { email: true, locale: true, slackUserId: true },
@@ -33,7 +35,7 @@ export async function notifyAdminsOfJoinRequest(opts: {
 
   if (!office || !requester || admins.length === 0) return;
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = platform.env.baseUrl();
   const reviewUrl = `${appUrl}/org/${office.id}/admin/members`;
 
   await Promise.allSettled(

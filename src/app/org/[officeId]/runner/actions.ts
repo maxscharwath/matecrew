@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { platform } from "@/platform";
 import { serveSession } from "@/lib/serve-session";
 import { stockDeltaOps } from "@/lib/stock";
 import { refreshSlackSessionMessage } from "@/lib/notifications";
@@ -30,31 +31,43 @@ export async function markServed(
     return { success: false, error: t('errors.alreadyServed') };
   }
 
-  await prisma.$transaction([
-    prisma.dailyRequest.update({
-      where: { id: requestId },
-      data: { status: "SERVED" },
-    }),
-    prisma.consumptionEntry.create({
-      data: {
+  // Read above, one atomic batch here. The guard only flips a request that is
+  // still unserved, so a double click cannot consume and destock twice.
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.dailyRequest.updateMany({
+          where: { id: requestId, status: request.status },
+          data: { status: "SERVED" },
+        }),
+        1,
+      ),
+      db.consumptionEntry.createMany({
+        data: [
+          {
+            officeId,
+            userId: request.userId,
+            itemId: request.itemId,
+            date: request.date,
+            qty: 1,
+            source: "DAILY_REQUEST",
+          },
+        ],
+      }),
+      ...stockDeltaOps(db, {
         officeId,
-        userId: request.userId,
         itemId: request.itemId,
-        date: request.date,
-        qty: 1,
-        source: "DAILY_REQUEST",
-      },
-    }),
-    ...stockDeltaOps({
-      officeId,
-      itemId: request.itemId,
-      delta: -1,
-      reason: "SERVED",
-      userId: membership.userId,
-    }),
-  ]);
+        delta: -1,
+        reason: "SERVED",
+        userId: membership.userId,
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return { success: false, error: t('errors.alreadyServed') };
+    throw error;
+  }
 
-  checkAndAlertLowStock(officeId, request.itemId).catch(() => {});
+  platform.runInBackground(checkAndAlertLowStock(officeId, request.itemId), "low-stock alert");
 
   revalidatePath(`/org/${officeId}/runner`);
   revalidatePath(`/org/${officeId}/request`);
@@ -135,28 +148,38 @@ export async function markUnserved(
     return { success: false, error: t('errors.notYetServed') };
   }
 
-  await prisma.$transaction([
-    prisma.dailyRequest.update({
-      where: { id: requestId },
-      data: { status: "REQUESTED" },
-    }),
-    prisma.consumptionEntry.deleteMany({
-      where: {
+  // Read above, one atomic batch here. The guard only reverts a request that
+  // is still served, so a double click cannot restock twice.
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.dailyRequest.updateMany({
+          where: { id: requestId, status: "SERVED" },
+          data: { status: "REQUESTED" },
+        }),
+        1,
+      ),
+      db.consumptionEntry.deleteMany({
+        where: {
+          officeId,
+          userId: request.userId,
+          itemId: request.itemId,
+          date: request.date,
+          source: "DAILY_REQUEST",
+        },
+      }),
+      ...stockDeltaOps(db, {
         officeId,
-        userId: request.userId,
         itemId: request.itemId,
-        date: request.date,
-        source: "DAILY_REQUEST",
-      },
-    }),
-    ...stockDeltaOps({
-      officeId,
-      itemId: request.itemId,
-      delta: 1,
-      reason: "UNSERVED",
-      userId: membership.userId,
-    }),
-  ]);
+        delta: 1,
+        reason: "UNSERVED",
+        userId: membership.userId,
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return { success: false, error: t('errors.notYetServed') };
+    throw error;
+  }
 
   revalidatePath(`/org/${officeId}/runner`);
   revalidatePath(`/org/${officeId}/request`);

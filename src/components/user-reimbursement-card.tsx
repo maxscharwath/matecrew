@@ -61,13 +61,17 @@ export function UserReimbursementCard({
 
   // The header carries the outcome on its own, so the body no longer repeats
   // it as a fourth "Balance" tile.
-  const statusText = owes
-    ? t("reimbursements.youOweCHF", { amount: pendingOwed.toFixed(2) })
-    : isOwed
-      ? t("reimbursements.youAreOwedCHF", {
-          amount: pendingOwedToYou.toFixed(2),
-        })
-      : t("reimbursements.settledLabel");
+  let statusText = t("reimbursements.settledLabel");
+  let statusVariant: "destructive" | "default" | "secondary" = "secondary";
+  if (owes) {
+    statusText = t("reimbursements.youOweCHF", { amount: pendingOwed.toFixed(2) });
+    statusVariant = "destructive";
+  } else if (isOwed) {
+    statusText = t("reimbursements.youAreOwedCHF", {
+      amount: pendingOwedToYou.toFixed(2),
+    });
+    statusVariant = "default";
+  }
 
   function handleExportPdf() {
     startTransition(async () => {
@@ -92,12 +96,7 @@ export function UserReimbursementCard({
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <span className="font-semibold">{label}</span>
           <div className="flex items-center gap-3">
-            <Badge
-              variant={
-                owes ? "destructive" : isOwed ? "default" : "secondary"
-              }
-              className="whitespace-nowrap"
-            >
+            <Badge variant={statusVariant} className="whitespace-nowrap">
               {owes || isOwed ? (
                 <Wallet className="size-3" />
               ) : (

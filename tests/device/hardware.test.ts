@@ -15,13 +15,17 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
   globalThis.fetch = (async () =>
     new Response(bytes, {
       headers: { "Content-Type": "application/wasm" },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
   const wasm = await DeviceWasm.load();
   const gpio = new VirtualGpio();
   // The runtime polls every 20 ms: 1 left, 2 right, 4 both keys, 8 left held, 16 right held,
   // 0 nothing (yet).
   let now = 0;
-  const sample = () => wasm.sampleGpio(gpio.read(5), gpio.read(8), (now += 20));
+  const tick = () => {
+    now += 20;
+    return now;
+  };
+  const sample = () => wasm.sampleGpio(gpio.read(5), gpio.read(8), tick());
   /** What the next polls report: `polls` × 20 ms (8: past the 120 ms the other key has to join). */
   const settle = (poll = sample, polls = 8) => {
     for (let i = 0; i < polls; i++) {
@@ -62,7 +66,7 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
   gpio.release();
   assert.equal(settle(), 0);
   // A tap shorter than the 20 ms poll still reaches the detector once.
-  const poll = () => wasm.sampleGpio(gpio.sample(5), gpio.sample(8), (now += 20));
+  const poll = () => wasm.sampleGpio(gpio.sample(5), gpio.sample(8), tick());
   gpio.drive(8, true, "keyboard");
   gpio.drive(8, false, "keyboard");
   assert.equal(gpio.read(8), false);
@@ -97,7 +101,7 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
     [1661, 220],
   ]);
   assert.equal(wasm.buzzerPattern("unknown").at(-1)?.[0], 3951);
-  assert.equal(wasm.buzzerPattern("boot").length, 10);
+  assert.equal(wasm.buzzerPattern("boot").length, 13);
 });
 
 test("the buzzer pin exposes PWM phase, silence and sequential firmware tones", () => {

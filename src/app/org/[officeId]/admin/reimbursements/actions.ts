@@ -13,13 +13,8 @@ import { generateReimbursementCsv } from "@/lib/csv-export";
 import { generateSettlementPdf } from "@/lib/pdf-export";
 import { sendPeriodStatements } from "@/lib/settlement-mail";
 import { sendPaymentReminders } from "@/lib/payment-reminder";
-import {
-  buildSettlementKey,
-  fileExists,
-  uploadFile,
-  internalFileUrl,
-  deleteFile,
-} from "@/lib/storage";
+import { buildSettlementKey, internalFileUrl } from "@/lib/storage";
+import { platform } from "@/platform";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -54,13 +49,12 @@ export async function deletePeriod(
     return { success: false, error: t('errors.periodNotFound') };
   }
 
-  await prisma.$transaction([
-    prisma.reimbursementLine.deleteMany({ where: { periodId } }),
-    prisma.reimbursementPeriod.delete({ where: { id: periodId } }),
-  ]);
+  // One statement, so atomic on its own: the period's lines and statement
+  // deliveries go with it (ON DELETE CASCADE).
+  await prisma.reimbursementPeriod.delete({ where: { id: periodId } });
 
   // Purge cached settlement PDF if present
-  deleteFile(buildSettlementKey(periodId)).catch(() => {});
+  platform.runInBackground(platform.storage.delete(buildSettlementKey(periodId)), "settlement PDF purge");
 
   revalidatePath(`/org/${officeId}/admin/reimbursements`);
   revalidatePath(`/org/${officeId}/reimbursements`);
@@ -126,7 +120,7 @@ export async function exportPeriodPdf(
   const key = buildSettlementKey(periodId);
 
   // Serve cached PDF if available
-  if (await fileExists(key)) {
+  if (await platform.storage.head(key)) {
     const url = internalFileUrl(key);
     return { success: true, url };
   }
@@ -154,7 +148,7 @@ export async function exportPeriodPdf(
     locale: period.office.locale,
   });
 
-  await uploadFile({ key, body: pdfBuffer, contentType: "application/pdf" });
+  await platform.storage.put(key, pdfBuffer, { contentType: "application/pdf" });
   const url = internalFileUrl(key);
   return { success: true, url };
 }

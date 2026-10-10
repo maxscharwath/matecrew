@@ -1,10 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
-import { roundCents } from "@/lib/money";
+import { commitBatch, expectRows, BatchConflictError, newId, prisma } from "@/lib/prisma";
+import { fromCents, toCents } from "@/lib/money";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { stockDeltaOps } from "@/lib/stock";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
+import { findByIdOrName } from "@/lib/mcp/name-match";
 import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
 import { isoDateArg, officeArg, parseIsoDate } from "@/lib/mcp/schemas";
@@ -63,13 +64,13 @@ export function registerAdminPurchaseTools(server: McpServer): void {
           deliveredAt: b.deliveredAt,
           orderedBy: b.orderedBy.name,
           paidBy: b.paidBy.name,
-          totalPrice: b.totalPrice,
+          totalPrice: fromCents(b.totalPriceCents),
           notes: b.notes,
           lines: b.lines.map((l) => ({
             item: l.item.name,
             qty: l.qty,
-            unitPrice: l.unitPrice,
-            lineTotal: l.lineTotal,
+            unitPrice: fromCents(l.unitPriceCents),
+            lineTotal: fromCents(l.lineTotalCents),
           })),
           invoiceCount: b.invoices.length,
         })),
@@ -138,19 +139,22 @@ export function registerAdminPurchaseTools(server: McpServer): void {
       const payer = await findOfficeMember(scope.officeId, paidBy);
 
       // Resolve every line's item up front so a typo fails before any write.
-      const resolved = [];
+      const resolved: {
+        itemId: string;
+        itemName: string;
+        qty: number;
+        unitPriceCents: number;
+        lineTotalCents: number;
+      }[] = [];
       for (const line of lines) {
         const wanted = line.item.trim();
-        const item = await prisma.item.findFirst({
-          where: {
-            officeId: scope.officeId,
-            OR: [
-              { id: wanted },
-              { name: { equals: wanted, mode: "insensitive" } },
-            ],
-          },
-          select: { id: true, name: true },
-        });
+        const item = findByIdOrName(
+          await prisma.item.findMany({
+            where: { officeId: scope.officeId },
+            select: { id: true, name: true },
+          }),
+          wanted,
+        );
         if (!item) {
           throw new McpToolError(
             `No item called "${line.item}" in ${scope.officeName}.`,
@@ -163,49 +167,57 @@ export function registerAdminPurchaseTools(server: McpServer): void {
           itemId: item.id,
           itemName: item.name,
           qty: line.qty,
-          unitPrice: roundCents(lineTotal / line.qty),
-          lineTotal: roundCents(lineTotal),
+          unitPriceCents: toCents(lineTotal / line.qty),
+          lineTotalCents: toCents(lineTotal),
         });
       }
 
-      const totalPrice = roundCents(
-        resolved.reduce((sum, l) => sum + l.lineTotal, 0),
-      );
+      const totalPriceCents = resolved.reduce((sum, l) => sum + l.lineTotalCents, 0);
+      const totalPrice = fromCents(totalPriceCents);
 
-      const batch = await prisma.purchaseBatch.create({
-        data: {
-          officeId: scope.officeId,
-          status: "ORDERED",
-          purchasedAt: purchasedAt ? parseIsoDate(purchasedAt) : new Date(),
-          orderedByUserId: actor.userId,
-          paidByUserId: payer.userId,
-          totalPrice,
-          notes: notes || null,
-          lines: {
-            create: resolved.map((l) => ({
-              itemId: l.itemId,
-              qty: l.qty,
-              unitPrice: l.unitPrice,
-              lineTotal: l.lineTotal,
-            })),
-          },
-        },
-        select: { id: true, purchasedAt: true },
-      });
+      // One atomic batch: the order and its lines land together or not at
+      // all (the id is ours, so the lines can point at it).
+      const batchId = newId();
+      const batchPurchasedAt = purchasedAt ? parseIsoDate(purchasedAt) : new Date();
+      await commitBatch((db) => [
+        db.purchaseBatch.createMany({
+          data: [
+            {
+              id: batchId,
+              officeId: scope.officeId,
+              status: "ORDERED",
+              purchasedAt: batchPurchasedAt,
+              orderedByUserId: actor.userId,
+              paidByUserId: payer.userId,
+              totalPriceCents,
+              notes: notes || null,
+            },
+          ],
+        }),
+        db.purchaseLine.createMany({
+          data: resolved.map((l) => ({
+            batchId,
+            itemId: l.itemId,
+            qty: l.qty,
+            unitPriceCents: l.unitPriceCents,
+            lineTotalCents: l.lineTotalCents,
+          })),
+        }),
+      ]);
 
       return {
         ok: true,
-        purchaseId: batch.id,
+        purchaseId: batchId,
         status: "ORDERED",
-        purchasedAt: batch.purchasedAt,
+        purchasedAt: batchPurchasedAt,
         paidBy: payer.name,
         totalPrice,
         totalCans: resolved.reduce((sum, l) => sum + l.qty, 0),
         lines: resolved.map((l) => ({
           item: l.itemName,
           qty: l.qty,
-          unitPrice: l.unitPrice,
-          lineTotal: l.lineTotal,
+          unitPrice: fromCents(l.unitPriceCents),
+          lineTotal: fromCents(l.lineTotalCents),
         })),
         message: `Recorded a ${totalPrice} CHF order paid by ${payer.name}. Stock is unchanged until you mark it delivered.`,
       };
@@ -259,22 +271,42 @@ export function registerAdminPurchaseTools(server: McpServer): void {
         });
       }
 
-      await prisma.$transaction([
-        prisma.purchaseBatch.update({
-          where: { id: purchaseId },
-          data: { status: "DELIVERED", deliveredAt: new Date() },
-        }),
-        ...[...qtyByItem.entries()].flatMap(([itemId, { qty }]) =>
-          stockDeltaOps({
-            officeId: scope.officeId,
-            itemId,
-            delta: qty,
-            reason: "PURCHASE",
-            note: `Delivery received: ${qty} units`,
-            userId: actor.userId,
-          }),
-        ),
-      ]);
+      // Read above, one atomic batch here. Guard: the order flips to
+      // DELIVERED only if it is still ORDERED, so a concurrent delivery (the
+      // web app, a retried call) cannot add its cans to stock twice.
+      const now = new Date();
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.purchaseBatch.updateMany({
+              where: { id: purchaseId, status: "ORDERED" },
+              data: { status: "DELIVERED", deliveredAt: now },
+            }),
+            1,
+          ),
+          ...[...qtyByItem.entries()].flatMap(([itemId, { qty }]) =>
+            stockDeltaOps(
+              db,
+              {
+                officeId: scope.officeId,
+                itemId,
+                delta: qty,
+                reason: "PURCHASE",
+                note: `Delivery received: ${qty} units`,
+                userId: actor.userId,
+              },
+              now,
+            ),
+          ),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        return {
+          ok: true,
+          status: "already_delivered",
+          message: "That order was marked delivered meanwhile — stock unchanged.",
+        };
+      }
 
       for (const itemId of qtyByItem.keys()) {
         await notifyQuietly("low-stock", () =>

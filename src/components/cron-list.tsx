@@ -14,7 +14,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { triggerCron } from "@/app/org/[officeId]/admin/cron/actions";
-import cronSchedules from "../../cron-schedules.json";
+import { SCHEDULES, type ScheduleName } from "@/jobs/schedules";
+
+const JOBS = Object.entries(SCHEDULES).map(([id, cron]) => ({ id: id as ScheduleName, cron }));
 
 interface CronListProps {
   readonly officeId: string;
@@ -25,7 +27,7 @@ function CronJobRow({
   job,
 }: {
   readonly officeId: string;
-  readonly job: (typeof cronSchedules)[number];
+  readonly job: (typeof JOBS)[number];
 }) {
   const t = useTranslations();
   const [isPending, startTransition] = useTransition();
@@ -49,14 +51,13 @@ function CronJobRow({
     <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{job.name}</span>
+          <span className="font-medium">{t(`cron.tasks.${job.id}.name`)}</span>
           <Badge variant="outline" className="font-mono text-xs">
             <Clock className="mr-1 size-3" />
             {job.cron}
           </Badge>
         </div>
-        <p className="text-sm text-muted-foreground">{job.description}</p>
-        <p className="font-mono text-xs text-muted-foreground">{job.path}</p>
+        <p className="text-sm text-muted-foreground">{t(`cron.tasks.${job.id}.description`)}</p>
         {lastResult && (
           <p className="mt-1 text-xs text-muted-foreground italic">{lastResult}</p>
         )}
@@ -86,11 +87,11 @@ export function CronList({ officeId }: CronListProps) {
       <CardHeader>
         <CardTitle>{t('cron.scheduledTasks')}</CardTitle>
         <CardDescription>
-          {t('cron.taskCount', { count: cronSchedules.length })}
+          {t('cron.taskCount', { count: JOBS.length })}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {cronSchedules.map((job) => (
+        {JOBS.map((job) => (
           <CronJobRow key={job.id} officeId={officeId} job={job} />
         ))}
       </CardContent>

@@ -1,7 +1,7 @@
 "use server";
 
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, expectRows, prisma, retryOnConflict } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth-utils";
 import { verifyClaim, type ClaimParams } from "@/lib/device/badge-claim";
 
@@ -24,20 +24,37 @@ export async function claimBadge(params: ClaimParams): Promise<ClaimResult> {
   });
   if (!member) return { success: false, error: t("notMember", { office: claim.device.office.name }) };
 
+  const linked = await retryOnConflict(() => linkBadge(officeId, claim.uid, session.user.id, claim.device.id));
+  if (!linked) return { success: false, error: t("takenTitle") };
+  return { success: true, deviceName: claim.device.name };
+}
+
+/**
+ * Gives the badge to the member unless someone else holds it, and tells the
+ * terminal to sync, in one atomic batch. The guard only takes the badge over
+ * from the holder that was read (nobody, or this member); a badge seen for the
+ * first time is created, and a concurrent creation is a unique-key conflict.
+ * Either way the loser reads again. Resolves to false when the badge is taken.
+ */
+async function linkBadge(officeId: string, uid: string, userId: string, deviceId: string): Promise<boolean> {
   const existing = await prisma.badge.findUnique({
-    where: { officeId_uid: { officeId, uid: claim.uid } },
+    where: { officeId_uid: { officeId, uid } },
     select: { userId: true },
   });
-  if (existing?.userId && existing.userId !== session.user.id) return { success: false, error: t("takenTitle") };
+  if (existing?.userId && existing.userId !== userId) return false;
 
   const now = new Date();
-  await prisma.$transaction([
-    prisma.badge.upsert({
-      where: { officeId_uid: { officeId, uid: claim.uid } },
-      create: { officeId, uid: claim.uid, userId: session.user.id, firstSeenAt: now, lastSeenAt: now },
-      update: { userId: session.user.id, lastSeenAt: now },
-    }),
-    prisma.deviceCommand.create({ data: { deviceId: claim.device.id, kind: "SYNC", sentById: session.user.id } }),
+  await commitBatch((db) => [
+    existing
+      ? expectRows(
+          db.badge.updateMany({
+            where: { officeId, uid, userId: existing.userId },
+            data: { userId, lastSeenAt: now },
+          }),
+          1,
+        )
+      : db.badge.createMany({ data: [{ officeId, uid, userId, firstSeenAt: now, lastSeenAt: now }] }),
+    db.deviceCommand.createMany({ data: [{ deviceId, kind: "SYNC", sentById: userId }] }),
   ]);
-  return { success: true, deviceName: claim.device.name };
+  return true;
 }

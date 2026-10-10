@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Unlink } from "lucide-react";
+import { Check, Unlink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,19 +13,27 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { revokeDevice, updateDevice } from "@/app/org/[officeId]/admin/devices/actions";
+import { cn } from "@/lib/utils";
+import type { DeviceTheme } from "@/lib/device/contract";
+
+/** The terminal's languages: the site's (src/i18n/request.ts). */
+const LANGUAGES = ["fr", "en"] as const;
+const THEMES: readonly DeviceTheme[] = ["paper", "dark", "flipper", "macos"];
+/** The language choice that follows the office's (`updateDevice`). */
+const OFFICE_LOCALE = "office";
 
 export type Take = { id: string; who: string; item: string | null; rejectedReason: string | null; takenAt: string };
 
-/** What there is to set: its name and the item the picker opens on; and unlinking it. */
-export function DeviceSettings({
-  officeId,
-  device,
-  items,
-}: Readonly<{
+export type DeviceSettingsProps = {
   officeId: string;
-  device: { id: string; name: string; firstItemId: string | null };
+  device: { id: string; name: string; firstItemId: string | null; locale: string | null; theme: string | null };
+  /** What a terminal without its own language and theme shows. */
+  display: { officeLocale: string; defaultTheme: DeviceTheme };
   items: { id: string; name: string }[];
-}>) {
+};
+
+/** What there is to set: its name, the item the picker opens on, its language and theme; and unlinking it. */
+export function DeviceSettings({ officeId, device, display, items }: Readonly<DeviceSettingsProps>) {
   const t = useTranslations("devices");
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -71,6 +79,7 @@ export function DeviceSettings({
                 </SelectContent>
               </Select>
             </div>
+            <DisplayFields device={device} display={display} />
             <Button type="submit" disabled={pending}>
               {t("save")}
             </Button>
@@ -110,6 +119,93 @@ export function DeviceSettings({
         }
       />
     </div>
+  );
+}
+
+/** A language's own name, capitalised: "Français", "English". */
+function autonym(code: string): string {
+  const name = new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
+  return name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
+}
+
+/** The terminal's language and its screens' theme, saved with the rest of the form. */
+function DisplayFields({ device, display }: Readonly<Pick<DeviceSettingsProps, "device" | "display">>) {
+  const t = useTranslations("devices.display");
+  const [theme, setTheme] = useState<string>(device.theme ?? display.defaultTheme);
+  const office = useMemo(() => autonym(display.officeLocale), [display.officeLocale]);
+  return (
+    <div className="space-y-4 border-t pt-4">
+      <div>
+        <div className="text-sm font-medium">{t("title")}</div>
+        <p className="text-xs text-muted-foreground">{t("hint")}</p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="device-locale">{t("language")}</Label>
+        <Select name="locale" defaultValue={device.locale ?? OFFICE_LOCALE}>
+          <SelectTrigger id="device-locale" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={OFFICE_LOCALE}>{t("officeLanguage", { language: office })}</SelectItem>
+            {LANGUAGES.map((code) => (
+              <SelectItem key={code} value={code}>
+                {autonym(code)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <fieldset className="space-y-2">
+        <legend className="mb-2 text-sm font-medium">{t("theme")}</legend>
+        <div className="grid grid-cols-2 gap-2">
+          {THEMES.map((value) => (
+            <label
+              key={value}
+              className={cn(
+                "relative flex cursor-pointer items-center gap-3 rounded-lg border p-2.5 outline-none hover:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
+                theme === value && "border-foreground/40 bg-accent",
+              )}
+            >
+              <input
+                type="radio"
+                name="theme"
+                value={value}
+                checked={theme === value}
+                onChange={() => setTheme(value)}
+                className="sr-only"
+              />
+              <ThemeSwatch theme={value} sample={t("sample")} />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{t(`themes.${value}`)}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {value === display.defaultTheme ? t("default") : t(`themeHints.${value}`)}
+                </span>
+              </span>
+              {theme === value && <Check className="absolute top-2 right-2 size-3.5" />}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </div>
+  );
+}
+
+/** A thumbnail of a theme on the panel: its ground, its ink and the feel of its type. */
+function ThemeSwatch({ theme, sample }: Readonly<{ theme: DeviceTheme; sample: string }>) {
+  const ground = {
+    paper: "bg-[#f4f2ec] text-zinc-900",
+    dark: "bg-zinc-900 text-[#f4f2ec]",
+    flipper: "bg-[#f4f2ec] text-zinc-900 font-mono uppercase",
+    macos: "bg-white text-zinc-900 font-serif",
+  }[theme];
+  return (
+    <span className={cn("relative grid h-10 w-14 shrink-0 place-items-center overflow-hidden rounded border border-zinc-400 text-sm font-semibold", ground)}>
+      {theme === "macos" && (
+        <span className="absolute inset-x-0 top-0 h-2 bg-[repeating-linear-gradient(0deg,#18181b_0_1px,transparent_1px_2px)]" />
+      )}
+      {theme === "flipper" && <span className="absolute inset-0.5 rounded-sm border border-dashed border-zinc-500" />}
+      <span className="relative">{sample}</span>
+    </span>
   );
 }
 

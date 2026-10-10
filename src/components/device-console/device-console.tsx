@@ -6,15 +6,32 @@ import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import {
+  Activity,
   ArrowLeft,
+  Battery,
+  BatteryFull,
+  BatteryLow,
+  BatteryMedium,
+  BatteryWarning,
   Bluetooth,
   BluetoothConnected,
   BluetoothSearching,
+  Clock,
+  Cpu,
+  Hash,
   History,
   Keyboard,
   LoaderCircle,
+  MonitorSmartphone,
+  Radio,
   Settings2,
   SquareTerminal,
+  Timer,
+  Wifi,
+  WifiHigh,
+  WifiLow,
+  WifiOff,
+  WifiZero,
 } from "lucide-react";
 import type { RemoteCommand } from "@matecrew/device-ui/link";
 import { cn } from "@/lib/utils";
@@ -27,15 +44,21 @@ import type { LiveStatus } from "@/lib/device/live";
 import { BadgeZone, DeviceShell, useDeviceShortcuts, type BadgeOption, type Side } from "./device-shell";
 import { compareFrames, fetchFrame, PANEL_WIDTH, type MirrorFrame } from "./frame-bits";
 import { MirrorScreen, type Mirror } from "./mirror-screen";
-import { StatusStrip } from "./status-strip";
-import { ConsoleMonitor, type MonitorLine } from "./console-monitor";
-import { BoardCard, ControlsCard } from "./console-controls";
-import { DeviceSettings, RecentTakes, type Take } from "./device-settings";
-import { useBleScreen, useBleTerminal, type BleTerminal } from "./ble-link";
+import { LogPanel } from "./log-panel";
+import { MemoryCard } from "./memory-panel";
+import { ActionsCard } from "./terminal-actions";
+import { BoardCard } from "./board-card";
+import { FactList, RailCard, Workbench, type Fact } from "./workbench";
+import type { ConsoleKind, LogEntry } from "./device-log";
+import { battery, signalBand } from "./readings";
+import { DeviceSettings, RecentTakes, type DeviceSettingsProps, type Take } from "./device-settings";
+import { useBleScreen, useBleSession, useBleTerminal, type BleTerminal } from "./ble-link";
 
 interface Props {
   readonly officeId: string;
-  readonly device: { id: string; name: string; hardwareId: string; firstItemId: string | null };
+  readonly device: DeviceSettingsProps["device"] & { hardwareId: string };
+  /** What a terminal without its own language and theme shows: its office's, the site's. */
+  readonly display: DeviceSettingsProps["display"];
   readonly items: { id: string; name: string }[];
   readonly badges: BadgeOption[];
   readonly takes: Take[];
@@ -56,16 +79,19 @@ const FLASH_MS = 700;
 const PASS_MS = 650;
 /** SPI clocks the frame in at the start of a refresh. */
 const SPI_MS = 250;
-const MAX_LINES = 200;
+/** Lines the log keeps: the console's, the commands', and the terminal's own over Bluetooth. */
+const MAX_LINES = 400;
 /** Remote taps are 200 × 120; the log shows them in panel pixels. */
 const TAP_SCALE = PANEL_WIDTH / 200;
 
+const SIGNAL_ICON = { excellent: Wifi, good: WifiHigh, fair: WifiLow, weak: WifiZero } as const;
+
 /**
- * One terminal, like the SDK studio shows the emulated one: its panel
- * mirrored live and driven from here (keys, badge, taps), its state, a serial
- * monitor of what the console sent and saw, its board; then its takes and settings.
- * Nearby, over Bluetooth, the panel comes straight from the terminal and the
- * commands go straight to it; through the site otherwise.
+ * One terminal, like the SDK studio shows the emulated one: its panel mirrored live and driven
+ * from here (keys, badge reader, taps), its status, memory and actions beside it, its log under
+ * it; then its takes and settings. Nearby, over Bluetooth, the panel comes straight from the
+ * terminal, the commands go straight to it and its own log and memory show; through the site
+ * otherwise.
  */
 export function DeviceConsole(props: Props) {
   return (
@@ -75,7 +101,7 @@ export function DeviceConsole(props: Props) {
   );
 }
 
-function Console({ officeId, device, items, badges, takes, initial, renderedAt, timeZone }: Props) {
+function Console({ officeId, device, display, items, badges, takes, initial, renderedAt, timeZone }: Props) {
   const t = useTranslations("devices.console");
   const format = useFormatter();
   const base = `/org/${officeId}/admin/devices/${device.id}`;
@@ -85,8 +111,8 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
   const [commands, setCommands] = useState<Record<string, Command>>(() =>
     Object.fromEntries(initial.commands.map((command) => [command.id, command])),
   );
-  const [events, setEvents] = useState<MonitorLine[]>(() => [
-    { id: "opened", at: Date.parse(renderedAt), kind: "link", text: t("log.opened") },
+  const [events, setEvents] = useState<LogEntry[]>(() => [
+    { id: "opened", at: Date.parse(renderedAt), source: "console", level: "I", tag: "link", text: t("log.opened") },
   ]);
   const [clearedAt, setClearedAt] = useState(0);
   const [pressed, setPressed] = useState<Side | "badge" | null>(null);
@@ -96,9 +122,16 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
   const [busy, setBusy] = useState<{ passes: number; spi: boolean } | null>(null);
 
   const eventId = useRef(0);
-  const addEvent = useCallback((kind: MonitorLine["kind"], text: string) => {
-    const id = `e${++eventId.current}`;
-    setEvents((current) => [{ id, at: Date.now(), kind, text }, ...current].slice(0, MAX_LINES));
+  const addEvent = useCallback((kind: ConsoleKind, text: string) => {
+    const entry: LogEntry = {
+      id: `e${++eventId.current}`,
+      at: Date.now(),
+      source: "console",
+      level: kind === "error" ? "E" : "I",
+      tag: kind,
+      text,
+    };
+    setEvents((current) => [...current, entry].slice(-MAX_LINES));
   }, []);
 
   // The terminal over Bluetooth, when connected from here: its screen, and a shorter way for commands.
@@ -116,6 +149,8 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
   });
   const { frame: bleFrame, error: bleError } = useBleScreen(ble.device);
   const bleLive = bleFrame !== null;
+  // Its own log, memory and info, which only Bluetooth carries.
+  const session = useBleSession(ble.device);
   useEffect(() => {
     if (bleError && bleError.code !== "disconnected") addEvent("error", t("ble.screenFailed", { message: bleError.message }));
   }, [bleError, addEvent, t]);
@@ -350,19 +385,37 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
     },
     [t],
   );
+  // One log, oldest first: what the console noticed, the commands it sent, the terminal's own lines.
+  const deviceLogs = session.logs;
   const lines = useMemo(() => {
-    const sent: MonitorLine[] = Object.values(commands).map((command) => ({
+    const sent: LogEntry[] = Object.values(commands).map((command) => ({
       id: command.id,
       at: Date.parse(command.createdAt),
-      kind: command.kind === "KEY" || command.kind === "BADGE" ? "input" : "system",
+      source: "console",
+      level: command.status === "dropped" ? "W" : "I",
+      tag: command.kind === "KEY" || command.kind === "BADGE" ? "input" : "system",
       text: describe(command),
       status: command.status,
     }));
-    return [...sent, ...events]
+    return [...sent, ...events, ...deviceLogs]
       .filter((line) => line.at > clearedAt)
-      .sort((a, b) => b.at - a.at)
-      .slice(0, MAX_LINES);
-  }, [commands, events, clearedAt, describe]);
+      .sort((a, b) => a.at - b.at)
+      .slice(-MAX_LINES);
+  }, [commands, events, deviceLogs, clearedAt, describe]);
+
+  const updateOverBluetooth = async (image: Uint8Array, progress: (percent: number) => void) => {
+    const target = ble.device;
+    if (!target) return;
+    addEvent("system", t("log.firmwareSending"));
+    const done = await target.updateFirmware(image, { onProgress: (sent, total) => progress(Math.round((sent * 100) / total)) });
+    if (done.ok) {
+      toast.success(t("log.firmwareSent"));
+      addEvent("system", t("log.firmwareSent"));
+    } else {
+      toast.error(t("ble.failed", { message: done.error.message }));
+      addEvent("error", t("ble.failed", { message: done.error.message }));
+    }
+  };
 
   const waiting = live.commands.filter((c) => c.status === "waiting").length;
   const active = new Set<number>();
@@ -401,71 +454,92 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
         </div>
       </div>
 
-      <StatusStrip live={live} now={now} timeZone={timeZone} />
-
-      {/*
-        Laid out on the room the page leaves (the sidebar takes some): the controls go beside
-        the panel only when it still gets 800 px there, else under it, beside the monitor.
-      */}
-      <TabsPrimitive.Content value="console" className="@container outline-none">
-        <div className="grid gap-6 @3xl:grid-cols-[minmax(0,1fr)_20rem]">
-          <div className="min-w-0 space-y-3 @3xl:col-span-2 @min-[75rem]:col-span-1">
-            <DeviceShell
-              pressed={pressed === "left" || pressed === "right" ? pressed : null}
-              onKey={(side) => send({ kind: "key", side })}
-              indicator={
-                <Indicator
-                  busy={busy?.passes ?? null}
-                  mirror={mirror}
-                  preview={preview}
-                  reachable={live.reachable || bleLive}
-                  relative={(iso) => format.relativeTime(new Date(iso), now)}
-                  onHidePreview={() => setPreview(false)}
-                />
-              }
-              screen={
-                <MirrorScreen
-                  mirror={mirror}
-                  reachable={live.reachable || bleLive}
-                  preview={preview}
-                  previewUrl={`${base}/screen`}
-                  onPreview={() => setPreview(true)}
-                  onTap={(x, y) => send({ kind: "tap", x, y })}
-                />
-              }
-              badge={
-                <BadgeZone
-                  badges={badges}
-                  open={badgeOpen}
-                  onOpenChange={setBadgeOpen}
-                  flashing={pressed === "badge"}
-                  onBadge={(uid) => send({ kind: "badge", uid })}
-                />
+      <TabsPrimitive.Content value="console" className="outline-none">
+        <Workbench
+          terminal={
+            <div className="space-y-3">
+              <DeviceShell
+                pressed={pressed === "left" || pressed === "right" ? pressed : null}
+                onKey={(side) => send({ kind: "key", side })}
+                indicator={
+                  <Indicator
+                    busy={busy?.passes ?? null}
+                    mirror={mirror}
+                    preview={preview}
+                    reachable={live.reachable || bleLive}
+                    relative={(iso) => format.relativeTime(new Date(iso), now)}
+                    onHidePreview={() => setPreview(false)}
+                  />
+                }
+                screen={
+                  <MirrorScreen
+                    mirror={mirror}
+                    reachable={live.reachable || bleLive}
+                    preview={preview}
+                    previewUrl={`${base}/screen`}
+                    onPreview={() => setPreview(true)}
+                    onTap={(x, y) => send({ kind: "tap", x, y })}
+                  />
+                }
+                badge={
+                  <BadgeZone
+                    badges={badges}
+                    open={badgeOpen}
+                    onOpenChange={setBadgeOpen}
+                    flashing={pressed === "badge"}
+                    onBadge={(uid) => send({ kind: "badge", uid })}
+                  />
+                }
+              />
+              <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+                <Keyboard className="hidden size-3.5 shrink-0 sm:block" /> {t("shortcuts")} {t("tapHint")}
+              </p>
+            </div>
+          }
+          rail={
+            <>
+              <RailCard icon={<Activity />} title={t("status.title")}>
+                <FactList facts={statusFacts({ t, format, live, now, timeZone, info: session.info, hardwareId: device.hardwareId })} />
+              </RailCard>
+              <MemoryCard
+                samples={session.memory}
+                state={ble.device ? "live" : "bluetooth"}
+                timeZone={timeZone}
+                action={<BleConnectHint ble={ble} />}
+              />
+              <ActionsCard
+                deviceName={device.name}
+                description={live.reachable || bleLive ? t("controls.live") : t("offlineHint")}
+                onSync={() => send({ kind: "sync" })}
+                onBoth={() => send({ kind: "both" })}
+                onOpenApp={(app) => send({ kind: "sync", app })}
+                onRestart={() => send({ kind: "restart" })}
+                onForgetWifi={() => send({ kind: "forgetWifi" })}
+                onFirmware={ble.device ? (image, progress) => updateOverBluetooth(image, progress) : undefined}
+              />
+              <BoardCard active={active} />
+            </>
+          }
+          logs={
+            <LogPanel
+              entries={lines}
+              timeZone={timeZone}
+              fileName={device.name}
+              onClear={() => {
+                setClearedAt(Date.now());
+                session.clearLogs();
+              }}
+              notice={
+                ble.device ? undefined : (
+                  <>
+                    <span className="min-w-0 flex-1">{t("logs.bluetoothNotice")}</span>
+                    <BleConnectHint ble={ble} dark />
+                  </>
+                )
               }
             />
-            <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-              <Keyboard className="hidden size-3.5 shrink-0 sm:block" /> {t("shortcuts")} {t("tapHint")}
-            </p>
-          </div>
-
-          <div className="space-y-4 @3xl:col-start-2 @3xl:row-start-2 @min-[75rem]:row-span-2 @min-[75rem]:row-start-1">
-            <ControlsCard
-              deviceName={device.name}
-              reachable={live.reachable || bleLive}
-              onKey={(side) => send({ kind: "key", side })}
-              onBoth={() => send({ kind: "both" })}
-              onBadge={(uid) => send({ kind: "badge", uid })}
-              onSync={(app) => send(app ? { kind: "sync", app } : { kind: "sync" })}
-              onRestart={() => send({ kind: "restart" })}
-              onForgetWifi={() => send({ kind: "forgetWifi" })}
-            />
-            <BoardCard hardwareId={device.hardwareId} firmwareVersion={live.firmwareVersion} active={active} />
-          </div>
-
-          <div className="min-w-0 @3xl:col-start-1 @3xl:row-start-2">
-            <ConsoleMonitor lines={lines} timeZone={timeZone} onClear={() => setClearedAt(Date.now())} />
-          </div>
-        </div>
+          }
+        />
       </TabsPrimitive.Content>
 
       <TabsPrimitive.Content value="activity" className="outline-none">
@@ -473,9 +547,145 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
       </TabsPrimitive.Content>
 
       <TabsPrimitive.Content value="settings" className="outline-none">
-        <DeviceSettings officeId={officeId} device={device} items={items} />
+        <DeviceSettings officeId={officeId} device={device} display={display} items={items} />
       </TabsPrimitive.Content>
     </TabsPrimitive.Root>
+  );
+}
+
+/** The status bar's battery icon for a charge, or a plain one when there is no battery reading. */
+function BatteryGlyph({ charge }: Readonly<{ charge: ReturnType<typeof battery> }>) {
+  if (!charge) return <Battery />;
+  if (charge.low) return <BatteryWarning />;
+  if (charge.percent > 66) return <BatteryFull />;
+  if (charge.percent > 33) return <BatteryMedium />;
+  return <BatteryLow />;
+}
+
+/**
+ * The terminal at a glance: link, contact, firmware, battery, Wi-Fi, screen; with Bluetooth,
+ * also what only the terminal knows (its slot, network name, uptime).
+ */
+function statusFacts({
+  t,
+  format,
+  live,
+  now,
+  timeZone,
+  info,
+  hardwareId,
+}: {
+  t: ReturnType<typeof useTranslations<"devices.console">>;
+  format: ReturnType<typeof useFormatter>;
+  live: LiveStatus;
+  now: Date;
+  timeZone: string;
+  info: ReturnType<typeof useBleSession>["info"];
+  hardwareId: string;
+}): Fact[] {
+  const facts: Fact[] = [
+    {
+      icon: <Radio />,
+      label: t("strip.link"),
+      value: (
+        <span className="inline-flex items-center gap-1.5">
+          <span className={cn("size-1.5 rounded-full", live.reachable ? "bg-emerald-500" : "bg-zinc-400")} />
+          {live.reachable ? t("live") : t("offline")}
+        </span>
+      ),
+      detail: live.reachable ? t("strip.linkLive") : t("strip.linkQueued"),
+    },
+    {
+      icon: <Clock />,
+      label: t("strip.lastSeen"),
+      value: live.lastSeenAt ? format.relativeTime(new Date(live.lastSeenAt), now) : t("neverSeen"),
+      detail: live.lastSeenAt
+        ? format.dateTime(new Date(live.lastSeenAt), { dateStyle: "short", timeStyle: "medium", timeZone })
+        : undefined,
+      muted: !live.lastSeenAt,
+    },
+    {
+      icon: <Cpu />,
+      label: t("firmware"),
+      value: info?.firmware.version ?? live.firmwareVersion ?? "—",
+      detail: info ? [info.firmware.slot, info.firmware.build].filter(Boolean).join(" · ") : undefined,
+      mono: true,
+      muted: !info && !live.firmwareVersion,
+    },
+    batteryFact(t, format, live.batteryMv),
+    signalFact(t, live.wifiRssi, info),
+    {
+      icon: <MonitorSmartphone />,
+      label: t("strip.screen"),
+      value: live.frame ? format.relativeTime(new Date(live.frame.drawnAt), now) : t("strip.screenNone"),
+      muted: !live.frame,
+    },
+  ];
+  if (info) {
+    const minutes = Math.floor(info.uptime / 60);
+    facts.push({
+      icon: <Timer />,
+      label: t("status.uptime"),
+      value: t("status.uptimeValue", { hours: Math.floor(minutes / 60), minutes: minutes % 60 }),
+    });
+  }
+  facts.push({ icon: <Hash />, label: t("hardwareId"), value: hardwareId, mono: true });
+  return facts;
+}
+
+/** Charge and voltage, with a warning when low. */
+function batteryFact(
+  t: ReturnType<typeof useTranslations<"devices.console">>,
+  format: ReturnType<typeof useFormatter>,
+  millivolts: number | null,
+): Fact {
+  const charge = battery(millivolts);
+  if (!charge) return { icon: <BatteryGlyph charge={null} />, label: t("battery"), value: "—", muted: true };
+  const volts = `${format.number(charge.millivolts / 1000, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} V`;
+  return {
+    icon: <BatteryGlyph charge={charge} />,
+    label: t("battery"),
+    value: `${charge.percent} %`,
+    detail: charge.low ? [volts, t("strip.batteryLow")].join(" · ") : volts,
+    alert: charge.low,
+  };
+}
+
+/** The network and its signal: the terminal's own reading over Bluetooth, else its last report. */
+function signalFact(
+  t: ReturnType<typeof useTranslations<"devices.console">>,
+  reported: number | null,
+  info: ReturnType<typeof useBleSession>["info"],
+): Fact {
+  const rssi = info?.wifi?.rssi ?? reported;
+  if (rssi == null && !info?.wifi) return { icon: <WifiOff />, label: t("signal"), value: "—", muted: true };
+  const band = rssi == null ? null : signalBand(rssi);
+  const SignalIcon = band ? SIGNAL_ICON[band] : WifiOff;
+  const dbm = rssi == null ? null : `${rssi} dBm`;
+  const quality = band ? t(`strip.signal.${band}`) : null;
+  return {
+    icon: <SignalIcon />,
+    label: t("signal"),
+    value: info?.wifi?.ssid ?? dbm ?? "—",
+    detail: [quality, info?.wifi ? dbm : null].filter(Boolean).join(" · ") || undefined,
+  };
+}
+
+/** Where only Bluetooth helps (memory, the terminal's log): connect, or why this browser cannot. */
+function BleConnectHint({ ble, dark = false }: Readonly<{ ble: BleTerminal; dark?: boolean }>) {
+  const t = useTranslations("devices.console.ble");
+  if (ble.supported === false) return <span className={dark ? "text-zinc-500" : "text-xs"}>{t("unsupported")}</span>;
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      disabled={ble.connecting || ble.supported === null}
+      onClick={ble.connect}
+      className={cn(dark && "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800")}
+    >
+      {ble.connecting ? <LoaderCircle className="animate-spin" /> : <Bluetooth />}
+      {t("connectNearby")}
+    </Button>
   );
 }
 

@@ -1,6 +1,15 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import type { Role } from "@/generated/prisma/client";
+import { BatchConflictError, commitBatch, expectRows, newId, prisma } from "@/lib/prisma";
+import {
+  createMembershipWrites,
+  officeKeepsAnAdmin,
+  replaceRolesWrites,
+  roleList,
+  rolesSelect,
+  withRoleList,
+} from "@/lib/membership-roles";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
@@ -13,20 +22,24 @@ const rolesArg = z
   );
 
 /**
- * Refuses a change that would leave the office with no admin — nobody could
- * then manage stock, purchases or membership without database access.
+ * Commits a batch of membership changes, refusing one that would leave the
+ * office with no admin: nobody could then manage stock, purchases or
+ * membership without database access. The check is the `officeKeepsAnAdmin`
+ * guard inside the batch, so it also holds against a concurrent demotion.
  */
-async function assertNotLastAdmin(
-  officeId: string,
+async function commitKeepingAnAdmin(
   officeName: string,
+  build: Parameters<typeof commitBatch>[0],
 ): Promise<void> {
-  const adminCount = await prisma.membership.count({
-    where: { officeId, roles: { has: "ADMIN" } },
-  });
-  if (adminCount <= 1) {
-    throw new McpToolError(
-      `That would leave ${officeName} with no admin. Give someone else the ADMIN role first.`,
-    );
+  try {
+    await commitBatch(build);
+  } catch (e) {
+    if (e instanceof BatchConflictError && e.reason === "guard") {
+      throw new McpToolError(
+        `That would leave ${officeName} with no admin. Give someone else the ADMIN role first.`,
+      );
+    }
+    throw e;
   }
 }
 
@@ -49,6 +62,7 @@ export function registerAdminMemberTools(server: McpServer): void {
         prisma.membership.findMany({
           where: { officeId: scope.officeId },
           include: {
+            ...rolesSelect,
             user: { select: { id: true, name: true, email: true, locale: true } },
           },
           orderBy: { user: { name: "asc" } },
@@ -63,12 +77,12 @@ export function registerAdminMemberTools(server: McpServer): void {
       return {
         office: scope.officeName,
         memberCount: members.length,
-        adminCount: members.filter((m) => m.roles.includes("ADMIN")).length,
+        adminCount: members.filter((m) => roleList(m).includes("ADMIN")).length,
         members: members.map((m) => ({
           membershipId: m.id,
           name: m.user.name,
           email: m.user.email,
-          roles: m.roles,
+          roles: roleList(m),
           locale: m.user.locale,
           joinedAt: m.createdAt,
         })),
@@ -116,44 +130,49 @@ export function registerAdminMemberTools(server: McpServer): void {
         where: {
           userId_officeId: { userId: user.id, officeId: scope.officeId },
         },
-        select: { roles: true },
+        select: rolesSelect,
       });
       if (existing) {
+        const existingRoles = roleList(existing);
         return {
           ok: true,
           status: "already_member",
           name: user.name,
-          roles: existing.roles,
-          message: `${user.name} is already a member of ${scope.officeName} with roles ${existing.roles.join(", ")}.`,
+          roles: existingRoles,
+          message: `${user.name} is already a member of ${scope.officeName} with roles ${existingRoles.join(", ")}.`,
         };
       }
 
-      const membership = await prisma.membership.create({
-        data: {
-          userId: user.id,
-          officeId: scope.officeId,
-          roles: roles ?? ["USER"],
-        },
-        select: { id: true, roles: true },
-      });
-
-      // A pending request from this person is now moot.
-      await prisma.joinRequest.updateMany({
-        where: {
-          userId: user.id,
-          officeId: scope.officeId,
-          status: "PENDING",
-        },
-        data: { status: "APPROVED" },
-      });
+      const membershipId = newId();
+      const granted: Role[] = roles ?? ["USER"];
+      // One atomic batch: the membership, its roles, and any pending request
+      // from this person, which is now moot.
+      try {
+        await commitBatch((db) => [
+          ...createMembershipWrites(db, { id: membershipId, userId: user.id, officeId: scope.officeId, roles: granted }),
+          db.joinRequest.updateMany({
+            where: { userId: user.id, officeId: scope.officeId, status: "PENDING" },
+            data: { status: "APPROVED" },
+          }),
+        ]);
+      } catch (e) {
+        if (!(e instanceof BatchConflictError && e.reason === "unique")) throw e;
+        // Added by someone else in the meantime.
+        return {
+          ok: true,
+          status: "already_member",
+          name: user.name,
+          message: `${user.name} is already a member of ${scope.officeName}.`,
+        };
+      }
 
       return {
         ok: true,
-        membershipId: membership.id,
+        membershipId,
         name: user.name,
         email: user.email,
-        roles: membership.roles,
-        message: `Added ${user.name} to ${scope.officeName} as ${membership.roles.join(", ")}.`,
+        roles: granted,
+        message: `Added ${user.name} to ${scope.officeName} as ${granted.join(", ")}.`,
       };
     },
   );
@@ -180,14 +199,13 @@ export function registerAdminMemberTools(server: McpServer): void {
         email,
       );
 
-      if (membership.roles.includes("ADMIN") && !roles.includes("ADMIN")) {
-        await assertNotLastAdmin(scope.officeId, scope.officeName);
-      }
-
-      await prisma.membership.update({
-        where: { id: membership.id },
-        data: { roles },
-      });
+      // Read above, then one atomic batch that swaps the roles; dropping
+      // ADMIN is guarded on the office keeping an admin.
+      const demotesAdmin = membership.roles.includes("ADMIN") && !roles.includes("ADMIN");
+      await commitKeepingAnAdmin(scope.officeName, (db) => [
+        ...replaceRolesWrites(db, membership.id, roles),
+        ...(demotesAdmin ? [officeKeepsAnAdmin(db, scope.officeId)] : []),
+      ]);
 
       return {
         ok: true,
@@ -221,17 +239,18 @@ export function registerAdminMemberTools(server: McpServer): void {
         email,
       );
 
-      if (membership.roles.includes("ADMIN")) {
-        await assertNotLastAdmin(scope.officeId, scope.officeName);
-      }
-
-      await prisma.$transaction([
-        prisma.membership.delete({ where: { id: membership.id } }),
-        // Otherwise their default office would point somewhere they can't reach.
-        prisma.user.updateMany({
+      // Read above, then one atomic batch: the membership (its roles
+      // cascade) and the default office, which would otherwise point
+      // somewhere they can't reach. Removing an admin is guarded on the
+      // office keeping one.
+      const isAdmin = membership.roles.includes("ADMIN");
+      await commitKeepingAnAdmin(scope.officeName, (db) => [
+        db.membership.deleteMany({ where: { id: membership.id } }),
+        db.user.updateMany({
           where: { id: membership.userId, defaultOfficeId: scope.officeId },
           data: { defaultOfficeId: null },
         }),
+        ...(isAdmin ? [officeKeepsAnAdmin(db, scope.officeId)] : []),
       ]);
 
       return {
@@ -293,19 +312,36 @@ export function registerAdminMemberTools(server: McpServer): void {
         };
       }
 
-      await prisma.$transaction([
-        prisma.membership.create({
-          data: {
+      // Read above, then one atomic batch: the approval, guarded on the
+      // request still being PENDING (another admin may decide at the same
+      // time), the membership and its role.
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.joinRequest.updateMany({
+              where: { id: joinRequestId, status: "PENDING" },
+              data: { status: "APPROVED" },
+            }),
+            1,
+          ),
+          ...createMembershipWrites(db, {
+            id: newId(),
             userId: request.userId,
             officeId: scope.officeId,
             roles: ["USER"],
-          },
-        }),
-        prisma.joinRequest.update({
-          where: { id: joinRequestId },
-          data: { status: "APPROVED" },
-        }),
-      ]);
+          }),
+        ]);
+      } catch (e) {
+        if (!(e instanceof BatchConflictError)) throw e;
+        const alreadyMember = e.reason === "unique";
+        return {
+          ok: true,
+          status: alreadyMember ? "already_member" : "already_decided",
+          message: alreadyMember
+            ? `${request.user.name} is already a member of ${scope.officeName}.`
+            : "That request was decided in the meantime.",
+        };
+      }
 
       return {
         ok: true,
@@ -323,13 +359,15 @@ async function requireMembershipByEmail(
   officeName: string,
   email: string,
 ) {
-  const membership = await prisma.membership.findFirst({
-    where: {
-      officeId,
-      user: { email: { equals: email.trim(), mode: "insensitive" } },
-    },
-    include: { user: { select: { name: true, email: true } } },
+  // Emails compare case-insensitively. SQLite's `=` does not, so the office's
+  // members (a handful) are matched here rather than in SQL.
+  const wanted = email.trim().toLowerCase();
+  const members = await prisma.membership.findMany({
+    where: { officeId },
+    include: { ...rolesSelect, user: { select: { name: true, email: true } } },
   });
+  const found = members.find((m) => m.user.email.toLowerCase() === wanted);
+  const membership = found ? withRoleList(found) : undefined;
   if (!membership) {
     throw new McpToolError(
       `${email} is not a member of ${officeName}. Call matecrew_admin_list_members to see who is.`,

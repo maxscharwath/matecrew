@@ -1,16 +1,11 @@
 import React from "react";
-import {
-  Document,
-  Page,
-  Text,
-  View,
-  renderToBuffer,
-} from "@react-pdf/renderer";
+import { Document, Page, Text, View } from "@react-pdf/renderer";
 import type { Style } from "@react-pdf/types";
 import { createTw } from "react-pdf-tailwind";
 import { createTranslator } from "next-intl";
 import type { ConsumptionShare, ItemPrice, PaymentLine } from "@/lib/reimbursement-calc";
 import { toISODateString } from "@/lib/date";
+import { platform } from "@/platform";
 
 async function getTranslator(locale: string) {
   const messages = (await import(`../../messages/${locale}.json`)).default;
@@ -55,6 +50,18 @@ function truncate(s: string, max: number) {
 const RED = "#dc2626";
 const GREEN = "#16a34a";
 const MUTED = "#737373";
+
+/** Where a balance stands, a cent either way counting as settled. */
+type Balance = "owes" | "owed" | "settled";
+
+function balanceOf(netOwed: number): Balance {
+  if (netOwed > 0.01) return "owes";
+  if (netOwed < -0.01) return "owed";
+  return "settled";
+}
+
+const BALANCE_COLOR: Record<Balance, string> = { owes: RED, owed: GREEN, settled: MUTED };
+const BALANCE_STRIP: Record<Balance, string> = { owes: "bg-dangersoft", owed: "bg-oksoft", settled: "bg-surface" };
 
 // ─── Shared components ──────────────────────────────────────────────────────
 
@@ -286,9 +293,9 @@ function SettlementDocument({
           </TableHeader>
 
           {data.shares.map((s, i) => {
-            const balColor =
-              s.netOwed > 0.01 ? RED : s.netOwed < -0.01 ? GREEN : MUTED;
-            const prefix = s.netOwed < -0.01 ? "-" : "";
+            const balance = balanceOf(s.netOwed);
+            const balColor = BALANCE_COLOR[balance];
+            const prefix = balance === "owed" ? "-" : "";
             return (
               <TableRow key={s.userId} alt={i % 2 === 1}>
                 <TD width={SW[0]}>{truncate(s.userName, 28)}</TD>
@@ -359,13 +366,22 @@ export async function generateSettlementPdf(data: {
   locale: string;
 }): Promise<Buffer> {
   const t = await getTranslator(data.locale);
-  const buffer = await renderToBuffer(
-    <SettlementDocument data={data} t={t} />,
-  );
-  return Buffer.from(buffer);
+  return Buffer.from(await platform.pdf.render(<SettlementDocument data={data} t={t} />));
 }
 
 // ─── User Personal Settlement PDF ───────────────────────────────────────────
+
+/** The personal statement's one-line verdict. */
+function balanceSentence(t: ReturnType<typeof createTranslator>, netOwed: number): string {
+  switch (balanceOf(netOwed)) {
+    case "owes":
+      return t("pdf.youOwe", { amount: netOwed.toFixed(2) });
+    case "owed":
+      return t("pdf.youAreOwed", { amount: Math.abs(netOwed).toFixed(2) });
+    default:
+      return t("pdf.allSettled");
+  }
+}
 
 interface UserPaymentLine {
   direction: "pay" | "receive";
@@ -381,23 +397,11 @@ function UserSettlementDocument({
   t: ReturnType<typeof createTranslator>;
 }) {
   const dateRange = `${toISODateString(data.startDate)} - ${toISODateString(data.endDate)}`;
-  const balColor =
-    data.netOwed > 0.01 ? RED : data.netOwed < -0.01 ? GREEN : MUTED;
-  const balPrefix = data.netOwed < -0.01 ? "-" : "";
-
-  const balanceText =
-    data.netOwed > 0.01
-      ? t("pdf.youOwe", { amount: data.netOwed.toFixed(2) })
-      : data.netOwed < -0.01
-        ? t("pdf.youAreOwed", { amount: Math.abs(data.netOwed).toFixed(2) })
-        : t("pdf.allSettled");
-
-  const stripBg =
-    data.netOwed > 0.01
-      ? "bg-dangersoft"
-      : data.netOwed < -0.01
-        ? "bg-oksoft"
-        : "bg-surface";
+  const balance = balanceOf(data.netOwed);
+  const balColor = BALANCE_COLOR[balance];
+  const balPrefix = balance === "owed" ? "-" : "";
+  const balanceText = balanceSentence(t, data.netOwed);
+  const stripBg = BALANCE_STRIP[balance];
 
   return (
     <Document>
@@ -548,8 +552,5 @@ export async function generateUserSettlementPdf(data: {
   locale: string;
 }): Promise<Buffer> {
   const t = await getTranslator(data.locale);
-  const buffer = await renderToBuffer(
-    <UserSettlementDocument data={data} t={t} />,
-  );
-  return Buffer.from(buffer);
+  return Buffer.from(await platform.pdf.render(<UserSettlementDocument data={data} t={t} />));
 }

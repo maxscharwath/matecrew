@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { ITEM_DISPLAY_ORDER } from "@/lib/items";
 import { loadLiveStatus } from "@/lib/device/live";
+import { defaultDeviceTheme } from "@/lib/device/state";
 import { DeviceConsole } from "@/components/device-console/device-console";
 
 interface Props {
@@ -18,7 +19,15 @@ export default async function DevicePage({ params }: Props) {
 
   const device = await prisma.device.findFirst({
     where: { id: deviceId, officeId },
-    select: { id: true, name: true, hardwareId: true, leftItemId: true, office: { select: { timezone: true } } },
+    select: {
+      id: true,
+      name: true,
+      hardwareId: true,
+      leftItemId: true,
+      locale: true,
+      theme: true,
+      office: { select: { timezone: true, locale: true } },
+    },
   });
   if (!device) notFound();
 
@@ -44,7 +53,15 @@ export default async function DevicePage({ params }: Props) {
     <div className="mx-auto max-w-7xl">
       <DeviceConsole
         officeId={officeId}
-        device={{ id: device.id, name: device.name, hardwareId: device.hardwareId, firstItemId: device.leftItemId }}
+        device={{
+          id: device.id,
+          name: device.name,
+          hardwareId: device.hardwareId,
+          firstItemId: device.leftItemId,
+          locale: device.locale,
+          theme: device.theme,
+        }}
+        display={{ officeLocale: device.office.locale, defaultTheme: defaultDeviceTheme() }}
         items={items}
         badges={badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? null }))}
         takes={takes.map((take) => ({

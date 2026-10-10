@@ -96,10 +96,12 @@ impl Tone {
             Self::Notification => &[(3136, 35), (0, 30), (2637, 35), (0, 30), (4186, 70)],
             // C7 E7 G7 then C8, legato: a contactless "tiling", brighter and shorter than Success.
             Self::Badge => &[(2093, 26), (2637, 26), (3136, 26), (4186, 90)],
-            // Power-on: a fast run up from C6 to C8, a breath, then G7 and a held C8.
+            // Power-on, a little tune in C: an arpeggio that lifts to the sixth (C7 G7 E7 A7), a
+            // walk down that leaves it hanging on D7, then up to a held C8. About 1.3 s.
             Self::Boot => &[
-                (1568, 35), (2093, 35), (2349, 35), (2637, 35), (3136, 35), (3520, 35), (4186, 35),
-                (0, 60), (3136, 70), (4186, 160),
+                (2093, 90), (3136, 90), (2637, 90), (3520, 140), (0, 30),
+                (3136, 90), (2794, 90), (2637, 90), (2349, 140), (0, 30),
+                (2637, 70), (3136, 70), (4186, 300),
             ],
             // "Huh?": G7, a step down to E7, then up to B7, like a question.
             Self::Unknown => &[(3136, 80), (0, 40), (2637, 60), (0, 30), (3951, 160)],

@@ -1,350 +1,253 @@
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client";
+/**
+ * Demo data for a local database: the local D1 (`bun db:migrate:local` first)
+ * that `bun run dev:cf` and `bun run preview` use, or with `--sqlite` the Node
+ * platform's SQLite file (DATABASE_URL, `bun db:migrate:sqlite` first) that
+ * `bun run dev` uses:
+ * two offices, their items and weekly sessions, a few members, five days of
+ * requests and one delivered order. Safe to run twice: what exists is kept.
+ *
+ * Every demo account gets the password in SEED_PASSWORD: credentials are
+ * never written in the source.
+ */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import type { Role } from "../src/generated/prisma/client";
+import { createMembershipWrites } from "../src/lib/membership-roles";
+import { toCents } from "../src/lib/money";
+import { utcDate } from "../src/lib/date";
+import { sqliteDatabaseAt } from "../src/platform/node/database";
+import type { Database, Db } from "../src/platform/ports/database";
+import { withLocalD1 } from "../scripts/cloudflare/local-d1";
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL,
-});
-const prisma = new PrismaClient({ adapter });
-
-const auth = betterAuth({
-  database: prismaAdapter(prisma, { provider: "postgresql" }),
-  emailAndPassword: { enabled: true },
-});
-
-async function createUser(name: string, email: string, password: string) {
-  const existing = await prisma.user.findFirst({ where: { email } });
-  if (existing) {
-    console.log(`  User ${email} already exists, skipping`);
-    return existing;
-  }
-
-  await auth.api.signUpEmail({
-    body: { name, email, password },
-  });
-
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
-  console.log(`  Created: ${email} (password: ${password})`);
-  return user;
+/** Runs `step` on each item, one after the other. */
+function inSequence<T>(items: readonly T[], step: (item: T) => Promise<unknown>): Promise<void> {
+  return items.reduce<Promise<void>>(async (previous, item) => {
+    await previous;
+    await step(item);
+  }, Promise.resolve());
 }
 
-async function createMembership(
-  userId: string,
-  officeId: string,
-  roles: ("ADMIN" | "USER")[]
-) {
-  await prisma.membership.upsert({
-    where: { userId_officeId: { userId, officeId } },
-    update: { roles },
-    create: { userId, officeId, roles },
-  });
-}
+const OFFICES = [
+  { name: "Lausanne", timezone: "Europe/Zurich", lowStockThreshold: 30 },
+  { name: "Genève", timezone: "Europe/Zurich", lowStockThreshold: 30 },
+] as const;
 
-async function main() {
-  console.log("Seeding database...\n");
+const ITEMS = [
+  { name: "Maté Classic", isDefault: true, sortOrder: 0 },
+  { name: "Maté Zero", isDefault: false, sortOrder: 1 },
+  { name: "Ginger", isDefault: false, sortOrder: 2 },
+] as const;
 
-  // ─── Offices ───────────────────────────────────────────
-  console.log("Offices:");
+const PEOPLE: readonly {
+  readonly name: string;
+  readonly email: string;
+  readonly offices: readonly (typeof OFFICES)[number]["name"][];
+  readonly roles: readonly Role[];
+}[] = [
+  { name: "Admin", email: "admin@matecrew.local", offices: ["Lausanne", "Genève"], roles: ["ADMIN", "USER"] },
+  { name: "Marie Runner", email: "marie@matecrew.local", offices: ["Lausanne"], roles: ["USER"] },
+  { name: "Alice Dupont", email: "alice@matecrew.local", offices: ["Lausanne"], roles: ["USER"] },
+  { name: "Bob Martin", email: "bob@matecrew.local", offices: ["Lausanne"], roles: ["USER"] },
+  { name: "Claire Favre", email: "claire@matecrew.local", offices: ["Genève"], roles: ["USER"] },
+];
 
-  const offices = [
-    { name: "Lausanne", timezone: "Europe/Zurich", lowStockThreshold: 30 },
-    { name: "Genève", timezone: "Europe/Zurich", lowStockThreshold: 30 },
-  ];
+/** Monday to Friday, a morning and an afternoon round. */
+const SESSIONS = [1, 2, 3, 4, 5].flatMap((dayOfWeek) => [
+  { dayOfWeek, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
+  { dayOfWeek, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
+]);
 
-  const createdOffices: Record<string, { id: string; name: string }> = {};
+const DELIVERED_CANS = 48;
+const CAN_PRICE = 2.5;
 
-  for (const office of offices) {
-    const result = await prisma.office.upsert({
-      where: { name: office.name },
-      update: {},
-      create: office,
-    });
-    createdOffices[office.name] = result;
-    console.log(`  ${result.name} (${result.id})`);
-  }
-
-  // ─── Items ─────────────────────────────────────────────
-  console.log("\nItems:");
-
-  const defaultItemByOffice: Record<string, string> = {};
-  const itemCatalog = [
-    { name: "Maté Classic", isDefault: true, sortOrder: 0 },
-    { name: "Maté Zero", isDefault: false, sortOrder: 1 },
-    { name: "Ginger", isDefault: false, sortOrder: 2 },
-  ];
-
-  for (const office of Object.values(createdOffices)) {
-    for (const item of itemCatalog) {
-      const created = await prisma.item.upsert({
-        where: { officeId_name: { officeId: office.id, name: item.name } },
-        update: {},
-        create: { officeId: office.id, ...item },
-      });
-      if (item.isDefault) defaultItemByOffice[office.id] = created.id;
-    }
-    console.log(`  ${office.name}: ${itemCatalog.map((i) => i.name).join(", ")}`);
-  }
-
-  // ─── Stock ─────────────────────────────────────────────
-  console.log("\nStock:");
-
-  for (const office of Object.values(createdOffices)) {
-    await prisma.stock.upsert({
-      where: {
-        officeId_itemId: {
-          officeId: office.id,
-          itemId: defaultItemByOffice[office.id],
-        },
-      },
-      update: {},
-      create: {
-        officeId: office.id,
-        itemId: defaultItemByOffice[office.id],
-        currentQty: 24,
-      },
-    });
-    console.log(`  ${office.name}: 24 cans (Maté Classic)`);
-  }
-
-  // ─── Users + Memberships ──────────────────────────────
-  console.log("\nUsers:");
-
-  const admin = await createUser("Admin", "admin@matecrew.local", "admin123");
-  // Admin gets membership in BOTH offices (demo org switching)
-  await createMembership(admin.id, createdOffices["Lausanne"].id, ["ADMIN", "USER"]);
-  await createMembership(admin.id, createdOffices["Genève"].id, ["ADMIN", "USER"]);
-  console.log("    → Memberships: Lausanne (Admin), Genève (Admin)");
-
-  const marie = await createUser("Marie Runner", "marie@matecrew.local", "runner123");
-  await createMembership(marie.id, createdOffices["Lausanne"].id, ["USER"]);
-  console.log("    → Membership: Lausanne (User)");
-
-  const employees = [
-    { name: "Alice Dupont", email: "alice@matecrew.local", office: "Lausanne" },
-    { name: "Bob Martin", email: "bob@matecrew.local", office: "Lausanne" },
-    { name: "Claire Favre", email: "claire@matecrew.local", office: "Genève" },
-  ];
-
-  const createdEmployees = [];
-  for (const emp of employees) {
-    const user = await createUser(emp.name, emp.email, "employee123");
-    await createMembership(user.id, createdOffices[emp.office].id, ["USER"]);
-    console.log(`    → Membership: ${emp.office} (User)`);
-    createdEmployees.push(user);
-  }
-
-  // ─── Mate Sessions (weekly schedule) ────────────────────
-  console.log("\nMate sessions:");
-
-  const lausanneId = createdOffices["Lausanne"].id;
-  const sessionData = [
-    { dayOfWeek: 1, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
-    { dayOfWeek: 1, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
-    { dayOfWeek: 2, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
-    { dayOfWeek: 2, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
-    { dayOfWeek: 3, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
-    { dayOfWeek: 3, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
-    { dayOfWeek: 4, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
-    { dayOfWeek: 4, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
-    { dayOfWeek: 5, startTime: "08:00", cutoffTime: "10:00", label: "Matin" },
-    { dayOfWeek: 5, startTime: "14:00", cutoffTime: "16:00", label: "Après-midi" },
-  ];
-
-  const createdSessions: { id: string; dayOfWeek: number; startTime: string }[] = [];
-  for (const s of sessionData) {
-    const session = await prisma.mateSession.upsert({
-      where: {
-        officeId_dayOfWeek_startTime: {
-          officeId: lausanneId,
-          dayOfWeek: s.dayOfWeek,
-          startTime: s.startTime,
-        },
-      },
-      update: {},
-      create: { officeId: lausanneId, ...s },
-    });
-    createdSessions.push(session);
-  }
-  console.log(`  Created ${createdSessions.length} sessions for Lausanne (Mon-Fri, 2/day)`);
-
-  // ─── Sample daily requests (last 5 days) ───────────────
-  console.log("\nDaily requests:");
-
-  const allLausanneUsers = [admin, marie, ...createdEmployees.filter((_, i) => i < 2)];
-  const today = new Date();
-  let requestCount = 0;
-
-  for (let daysAgo = 4; daysAgo >= 0; daysAgo--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - daysAgo);
-    date.setHours(0, 0, 0, 0);
-
-    // Find the morning session for this day of week
-    const dow = date.getDay();
-    const daySession = createdSessions.find(
-      (s) => s.dayOfWeek === dow && s.startTime === "08:00",
+async function seedOffices(db: Db): Promise<Map<string, { officeId: string; defaultItemId: string }>> {
+  const offices = new Map<string, { officeId: string; defaultItemId: string }>();
+  await inSequence(OFFICES, async (data) => {
+    const office = await db.office.upsert({ where: { name: data.name }, update: {}, create: data });
+    const items = await Promise.all(
+      ITEMS.map((item) =>
+        db.item.upsert({
+          where: { officeId_name: { officeId: office.id, name: item.name } },
+          update: {},
+          create: { officeId: office.id, ...item },
+        }),
+      ),
     );
-
-    const requesters = allLausanneUsers.filter((_, i) => (daysAgo + i) % 3 !== 0);
-
-    for (const user of requesters) {
-      const status = daysAgo > 0 ? "SERVED" : "REQUESTED";
-
-      const existing = await prisma.dailyRequest.findFirst({
-        where: {
-          date,
-          officeId: lausanneId,
-          userId: user.id,
-          mateSessionId: daySession?.id ?? null,
-        },
-      });
-      if (!existing) {
-        await prisma.dailyRequest.create({
-          data: {
-            date,
-            officeId: lausanneId,
-            userId: user.id,
-            itemId: defaultItemByOffice[lausanneId],
-            mateSessionId: daySession?.id ?? null,
-            status,
-          },
-        });
-      }
-      requestCount++;
-    }
-  }
-
-  console.log(`  Created ${requestCount} requests across 5 days`);
-
-  // ─── Consumption entries for served requests ───────────
-  console.log("\nConsumption entries:");
-
-  const servedRequests = await prisma.dailyRequest.findMany({
-    where: { status: "SERVED" },
-  });
-
-  let consumptionCount = 0;
-  for (const req of servedRequests) {
-    const existing = await prisma.consumptionEntry.findFirst({
-      where: { userId: req.userId, date: req.date, officeId: req.officeId },
+    const defaultItemId = items[0].id;
+    await db.stock.upsert({
+      where: { officeId_itemId: { officeId: office.id, itemId: defaultItemId } },
+      update: {},
+      create: { officeId: office.id, itemId: defaultItemId, currentQty: 24 },
     });
-    if (!existing) {
-      await prisma.consumptionEntry.create({
-        data: {
-          officeId: req.officeId,
-          userId: req.userId,
-          itemId: req.itemId,
-          date: req.date,
-          qty: 1,
-          source: "DAILY_REQUEST",
-        },
-      });
-      consumptionCount++;
-    }
-  }
-
-  console.log(`  Created ${consumptionCount} entries from served requests`);
-
-  // ─── Stock movements for served requests ───────────────
-  console.log("\nStock movements:");
-
-  for (const req of servedRequests) {
-    await prisma.stockMovement.create({
-      data: {
-        officeId: req.officeId,
-        itemId: req.itemId,
-        delta: -1,
-        reason: "SERVED",
-        userId: req.userId,
-      },
-    });
-  }
-  console.log(`  Created ${servedRequests.length} SERVED movements`);
-
-  // ─── Sample purchase batch ─────────────────────────────
-  console.log("\nPurchase batches:");
-
-  const existingBatch = await prisma.purchaseBatch.findFirst({
-    where: { officeId: createdOffices["Lausanne"].id },
+    offices.set(office.name, { officeId: office.id, defaultItemId });
+    console.log(`  ${office.name}: ${ITEMS.map((i) => i.name).join(", ")}; 24 cans of ${ITEMS[0].name}`);
   });
-
-  if (!existingBatch) {
-    await prisma.purchaseBatch.create({
-      data: {
-        officeId: createdOffices["Lausanne"].id,
-        status: "DELIVERED",
-        deliveredAt: new Date(today.getFullYear(), today.getMonth() - 1, 16),
-        orderedByUserId: admin.id,
-        paidByUserId: admin.id,
-        totalPrice: 120,
-        notes: "Initial batch — Migros order",
-        purchasedAt: new Date(today.getFullYear(), today.getMonth() - 1, 15),
-        lines: {
-          create: [
-            {
-              itemId: defaultItemByOffice[lausanneId],
-              qty: 48,
-              unitPrice: 2.5,
-              lineTotal: 120,
-            },
-          ],
-        },
-      },
-    });
-
-    // Stock movement for purchase
-    await prisma.stockMovement.create({
-      data: {
-        officeId: createdOffices["Lausanne"].id,
-        itemId: defaultItemByOffice[lausanneId],
-        delta: 48,
-        reason: "PURCHASE",
-        note: "Initial batch — Migros order",
-        userId: admin.id,
-      },
-    });
-
-    console.log("  Created 1 batch: 48 cans @ CHF 2.50 (Lausanne)");
-  } else {
-    console.log("  Purchase batch already exists, skipping");
-  }
-
-  // ─── Update stock to reflect consumption ───────────────
-  const totalConsumedLausanne = await prisma.consumptionEntry.aggregate({
-    where: { officeId: createdOffices["Lausanne"].id },
-    _sum: { qty: true },
-  });
-
-  await prisma.stock.update({
-    where: {
-      officeId_itemId: {
-        officeId: createdOffices["Lausanne"].id,
-        itemId: defaultItemByOffice[lausanneId],
-      },
-    },
-    data: { currentQty: 48 - (totalConsumedLausanne._sum.qty ?? 0) },
-  });
-
-  console.log(
-    `\nStock adjusted: Lausanne now has ${48 - (totalConsumedLausanne._sum.qty ?? 0)} cans`
-  );
-
-  // ─── Summary ───────────────────────────────────────────
-  console.log("\n✓ Seed complete!");
-  console.log("\nTest accounts:");
-  console.log("  admin@matecrew.local   / admin123    (Admin in Lausanne + Genève)");
-  console.log("  marie@matecrew.local   / runner123   (User in Lausanne)");
-  console.log("  alice@matecrew.local   / employee123 (Employee in Lausanne)");
-  console.log("  bob@matecrew.local     / employee123 (Employee in Lausanne)");
-  console.log("  claire@matecrew.local  / employee123 (Employee in Genève)");
+  return offices;
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
+async function seedPeople(
+  db: Database,
+  officeIds: ReadonlyMap<string, { officeId: string }>,
+  password: string,
+): Promise<Map<string, string>> {
+  const auth = betterAuth({
+    database: prismaAdapter(db.client(), { provider: "sqlite", transaction: false }),
+    emailAndPassword: { enabled: true },
   });
+  const userIds = new Map<string, string>();
+  await inSequence(PEOPLE, async (person) => {
+    if (!(await db.client().user.findUnique({ where: { email: person.email } }))) {
+      await auth.api.signUpEmail({ body: { name: person.name, email: person.email, password } });
+      console.log(`  Created ${person.email}`);
+    }
+    const user = await db.client().user.findUniqueOrThrow({ where: { email: person.email } });
+    userIds.set(person.email, user.id);
+    const existing = await db.client().membership.findMany({ where: { userId: user.id }, select: { officeId: true } });
+    const missing = person.offices
+      .map((name) => officeIds.get(name)?.officeId)
+      .filter((officeId): officeId is string => !!officeId && !existing.some((m) => m.officeId === officeId));
+    await db.commitBatch((batch) =>
+      missing.flatMap((officeId) =>
+        createMembershipWrites(batch, { id: crypto.randomUUID(), userId: user.id, officeId, roles: person.roles }),
+      ),
+    );
+  });
+  return userIds;
+}
+
+async function seedSessions(db: Db, officeId: string) {
+  return Promise.all(
+    SESSIONS.map((s) =>
+      db.mateSession.upsert({
+        where: { officeId_dayOfWeek_startTime: { officeId, dayOfWeek: s.dayOfWeek, startTime: s.startTime } },
+        update: {},
+        create: { officeId, ...s },
+      }),
+    ),
+  );
+}
+
+/**
+ * Requests over the last five days in Lausanne, served except today's, with
+ * their consumption and stock movements, written once.
+ */
+async function seedRequests(
+  db: Database,
+  office: { officeId: string; defaultItemId: string },
+  userIds: readonly string[],
+  sessions: readonly { id: string; dayOfWeek: number; startTime: string }[],
+) {
+  if ((await db.client().dailyRequest.count({ where: { officeId: office.officeId } })) > 0) {
+    console.log("  Requests already exist, skipping");
+    return;
+  }
+  const now = new Date();
+  const requests = [4, 3, 2, 1, 0].flatMap((daysAgo) => {
+    const date = utcDate(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo);
+    const session = sessions.find((s) => s.dayOfWeek === date.getUTCDay() && s.startTime === "08:00");
+    return userIds
+      .filter((_, i) => (daysAgo + i) % 3 !== 0)
+      .map((userId) => ({
+        officeId: office.officeId,
+        userId,
+        itemId: office.defaultItemId,
+        date,
+        mateSessionId: session?.id ?? null,
+        status: daysAgo > 0 ? ("SERVED" as const) : ("REQUESTED" as const),
+      }));
+  });
+  const served = requests.filter((r) => r.status === "SERVED");
+  await db.commitBatch((batch) => [
+    batch.dailyRequest.createMany({ data: requests }),
+    batch.consumptionEntry.createMany({
+      data: served.map((r) => ({ officeId: r.officeId, userId: r.userId, itemId: r.itemId, date: r.date, qty: 1, source: "DAILY_REQUEST" as const })),
+    }),
+    batch.stockMovement.createMany({
+      data: served.map((r) => ({ officeId: r.officeId, itemId: r.itemId, delta: -1, reason: "SERVED" as const, userId: r.userId })),
+    }),
+  ]);
+  console.log(`  ${requests.length} requests over 5 days, ${served.length} served`);
+}
+
+/** One delivered order of 48 cans, and the stock it leaves after what was served. */
+async function seedPurchase(db: Database, office: { officeId: string; defaultItemId: string }, adminId: string) {
+  if (await db.client().purchaseBatch.findFirst({ where: { officeId: office.officeId } })) {
+    console.log("  Purchase batch already exists, skipping");
+    return;
+  }
+  const now = new Date();
+  const batchId = crypto.randomUUID();
+  const totalCents = toCents(DELIVERED_CANS * CAN_PRICE);
+  const consumed = await db.client().consumptionEntry.aggregate({ where: { officeId: office.officeId }, _sum: { qty: true } });
+  const note = "Initial batch — Migros order";
+  await db.commitBatch((batch) => [
+    batch.purchaseBatch.createMany({
+      data: [
+        {
+          id: batchId,
+          officeId: office.officeId,
+          status: "DELIVERED",
+          purchasedAt: utcDate(now.getUTCFullYear(), now.getUTCMonth() - 1, 15),
+          deliveredAt: utcDate(now.getUTCFullYear(), now.getUTCMonth() - 1, 16),
+          orderedByUserId: adminId,
+          paidByUserId: adminId,
+          totalPriceCents: totalCents,
+          notes: note,
+        },
+      ],
+    }),
+    batch.purchaseLine.createMany({
+      data: [
+        { batchId, itemId: office.defaultItemId, qty: DELIVERED_CANS, unitPriceCents: toCents(CAN_PRICE), lineTotalCents: totalCents },
+      ],
+    }),
+    batch.stockMovement.createMany({
+      data: [{ officeId: office.officeId, itemId: office.defaultItemId, delta: DELIVERED_CANS, reason: "PURCHASE", note, userId: adminId }],
+    }),
+    batch.stock.updateMany({
+      where: { officeId: office.officeId, itemId: office.defaultItemId },
+      data: { currentQty: DELIVERED_CANS - (consumed._sum.qty ?? 0) },
+    }),
+  ]);
+  console.log(`  1 batch: ${DELIVERED_CANS} cans @ CHF ${CAN_PRICE.toFixed(2)}; stock now ${DELIVERED_CANS - (consumed._sum.qty ?? 0)}`);
+}
+
+async function seed(db: Database, password: string) {
+  console.log("Offices and items:");
+  const offices = await seedOffices(db.client());
+  const lausanne = offices.get("Lausanne");
+  if (!lausanne) throw new Error("Lausanne was not seeded");
+
+  console.log("\nUsers:");
+  const userIds = await seedPeople(db, offices, password);
+  const adminId = userIds.get("admin@matecrew.local");
+  if (!adminId) throw new Error("The admin was not seeded");
+
+  console.log("\nMate sessions:");
+  const sessions = await seedSessions(db.client(), lausanne.officeId);
+  console.log(`  ${sessions.length} sessions for Lausanne (Mon-Fri, 2/day)`);
+
+  console.log("\nDaily requests:");
+  const lausanneUsers = PEOPLE.filter((p) => p.offices.includes("Lausanne"))
+    .map((p) => userIds.get(p.email))
+    .filter((id): id is string => !!id);
+  await seedRequests(db, lausanne, lausanneUsers, sessions);
+
+  console.log("\nPurchases:");
+  await seedPurchase(db, lausanne, adminId);
+
+  console.log("\nSeed complete. Test accounts (password: SEED_PASSWORD):");
+  for (const person of PEOPLE) {
+    console.log(`  ${person.email.padEnd(24)} ${person.roles.join("+")} in ${person.offices.join(", ")}`);
+  }
+}
+
+const seedPassword = process.env.SEED_PASSWORD;
+if (!seedPassword || seedPassword.length < 8) {
+  throw new Error("Set SEED_PASSWORD (8 characters or more): every demo account gets it.");
+}
+if (process.argv.includes("--sqlite")) {
+  await seed(sqliteDatabaseAt(process.env.DATABASE_URL ?? "file:.data/matecrew.sqlite"), seedPassword);
+} else {
+  await withLocalD1(({ client, commitBatch }) => seed({ client: () => client, commitBatch }, seedPassword));
+}

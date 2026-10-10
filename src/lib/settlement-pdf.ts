@@ -3,13 +3,9 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { calculateReimbursements, type ReimbursementResult } from "@/lib/reimbursement-calc";
 import { generateUserSettlementPdf } from "@/lib/pdf-export";
-import { roundCents } from "@/lib/money";
-import {
-  buildUserSettlementKey,
-  fileExists,
-  internalFileUrl,
-  uploadFile,
-} from "@/lib/storage";
+import { fromCents, roundCents } from "@/lib/money";
+import { buildUserSettlementKey, internalFileUrl } from "@/lib/storage";
+import { platform } from "@/platform";
 
 /**
  * One person's statement for one period — the "facture" they download from
@@ -101,12 +97,12 @@ export async function buildUserSettlement(opts: {
       ? {
           direction: "pay" as const,
           otherUserName: l.toUser.name,
-          amount: l.amount.toNumber(),
+          amount: fromCents(l.amountCents),
         }
       : {
           direction: "receive" as const,
           otherUserName: l.fromUser.name,
-          amount: l.amount.toNumber(),
+          amount: fromCents(l.amountCents),
         },
   );
 
@@ -119,7 +115,7 @@ export async function buildUserSettlement(opts: {
     lines,
   };
 
-  const cached = await fileExists(key);
+  const cached = (await platform.storage.head(key)) !== null;
   if (cached && !wantBytes) {
     return { key, url, buffer: null, ...figures };
   }
@@ -140,7 +136,7 @@ export async function buildUserSettlement(opts: {
   });
 
   if (!cached) {
-    await uploadFile({ key, body: buffer, contentType: "application/pdf" });
+    await platform.storage.put(key, buffer, { contentType: "application/pdf" });
   }
 
   return { key, url, buffer, ...figures };

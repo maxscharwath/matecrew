@@ -3,7 +3,7 @@
 esp := ". ~/export-esp.sh &&"
 version := `grep -m1 '^version' firmware/Cargo.toml | cut -d'"' -f2`
 # Files the local site serves (images, firmware), kept apart from the copy of production.
-storage := "STORAGE_PROVIDER=local LOCAL_STORAGE_DIR=.data/dev-storage"
+storage := "LOCAL_STORAGE_DIR=.data/dev-storage"
 
 default:
     @just --list
@@ -64,7 +64,7 @@ release: ui
 
 # Publish that image on the local copy of production (scripts/dev-prod-copy.sh): terminals install it at their next sync.
 publish:
-    cd .. && url=$(sed -n 's/^DATABASE_URL=//p' .env.local | tr -d '"' | sed -E 's#/[^/?]+(\?|$)#/matecrew_prod\1#') && DATABASE_URL="$url" DIRECT_URL="$url" STORAGE_PROVIDER=local LOCAL_STORAGE_DIR=.data/storage bun scripts/publish-firmware.ts device/release/matecrew-{{version}}.bin
+    cd .. && url=$(sed -n 's/^DATABASE_URL=//p' .env.local | tr -d '"' | sed -E 's#/[^/?]+(\?|$)#/matecrew_prod\1#') && DATABASE_URL="$url" DIRECT_URL="$url" LOCAL_STORAGE_DIR=.data/storage bun scripts/publish-firmware.ts device/release/matecrew-{{version}}.bin
 
 # Forget the Wi-Fi, the token and the screen: the device starts setup again.
 forget:

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { downloadFile } from "@/lib/storage";
+import { platform } from "@/platform";
 import { getOptionalSession } from "@/lib/auth-utils";
 import { audienceForKey, canReadFile } from "@/lib/file-access";
 
@@ -55,20 +55,20 @@ export async function GET(
     }
   }
 
-  try {
-    const { body, contentType } = await downloadFile(storageKey);
-
-    return new NextResponse(body as BodyInit, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": isPublic
-          ? // Shared caches may serve this, so the store is hit about once per
-            // file rather than once per viewer per hour.
-            `public, max-age=${YEAR_SECONDS}, immutable`
-          : `private, max-age=${HOUR_SECONDS}, immutable`,
-      },
-    });
-  } catch {
+  const file = await platform.storage.get(storageKey);
+  if (!file) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  return new NextResponse(file.body, {
+    headers: {
+      "Content-Type": file.contentType,
+      "Content-Length": String(file.size),
+      "Cache-Control": isPublic
+        ? // Shared caches may serve this, so the store is hit about once per
+          // file rather than once per viewer per hour.
+          `public, max-age=${YEAR_SECONDS}, immutable`
+        : `private, max-age=${HOUR_SECONDS}, immutable`,
+    },
+  });
 }

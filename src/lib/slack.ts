@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createTranslator } from "next-intl";
+import { platform } from "@/platform";
 
 interface SlackSelectOption {
   text: { type: "plain_text"; text: string };
@@ -46,8 +47,8 @@ export const SLACK_PICK_ACTION_ID = "pick_item";
 export function publicImageUrl(relativeUrl: string | undefined): string | undefined {
   if (!relativeUrl) return undefined;
   if (relativeUrl.startsWith("https://")) return relativeUrl;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl?.startsWith("https://")) return undefined;
+  const appUrl = platform.env.baseUrl();
+  if (!appUrl.startsWith("https://")) return undefined;
   return `${appUrl}${relativeUrl}`;
 }
 
@@ -96,8 +97,7 @@ export function verifySlackSignature(
   timestamp: string | null,
   signature: string | null,
 ): boolean {
-  const secret = process.env.SLACK_SIGNING_SECRET;
-  if (!secret) throw new Error("SLACK_SIGNING_SECRET is not configured");
+  const secret = platform.env.require("SLACK_SIGNING_SECRET");
   if (!timestamp || !signature) return false;
   const ts = Number(timestamp);
   if (!Number.isFinite(ts)) return false;
@@ -116,8 +116,7 @@ export function verifySlackSignature(
  * Looks up a Slack user's email via the Web API. Requires `users:read.email` scope.
  */
 export async function fetchSlackUserEmail(slackUserId: string): Promise<string | null> {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) throw new Error("SLACK_BOT_TOKEN is not configured");
+  const token = platform.env.require("SLACK_BOT_TOKEN");
 
   const res = await fetch(
     `https://slack.com/api/users.info?user=${encodeURIComponent(slackUserId)}`,
@@ -137,11 +136,10 @@ export async function sendSlackMessage(
   blocks: SlackBlock[],
   text: string,
 ): Promise<{ ts: string; channel: string }> {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    throw new Error("SLACK_BOT_TOKEN is not configured");
-  }
+  const token = platform.env.require("SLACK_BOT_TOKEN");
 
+  const username = platform.env.get("SLACK_BOT_USERNAME");
+  const iconUrl = platform.env.get("SLACK_BOT_ICON_URL");
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
@@ -152,8 +150,8 @@ export async function sendSlackMessage(
       channel: channelId,
       text,
       blocks,
-      ...(process.env.SLACK_BOT_USERNAME && { username: process.env.SLACK_BOT_USERNAME }),
-      ...(process.env.SLACK_BOT_ICON_URL && { icon_url: process.env.SLACK_BOT_ICON_URL }),
+      ...(username && { username }),
+      ...(iconUrl && { icon_url: iconUrl }),
     }),
   });
 
@@ -184,10 +182,7 @@ export async function updateSlackMessage(opts: {
   blocks: SlackBlock[];
   text: string;
 }): Promise<void> {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
-    throw new Error("SLACK_BOT_TOKEN is not configured");
-  }
+  const token = platform.env.require("SLACK_BOT_TOKEN");
 
   const response = await fetch("https://slack.com/api/chat.update", {
     method: "POST",
@@ -224,8 +219,7 @@ export async function postEphemeralMessage(opts: {
   blocks: SlackBlock[];
   text: string;
 }): Promise<void> {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) throw new Error("SLACK_BOT_TOKEN is not configured");
+  const token = platform.env.require("SLACK_BOT_TOKEN");
 
   const response = await fetch("https://slack.com/api/chat.postEphemeral", {
     method: "POST",
@@ -393,7 +387,7 @@ export async function buildSessionRequestMessage(opts: {
     blocks.push(...requesterGroupBlocks(t, opts.requesterGroups));
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = platform.env.baseUrl();
   const openUrl = `${appUrl}/org/${opts.officeId}/request`;
 
   const ctx = {

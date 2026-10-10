@@ -165,12 +165,11 @@ export function settlementTemplate(opts: {
   copyLinkLabel: string;
   footer: string;
 }): string {
-  const accent =
-    opts.direction === "pay"
-      ? "#dc2626"
-      : opts.direction === "receive"
-        ? "#16a34a"
-        : colors.foreground;
+  const accent = {
+    pay: "#dc2626",
+    receive: "#16a34a",
+    settled: colors.foreground,
+  }[opts.direction];
   const row = (label: string, value: string) => `
     <tr>
       <td style="padding:6px 0;font-size:13px;color:${colors.mutedForeground};">${label}</td>

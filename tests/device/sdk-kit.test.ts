@@ -18,7 +18,7 @@ async function wasm() {
   globalThis.fetch = (async () =>
     new Response(bytes, {
       headers: { "Content-Type": "application/wasm" },
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
   return DeviceWasm.load();
 }
 
@@ -226,7 +226,7 @@ test("image downloads omit third-party credentials and bound streaming bodies", 
           cancelled = true;
         },
       }),
-    )) as typeof fetch;
+    )) as unknown as typeof fetch;
   await assert.rejects(
     downloadImage("/a.png", "private-token", signal),
     /64 KiB/,

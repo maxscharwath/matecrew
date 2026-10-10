@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { buildCostingLedger } from "@/lib/costing";
-import { roundCents } from "@/lib/money";
+import { fromCents, roundCents } from "@/lib/money";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { PurchaseList } from "@/components/purchase-list";
 import { PurchasePriceChart, type PriceSeries } from "@/components/purchase-price-chart";
@@ -93,9 +93,9 @@ export async function PurchaseListSection({ officeId, page }: Props) {
       lines: b.lines.map((l) => ({
         itemName: l.item.name,
         qty: l.qty,
-        unitPrice: l.unitPrice.toNumber(),
+        unitPrice: fromCents(l.unitPriceCents),
       })),
-      totalPrice: b.totalPrice.toNumber(),
+      totalPrice: fromCents(b.totalPriceCents),
       paidByName: b.paidBy.name,
       paidByImage: resolveAvatarUrl(b.paidBy.image),
       notes: b.notes,

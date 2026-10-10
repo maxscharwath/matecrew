@@ -1,4 +1,5 @@
 import { Resend, type CreateEmailOptions } from "resend";
+import { platform } from "@/platform";
 import {
   passwordResetTemplate,
   emailVerificationTemplate,
@@ -8,13 +9,20 @@ import {
 } from "@/lib/email-templates";
 import { getTranslator } from "@/lib/slack";
 
+/** Whether the member pays, is paid, or is square; within half a cent is square. */
+function settlementDirection(netOwed: number): "pay" | "receive" | "settled" {
+  if (netOwed > 0.005) return "pay";
+  if (netOwed < -0.005) return "receive";
+  return "settled";
+}
+
 let client: Resend | null = null;
 function getResend() {
-  client ??= new Resend(process.env.RESEND_API_KEY);
+  client ??= new Resend(platform.env.get("RESEND_API_KEY"));
   return client;
 }
 
-const from = process.env.EMAIL_FROM ?? "MateCrew <matecrew@mail.stmx.ch>";
+const from = platform.env.get("EMAIL_FROM") ?? "MateCrew <matecrew@mail.stmx.ch>";
 
 /**
  * Sends, and fails loudly when it did not.
@@ -142,8 +150,7 @@ export async function sendSettlementEmail(opts: {
   pdfFilename: string;
 }) {
   const t = await getTranslator(opts.locale);
-  const direction =
-    opts.netOwed > 0.005 ? "pay" : opts.netOwed < -0.005 ? "receive" : "settled";
+  const direction = settlementDirection(opts.netOwed);
 
   await send({
     from,

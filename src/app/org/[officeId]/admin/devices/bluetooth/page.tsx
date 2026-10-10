@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { ArrowLeft } from "lucide-react";
+import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { Button } from "@/components/ui/button";
 import { BluetoothPanel } from "@/components/device-ble/bluetooth-panel";
@@ -14,8 +15,14 @@ export default async function BluetoothPage({ params }: Props) {
   const { officeId } = await params;
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations("deviceBluetooth");
+  // For the badge reader: the office's badges, to tap one on the terminal.
+  const badges = await prisma.badge.findMany({
+    where: { officeId },
+    orderBy: [{ user: { name: "asc" } }, { lastSeenAt: "desc" }],
+    select: { uid: true, user: { select: { name: true } } },
+  });
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <div className="space-y-2">
         <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link href={`/org/${officeId}/admin/devices`}>
@@ -25,7 +32,7 @@ export default async function BluetoothPage({ params }: Props) {
         <h1 className="text-2xl font-bold">{t("title")}</h1>
         <p className="text-muted-foreground">{t("subtitle")}</p>
       </div>
-      <BluetoothPanel officeId={officeId} />
+      <BluetoothPanel officeId={officeId} badges={badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? null }))} />
     </div>
   );
 }

@@ -12,8 +12,10 @@ import {
   Trophy,
   Clock,
   Package,
+  type LucideIcon,
 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { fromCents } from "@/lib/money";
 import { requireMembership } from "@/lib/auth-utils";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -288,6 +290,19 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
     amount: l.amount,
   }));
 
+  let netClass = "";
+  let netAmount = "CHF 0.00";
+  let netHint = t('common.settled');
+  if (netOwed > 0) {
+    netClass = "text-red-600 dark:text-red-400";
+    netAmount = `CHF ${netOwed.toFixed(2)}`;
+    netHint = t('dashboard.youOwe');
+  } else if (netOwed < 0) {
+    netClass = "text-green-600 dark:text-green-400";
+    netAmount = `-CHF ${Math.abs(netOwed).toFixed(2)}`;
+    netHint = t('dashboard.youAreOwed');
+  }
+
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -344,30 +359,12 @@ export async function StatsAndFinancialsSection({ officeId, userId }: SectionPro
                   <CardDescription>{t('dashboard.netBalanceEstimate')}</CardDescription>
                   <Scale className="size-4 text-muted-foreground" />
                 </div>
-                <CardTitle
-                  className={`text-2xl ${
-                    netOwed > 0
-                      ? "text-red-600 dark:text-red-400"
-                      : netOwed < 0
-                        ? "text-green-600 dark:text-green-400"
-                        : ""
-                  }`}
-                >
-                  {netOwed > 0
-                    ? `CHF ${netOwed.toFixed(2)}`
-                    : netOwed < 0
-                      ? `-CHF ${Math.abs(netOwed).toFixed(2)}`
-                      : "CHF 0.00"}
+                <CardTitle className={`text-2xl ${netClass}`}>
+                  {netAmount}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  {netOwed > 0
-                    ? t('dashboard.youOwe')
-                    : netOwed < 0
-                      ? t('dashboard.youAreOwed')
-                      : t('common.settled')}
-                </p>
+                <p className="text-xs text-muted-foreground">{netHint}</p>
               </CardContent>
             </Card>
           </>
@@ -459,7 +456,7 @@ export async function SettlementSection({ officeId, userId }: SectionProps) {
         direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
         otherUserName: other.name,
         otherUserImage: resolveAvatarUrl(other.image),
-        amount: l.amount.toNumber(),
+        amount: fromCents(l.amountCents),
         status: l.status,
       };
     }),
@@ -516,15 +513,7 @@ export async function SettlementSection({ officeId, userId }: SectionProps) {
                       {l.status === "PAID" ? t('common.paid') : t('common.pending')}
                     </Badge>
                   </div>
-                  <span
-                    className={`text-sm font-medium ${
-                      l.status === "PAID"
-                        ? "text-muted-foreground line-through"
-                        : l.direction === "pay"
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-green-600 dark:text-green-400"
-                    }`}
-                  >
+                  <span className={`text-sm font-medium ${lineAmountClass(l)}`}>
                     CHF {l.amount.toFixed(2)}
                   </span>
                 </div>
@@ -542,6 +531,14 @@ export async function SettlementSection({ officeId, userId }: SectionProps) {
       </CardContent>
     </Card>
   );
+}
+
+/** Paid lines fade out; open ones are red to pay and green to receive. */
+function lineAmountClass(line: { status: string; direction: "pay" | "receive" }): string {
+  if (line.status === "PAID") return "text-muted-foreground line-through";
+  return line.direction === "pay"
+    ? "text-red-600 dark:text-red-400"
+    : "text-green-600 dark:text-green-400";
 }
 
 function bucketFor(qty: number): HeatmapCell["bucket"] {
@@ -610,55 +607,13 @@ export async function PersonalStatsSection({ officeId, userId }: SectionProps) {
     qtyByDate.set(key, (qtyByDate.get(key) ?? 0) + e.qty);
   }
 
-  const weeks: HeatmapCell[][] = [];
-  const monthLabels: (string | null)[] = [];
-  const dailyOrdered: { date: Date; qty: number; key: string }[] = [];
-
-  let lastMonthLabelled = -1;
-
-  for (let w = 0; w < 53; w++) {
-    const week: HeatmapCell[] = [];
-    let firstRealDayThisCol: Date | null = null;
-    for (let d = 0; d < 7; d++) {
-      const dt = new Date(gridStart);
-      dt.setUTCDate(gridStart.getUTCDate() + w * 7 + d);
-      if (dt.getTime() > today.getTime()) {
-        week.push({ date: null, qty: 0, bucket: 0 });
-      } else {
-        const key = dt.toISOString().slice(0, 10);
-        const qty = qtyByDate.get(key) ?? 0;
-        const dateLabel = dt.toLocaleDateString(locale, {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-          timeZone: "UTC",
-        });
-        const countLabel = t("dashboard.matesUnit", { count: qty });
-        week.push({ date: key, qty, bucket: bucketFor(qty), countLabel, dateLabel });
-        dailyOrdered.push({ date: dt, qty, key });
-        if (!firstRealDayThisCol) firstRealDayThisCol = dt;
-      }
-    }
-    weeks.push(week);
-
-    if (firstRealDayThisCol) {
-      const month = firstRealDayThisCol.getUTCMonth();
-      if (month !== lastMonthLabelled && firstRealDayThisCol.getUTCDate() <= 7) {
-        monthLabels.push(
-          firstRealDayThisCol.toLocaleDateString(locale, {
-            month: "short",
-            timeZone: "UTC",
-          }),
-        );
-        lastMonthLabelled = month;
-      } else {
-        monthLabels.push(null);
-      }
-    } else {
-      monthLabels.push(null);
-    }
-  }
+  const { weeks, monthLabels, dailyOrdered } = buildHeatmap(
+    gridStart,
+    today,
+    qtyByDate,
+    locale,
+    (qty) => t("dashboard.matesUnit", { count: qty }),
+  );
 
   const totalCups = dailyOrdered.reduce((s, d) => s + d.qty, 0);
   const avgPerWeek = Math.round((totalCups / 52) * 10) / 10;
@@ -667,51 +622,9 @@ export async function PersonalStatsSection({ officeId, userId }: SectionProps) {
     week.some((cell) => cell.date !== null && cell.qty > 0),
   );
 
-  let currentStreak = 0;
-  for (let i = weekActive.length - 1; i >= 0; i--) {
-    if (weekActive[i]) {
-      currentStreak++;
-    } else if (i === weekActive.length - 1) {
-      // Current week: empty so far, but the week isn't over — don't break the streak yet.
-      continue;
-    } else {
-      break;
-    }
-  }
-
-  let longestStreak = 0;
-  let weekRun = 0;
-  for (const active of weekActive) {
-    if (active) {
-      weekRun++;
-      if (weekRun > longestStreak) longestStreak = weekRun;
-    } else {
-      weekRun = 0;
-    }
-  }
-
-  const byWeekday: number[] = [0, 0, 0, 0, 0, 0, 0];
-  for (const d of dailyOrdered) {
-    const dow = (d.date.getUTCDay() + 6) % 7;
-    byWeekday[dow] += d.qty;
-  }
-  let busiestDow = 0;
-  for (let i = 1; i < 7; i++) {
-    if (byWeekday[i] > byWeekday[busiestDow]) busiestDow = i;
-  }
-  const busiestDayQty = byWeekday[busiestDow];
-
-  const thisWeek = dailyOrdered.slice(-7).reduce((s, d) => s + d.qty, 0);
-  const prior3wDays = dailyOrdered.slice(-28, -7);
-  const prior3wTotal = prior3wDays.reduce((s, d) => s + d.qty, 0);
-  const priorWeeklyAvg = prior3wDays.length > 0 ? prior3wTotal / 3 : 0;
-
-  let trendPct: number | null = null;
-  if (priorWeeklyAvg > 0) {
-    trendPct = Math.round(((thisWeek - priorWeeklyAvg) / priorWeeklyAvg) * 100);
-  } else if (thisWeek > 0) {
-    trendPct = null;
-  }
+  const { currentStreak, longestStreak } = weekStreaks(weekActive);
+  const { busiestDow, busiestDayQty } = busiestWeekday(dailyOrdered);
+  const trendPct = weeklyTrendPct(dailyOrdered);
 
   const now = new Date();
   const lastMateRelative = lastEntry
@@ -721,7 +634,7 @@ export async function PersonalStatsSection({ officeId, userId }: SectionProps) {
   const trail = weeks.slice(-7).map((week) => {
     const firstReal = week.find((c) => c.date !== null);
     return {
-      key: firstReal?.date ?? `pad-${Math.random()}`,
+      key: firstReal?.date ?? `pad-${crypto.randomUUID()}`,
       active: week.some((c) => c.date !== null && c.qty > 0),
     };
   });
@@ -797,33 +710,7 @@ export async function PersonalStatsSection({ officeId, userId }: SectionProps) {
               />
             </div>
 
-            {trendPct !== null && (
-              <div
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
-                  trendPct > 0 &&
-                    "border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300",
-                  trendPct < 0 &&
-                    "border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300",
-                  trendPct === 0 && "border-border bg-muted text-muted-foreground",
-                )}
-              >
-                {trendPct > 0 ? (
-                  <TrendingUp className="size-3.5" />
-                ) : trendPct < 0 ? (
-                  <TrendingDown className="size-3.5" />
-                ) : (
-                  <Minus className="size-3.5" />
-                )}
-                <span>
-                  {trendPct > 0
-                    ? t("dashboard.trendUp", { pct: trendPct })
-                    : trendPct < 0
-                      ? t("dashboard.trendDown", { pct: Math.abs(trendPct) })
-                      : t("dashboard.trendFlat")}
-                </span>
-              </div>
-            )}
+            {trendPct !== null && <TrendPill pct={trendPct} t={t} />}
 
             <MateActivityHeatmap
               weeks={weeks}
@@ -836,6 +723,180 @@ export async function PersonalStatsSection({ officeId, userId }: SectionProps) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+interface DayQty {
+  date: Date;
+  qty: number;
+  key: string;
+}
+
+function heatmapCell(
+  day: DayQty,
+  locale: string,
+  countLabel: (qty: number) => string,
+): HeatmapCell {
+  const dateLabel = day.date.toLocaleDateString(locale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return {
+    date: day.key,
+    qty: day.qty,
+    bucket: bucketFor(day.qty),
+    countLabel: countLabel(day.qty),
+    dateLabel,
+  };
+}
+
+/** The month's short name over the column holding its first days; null elsewhere. */
+function monthLabelFor(
+  firstDay: Date | null,
+  lastMonthLabelled: number,
+  locale: string,
+): string | null {
+  if (!firstDay) return null;
+  if (firstDay.getUTCMonth() === lastMonthLabelled || firstDay.getUTCDate() > 7) {
+    return null;
+  }
+  return firstDay.toLocaleDateString(locale, {
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+/** 53 week columns from `gridStart`, the days after `today` left blank. */
+function buildHeatmap(
+  gridStart: Date,
+  today: Date,
+  qtyByDate: ReadonlyMap<string, number>,
+  locale: string,
+  countLabel: (qty: number) => string,
+) {
+  const weeks: HeatmapCell[][] = [];
+  const monthLabels: (string | null)[] = [];
+  const dailyOrdered: DayQty[] = [];
+
+  let lastMonthLabelled = -1;
+
+  for (let w = 0; w < 53; w++) {
+    const week: HeatmapCell[] = [];
+    let firstRealDayThisCol: Date | null = null;
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(gridStart);
+      dt.setUTCDate(gridStart.getUTCDate() + w * 7 + d);
+      if (dt.getTime() > today.getTime()) {
+        week.push({ date: null, qty: 0, bucket: 0 });
+      } else {
+        const key = dt.toISOString().slice(0, 10);
+        const day = { date: dt, qty: qtyByDate.get(key) ?? 0, key };
+        week.push(heatmapCell(day, locale, countLabel));
+        dailyOrdered.push(day);
+        firstRealDayThisCol ??= dt;
+      }
+    }
+    weeks.push(week);
+
+    const monthLabel = monthLabelFor(firstRealDayThisCol, lastMonthLabelled, locale);
+    monthLabels.push(monthLabel);
+    if (monthLabel !== null && firstRealDayThisCol) {
+      lastMonthLabelled = firstRealDayThisCol.getUTCMonth();
+    }
+  }
+
+  return { weeks, monthLabels, dailyOrdered };
+}
+
+/** Consecutive active weeks up to now, and the longest run in the grid. */
+function weekStreaks(weekActive: readonly boolean[]) {
+  let currentStreak = 0;
+  for (let i = weekActive.length - 1; i >= 0; i--) {
+    if (weekActive[i]) {
+      currentStreak++;
+    } else if (i === weekActive.length - 1) {
+      // Current week: empty so far, but the week isn't over — don't break the streak yet.
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  let longestStreak = 0;
+  let weekRun = 0;
+  for (const active of weekActive) {
+    if (active) {
+      weekRun++;
+      if (weekRun > longestStreak) longestStreak = weekRun;
+    } else {
+      weekRun = 0;
+    }
+  }
+
+  return { currentStreak, longestStreak };
+}
+
+/** The weekday (0 = Monday) with the most mates, and that total. */
+function busiestWeekday(days: readonly DayQty[]) {
+  const byWeekday: number[] = [0, 0, 0, 0, 0, 0, 0];
+  for (const d of days) {
+    const dow = (d.date.getUTCDay() + 6) % 7;
+    byWeekday[dow] += d.qty;
+  }
+  let busiestDow = 0;
+  for (let i = 1; i < 7; i++) {
+    if (byWeekday[i] > byWeekday[busiestDow]) busiestDow = i;
+  }
+  return { busiestDow, busiestDayQty: byWeekday[busiestDow] };
+}
+
+/** This week against the three before it, in percent; null with nothing to compare. */
+function weeklyTrendPct(days: readonly DayQty[]): number | null {
+  const thisWeek = days.slice(-7).reduce((s, d) => s + d.qty, 0);
+  const prior3wDays = days.slice(-28, -7);
+  const prior3wTotal = prior3wDays.reduce((s, d) => s + d.qty, 0);
+  const priorWeeklyAvg = prior3wDays.length > 0 ? prior3wTotal / 3 : 0;
+
+  if (priorWeeklyAvg <= 0) return null;
+  return Math.round(((thisWeek - priorWeeklyAvg) / priorWeeklyAvg) * 100);
+}
+
+function TrendPill({
+  pct,
+  t,
+}: {
+  pct: number;
+  t: Awaited<ReturnType<typeof getTranslations>>;
+}) {
+  let Icon: LucideIcon;
+  let label: string;
+  if (pct > 0) {
+    Icon = TrendingUp;
+    label = t("dashboard.trendUp", { pct });
+  } else if (pct < 0) {
+    Icon = TrendingDown;
+    label = t("dashboard.trendDown", { pct: Math.abs(pct) });
+  } else {
+    Icon = Minus;
+    label = t("dashboard.trendFlat");
+  }
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium",
+        pct > 0 &&
+          "border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300",
+        pct < 0 &&
+          "border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300",
+        pct === 0 && "border-border bg-muted text-muted-foreground",
+      )}
+    >
+      <Icon className="size-3.5" />
+      <span>{label}</span>
+    </div>
   );
 }
 

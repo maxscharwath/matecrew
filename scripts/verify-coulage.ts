@@ -19,6 +19,7 @@
 import { prisma } from "../src/lib/prisma";
 import { buildCostingLedger, type CostDraw } from "../src/lib/costing";
 import { sliceLedger, matchBalances } from "../src/lib/reimbursement-calc";
+import { fromCents } from "../src/lib/money";
 
 const EPS = 0.011; // one centime of rounding per person, plus slack
 let failures = 0;
@@ -47,7 +48,7 @@ for (const office of await prisma.office.findMany({ select: { id: true, name: tr
     const paidByUser = new Map<string, number>();
     for (const l of period.lines) {
       const bucket = l.status === "PAID" ? paidByUser : pendingByUser;
-      bucket.set(l.fromUserId, (bucket.get(l.fromUserId) ?? 0) + l.amount.toNumber());
+      bucket.set(l.fromUserId, (bucket.get(l.fromUserId) ?? 0) + fromCents(l.amountCents));
     }
     for (const share of base.shares) {
       if (share.netOwed <= 0.01) continue;

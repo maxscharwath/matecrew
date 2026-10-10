@@ -6,6 +6,13 @@ interface SignedQtyProps {
   readonly className?: string;
 }
 
+function signColor(value: number): string {
+  if (value === 0) return "text-muted-foreground";
+  return value > 0
+    ? "text-green-600 dark:text-green-400"
+    : "text-red-600 dark:text-red-400";
+}
+
 /**
  * A signed quantity of cans: green when the fridge gained, red when it lost.
  *
@@ -19,17 +26,7 @@ export function SignedQty({ value, className }: SignedQtyProps) {
   }
 
   return (
-    <span
-      className={cn(
-        "tabular-nums",
-        value === 0
-          ? "text-muted-foreground"
-          : value > 0
-            ? "text-green-600 dark:text-green-400"
-            : "text-red-600 dark:text-red-400",
-        className,
-      )}
-    >
+    <span className={cn("tabular-nums", signColor(value), className)}>
       {value > 0 ? `+${value}` : value}
     </span>
   );

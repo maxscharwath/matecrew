@@ -85,26 +85,8 @@ function toolError(message: string): CallToolResult {
   return { isError: true, content: [{ type: "text", text: message }] };
 }
 
+/** Tool results are plain values: money is a number of francs, a `Date` an ISO string through `toJSON`. */
 function encode(value: unknown): string {
   // `undefined` at the top level stringifies to undefined, not "null".
-  return JSON.stringify(value, replacer) ?? "null";
-}
-
-/**
- * Makes Prisma values JSON-friendly: `Decimal` becomes a number (money here is
- * already rounded to cents, so float representation is not a concern), and
- * everything else falls through. `Date` needs no case — `toJSON` already yields
- * an ISO string.
- */
-function replacer(_key: string, value: unknown): unknown {
-  return isDecimal(value) ? value.toNumber() : value;
-}
-
-function isDecimal(value: unknown): value is { toNumber(): number } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "toNumber" in value &&
-    typeof (value as { toNumber: unknown }).toNumber === "function"
-  );
+  return JSON.stringify(value) ?? "null";
 }

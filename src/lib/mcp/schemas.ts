@@ -18,8 +18,8 @@ export const isoDateArg = z
   .describe("Calendar date as YYYY-MM-DD.");
 
 /**
- * Parses "YYYY-MM-DD" into the UTC-midnight `Date` that Prisma's `@db.Date`
- * columns store, matching `getTodayDate()` in `@/lib/date`.
+ * Parses "YYYY-MM-DD" into the UTC-midnight `Date` that day columns store,
+ * matching `getTodayDate()` in `@/lib/date`.
  */
 export function parseIsoDate(value: string): Date {
   if (!ISO_DATE.test(value)) {

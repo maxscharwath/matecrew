@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { utcDate } from "@/lib/date";
+import { fromCents } from "@/lib/money";
 
 /**
  * Inventory costing for the fridge — the single source of truth for "what did
@@ -176,7 +177,7 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
       select: {
         itemId: true,
         qty: true,
-        lineTotal: true,
+        lineTotalCents: true,
         item: { select: { name: true, sortOrder: true } },
         batch: {
           select: {
@@ -223,8 +224,62 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
     }),
   ]);
 
+  // Money enters the replay in francs, converted once from the stored cents.
+  return replayCostingLedger({
+    purchaseLines: purchaseLines.map(({ lineTotalCents, ...line }) => ({
+      ...line,
+      spend: fromCents(lineTotalCents),
+    })),
+    entries,
+    countLines,
+  });
+});
+
+/** An item as the replay names and orders it. */
+interface ItemInfo {
+  readonly name: string;
+  readonly sortOrder: number;
+}
+
+/** What the replay reads: the rows `buildCostingLedger` loads, money in francs. */
+export interface CostingRows {
+  readonly purchaseLines: readonly {
+    readonly itemId: string;
+    readonly qty: number;
+    /** The line's total, in francs. */
+    readonly spend: number;
+    readonly item: ItemInfo;
+    readonly batch: {
+      readonly id: string;
+      readonly purchasedAt: Date;
+      readonly deliveredAt: Date | null;
+      readonly paidByUserId: string;
+      readonly paidBy: { readonly name: string };
+    };
+  }[];
+  readonly entries: readonly {
+    readonly id: string;
+    readonly userId: string;
+    readonly itemId: string;
+    readonly date: Date;
+    readonly qty: number;
+    readonly cancelledAt: Date | null;
+    readonly item: ItemInfo;
+    readonly user: { readonly name: string };
+  }[];
+  readonly countLines: readonly {
+    readonly id: string;
+    readonly itemId: string;
+    readonly delta: number;
+    readonly item: ItemInfo;
+    readonly count: { readonly countedAt: Date };
+  }[];
+}
+
+/** The rows as one timeline in replay order, and the names they carry. */
+function timelineOf({ purchaseLines, entries, countLines }: CostingRows) {
   const userNames = new Map<string, string>();
-  const itemInfo = new Map<string, { name: string; sortOrder: number }>();
+  const itemInfo = new Map<string, ItemInfo>();
   const events: LedgerEvent[] = [];
 
   for (const l of purchaseLines) {
@@ -238,7 +293,7 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
       at: l.batch.deliveredAt ?? l.batch.purchasedAt,
       itemId: l.itemId,
       qty: l.qty,
-      spend: l.lineTotal.toNumber(),
+      spend: l.spend,
       payerId: l.batch.paidByUserId,
       batchId: l.batch.id,
     });
@@ -289,6 +344,25 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
       EVENT_ORDER[a.kind] - EVENT_ORDER[b.kind] ||
       a.at.getTime() - b.at.getTime(),
   );
+
+  return { userNames, itemInfo, events };
+}
+
+/** Each payer's fraction of a draw's cost. */
+function splitOf(credits: Map<string, number>, cost: number): Map<string, number> {
+  const shares = new Map<string, number>();
+  if (cost !== 0) {
+    for (const [payerId, c] of credits) shares.set(payerId, c / cost);
+  }
+  return shares;
+}
+
+/**
+ * The replay itself, a pure function of the rows: the same rows always give
+ * the same ledger, which is what lets a test pin it down.
+ */
+export function replayCostingLedger(rows: CostingRows): CostingLedger {
+  const { userNames, itemInfo, events } = timelineOf(rows);
 
   const pools = new Map<string, Pool>();
   const poolOf = (itemId: string): Pool => {
@@ -500,13 +574,9 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
         const { cost, credits } = draw(ev.itemId, ev.qty);
         // Remember the exact price and split, so a later cancellation reverses
         // this draw rather than approximating it at today's price.
-        const shares = new Map<string, number>();
-        if (cost !== 0) {
-          for (const [payerId, c] of credits) shares.set(payerId, c / cost);
-        }
         drawnEntries.set(ev.entryId, {
           unitCost: ev.qty > 0 ? cost / ev.qty : 0,
-          shares,
+          shares: splitOf(credits, cost),
         });
         draws.push({
           kind: "CONSUMPTION",
@@ -571,7 +641,7 @@ export const buildCostingLedger = cache(async function buildCostingLedger(
     userNames,
     itemNames: new Map(ordered.map(([id, info]) => [id, info.name])),
   };
-});
+}
 
 /** A price curve: unit cost from `day` (a UTC day number) until the next entry. */
 interface PriceStep {

@@ -111,6 +111,8 @@ export function TakeCanButton({ officeId, items }: Props) {
   }
 
   const soldOut = (items[0]?.stockQty ?? 0) <= 0;
+  let label = isPending ? t("common.processing") : t("dashboard.takeCan");
+  if (soldOut) label = t("request.outOfStock");
 
   return (
     <>
@@ -121,11 +123,7 @@ export function TakeCanButton({ officeId, items }: Props) {
         className="gap-2"
       >
         <CupSoda className="size-5" />
-        {soldOut
-          ? t("request.outOfStock")
-          : isPending
-            ? t("common.processing")
-            : t("dashboard.takeCan")}
+        {label}
       </Button>
 
       <ConfirmDialog

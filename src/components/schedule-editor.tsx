@@ -105,6 +105,8 @@ function SessionForm({
     });
   }
 
+  const submitLabel = isEdit ? t('schedule.save') : t('schedule.addSession');
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border bg-muted/50 p-3">
       <div className="grid grid-cols-3 gap-2">
@@ -130,7 +132,7 @@ function SessionForm({
       </p>
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "..." : isEdit ? t('schedule.save') : t('schedule.addSession')}
+          {isPending ? "..." : submitLabel}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
           {t('common.cancel')}

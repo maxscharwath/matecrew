@@ -1,0 +1,5 @@
+# The Prisma client imports its query compiler the workerd way; see the plugin.
+preload = ["./scripts/bun/wasm-module.ts"]
+
+[test]
+preload = ["./scripts/bun/wasm-module.ts"]

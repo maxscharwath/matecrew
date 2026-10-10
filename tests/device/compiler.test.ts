@@ -154,7 +154,10 @@ test("SDK components compile independently from the terminal and theme hooks rem
 
 test("the DEFLATE encoder is deterministic and any inflater reads it", () => {
   let seed = 7;
-  const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) & 255;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed & 255;
+  };
   const inputs = [
     new Uint8Array(0),
     new Uint8Array([42]),

@@ -1,7 +1,7 @@
 "use server";
 
 import { getOptionalSession } from "@/lib/auth-utils";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, expectRows, prisma, retryOnConflict } from "@/lib/prisma";
 
 /**
  * The bottle-flip scoreboard.
@@ -71,27 +71,42 @@ export async function getFlipBoard(): Promise<FlipBoard> {
 export async function recordFlip(upright: boolean): Promise<FlipBoard> {
   const session = await getOptionalSession();
   if (session) {
-    const userId = session.user.id;
-    await prisma.$transaction(async (tx) => {
-      const current = await tx.flipScore.findUnique({ where: { userId } });
-      const streak = upright ? (current?.currentStreak ?? 0) + 1 : 0;
-      await tx.flipScore.upsert({
-        where: { userId },
-        create: {
-          userId,
-          throws: 1,
-          landings: upright ? 1 : 0,
-          currentStreak: streak,
-          bestStreak: streak,
-        },
-        update: {
-          throws: { increment: 1 },
-          landings: { increment: upright ? 1 : 0 },
-          currentStreak: streak,
-          bestStreak: Math.max(current?.bestStreak ?? 0, streak),
-        },
-      });
-    });
+    await retryOnConflict(() => recordThrow(session.user.id, upright));
   }
   return getFlipBoard();
+}
+
+/**
+ * Reads the player's row, computes the new streak, then writes it in one
+ * atomic batch. The guard only updates the row as it was read (same throw
+ * count), so two throws landing at once cannot both extend the same streak;
+ * the loser reads again. A first throw creates the row, and a concurrent first
+ * throw makes it a unique-key conflict, retried the same way.
+ */
+async function recordThrow(userId: string, upright: boolean): Promise<void> {
+  const current = await prisma.flipScore.findUnique({ where: { userId } });
+  const landing = upright ? 1 : 0;
+  const streak = upright ? (current?.currentStreak ?? 0) + 1 : 0;
+  await commitBatch((db) =>
+    current
+      ? [
+          expectRows(
+            db.flipScore.updateMany({
+              where: { userId, throws: current.throws },
+              data: {
+                throws: current.throws + 1,
+                landings: current.landings + landing,
+                currentStreak: streak,
+                bestStreak: Math.max(current.bestStreak, streak),
+              },
+            }),
+            1,
+          ),
+        ]
+      : [
+          db.flipScore.createMany({
+            data: [{ userId, throws: 1, landings: landing, currentStreak: streak, bestStreak: streak }],
+          }),
+        ],
+  );
 }

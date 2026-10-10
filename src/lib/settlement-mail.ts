@@ -39,6 +39,46 @@ export type StatementsResult =
 /** Resend allows a couple of requests a second; offices are small, so wait. */
 const SEND_INTERVAL_MS = 600;
 
+/**
+ * Everyone the period actually concerns: they drank something, or they owe
+ * or are owed by somebody. A member who was away all month gets no mail —
+ * an invoice for nothing is noise, not transparency.
+ */
+function concernedUsers(
+  shares: readonly { userId: string; qty: number; netOwed: number }[],
+  lines: readonly { fromUserId: string; toUserId: string }[],
+): Set<string> {
+  const concerned = new Set<string>();
+  for (const share of shares) {
+    if (share.qty > 0 || Math.abs(share.netOwed) >= 0.005) {
+      concerned.add(share.userId);
+    }
+  }
+  for (const line of lines) {
+    concerned.add(line.fromUserId);
+    concerned.add(line.toUserId);
+  }
+  return concerned;
+}
+
+/** Their share of the missing cans, or null when there was no shrinkage. */
+function lossShareLabel(lossShare: number, locale: string): string | null {
+  return lossShare >= 0.005 ? money(lossShare, locale) : null;
+}
+
+/** Everybody when forced; otherwise only those not on record yet. */
+function stillToMail<T extends { user: { id: string } }>(
+  members: T[],
+  alreadyMailed: ReadonlySet<string>,
+  force = false,
+): T[] {
+  return force ? members : members.filter(({ user }) => !alreadyMailed.has(user.id));
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : "Unknown error";
+}
+
 export async function sendPeriodStatements(
   periodId: string,
   opts: { force?: boolean } = {},
@@ -58,19 +98,7 @@ export async function sendPeriodStatements(
     period.endDate,
   );
 
-  // Everyone the period actually concerns: they drank something, or they owe
-  // or are owed by somebody. A member who was away all month gets no mail —
-  // an invoice for nothing is noise, not transparency.
-  const concerned = new Set<string>();
-  for (const share of result.shares) {
-    if (share.qty > 0 || Math.abs(share.netOwed) >= 0.005) {
-      concerned.add(share.userId);
-    }
-  }
-  for (const line of period.lines) {
-    concerned.add(line.fromUserId);
-    concerned.add(line.toUserId);
-  }
+  const concerned = concernedUsers(result.shares, period.lines);
   if (concerned.size === 0) return { kind: "no_recipients" };
 
   // Membership is what makes someone part of this office today: a person who
@@ -100,9 +128,7 @@ export async function sendPeriodStatements(
     return { kind: "already_sent", at: period.statementsSentAt };
   }
 
-  const pending = opts.force
-    ? members
-    : members.filter(({ user }) => !alreadyMailed.has(user.id));
+  const pending = stillToMail(members, alreadyMailed, opts.force);
   if (pending.length === 0) {
     return { kind: "sent", sent: 0, skipped: members.length, failed: [] };
   }
@@ -138,10 +164,7 @@ export async function sendPeriodStatements(
         qty: statement.qty,
         costShare: money(statement.costShare, user.locale),
         avgUnitPrice: money(statement.avgUnitPrice, user.locale),
-        lossShare:
-          statement.lossShare >= 0.005
-            ? money(statement.lossShare, user.locale)
-            : null,
+        lossShare: lossShareLabel(statement.lossShare, user.locale),
         netOwed: statement.netOwed,
         payments: statement.lines.map((l) => ({
           direction: l.direction,
@@ -166,7 +189,7 @@ export async function sendPeriodStatements(
     } catch (e) {
       failed.push({
         name: user.name,
-        error: e instanceof Error ? e.message : "Unknown error",
+        error: errorMessage(e),
       });
     }
 

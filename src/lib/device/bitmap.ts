@@ -3,9 +3,8 @@
  * item has none. Screen layout and stock charts are drawn in Rust. Bits are packed: row
  * after row, most significant bit first, 1 = ink.
  */
-import sharp from "sharp";
 import { CoffeeIcon } from "@matecrew/device-ui/icons/pixelarticons";
-import { downloadFile } from "@/lib/storage";
+import { platform, readBlobBytes } from "@/platform";
 
 export type Bitmap = { width: number; height: number; bits: Uint8Array };
 
@@ -100,14 +99,13 @@ function fallbackProductImage(): Bitmap {
   );
 }
 
-const cache = new Map<string, Promise<Bitmap | null>>();
-
-async function load(imageKey: string): Promise<Buffer> {
-  if (/^https?:\/\//.test(imageKey))
-    return Buffer.from(await (await fetch(imageKey)).arrayBuffer());
-  const { body } = await downloadFile(imageKey);
-  if (Buffer.isBuffer(body)) return body;
-  return Buffer.from(await new Response(body).arrayBuffer());
+/** A plain threshold: ink where the grey is darker than the middle. */
+export function threshold(gray: Uint8Array, width: number, height: number): Bitmap {
+  const out = blank(width, height);
+  gray.forEach((level, i) => {
+    if (level < 128) set(out, i % width, Math.floor(i / width));
+  });
+  return out;
 }
 
 /**
@@ -115,53 +113,43 @@ async function load(imageKey: string): Promise<Buffer> {
  * for a drawing. Pixel art at 24, 48 or 96 px keeps its pixels.
  */
 export async function pictureToBitmap(
-  source: Buffer,
+  source: Uint8Array,
   mode: "dither" | "threshold",
 ): Promise<Bitmap> {
-  const { width = 0, height = 0 } = await sharp(source).metadata();
+  const { width, height } = await platform.images.size(source);
   const pixelArt =
     width > 0 &&
     width === height &&
     width <= ITEM_IMAGE_SIZE &&
     ITEM_IMAGE_SIZE % width === 0;
-  const { data } = await sharp(source)
-    .flatten({ background: "#ffffff" })
-    .resize(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE, {
-      fit: "contain",
-      background: "#ffffff",
-      kernel: pixelArt ? "nearest" : "lanczos3",
-    })
-    .greyscale()
-    .normalise()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  if (mode === "dither") return dither(data, ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
-  const out = blank(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
-  data.forEach((level, i) => {
-    if (level < 128)
-      set(out, i % ITEM_IMAGE_SIZE, Math.floor(i / ITEM_IMAGE_SIZE));
-  });
-  return out;
+  const gray = await platform.images.greyscaleSquare(
+    source,
+    ITEM_IMAGE_SIZE,
+    pixelArt ? "nearest" : "lanczos3",
+  );
+  const convert = mode === "dither" ? dither : threshold;
+  return convert(gray, ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
 }
 
 /**
- * The item's photo at 96 x 96, or null when it has none or it cannot be read.
- * A plain threshold: on product photos it keeps the outline and some of the
- * label, where dithering at this size is noise.
+ * A stored photo as the terminal draws it, worked out once when the photo is
+ * uploaded (Item.terminalPhoto). A plain threshold: on product photos it keeps
+ * the outline and some of the label, where dithering at this size is noise.
  */
-export async function photoBitmap(
-  imageKey: string | null,
-): Promise<Bitmap | null> {
-  if (!imageKey) return null;
-  if (!cache.has(imageKey)) {
-    cache.set(
-      imageKey,
-      load(imageKey)
-        .then((source) => pictureToBitmap(source, "threshold"))
-        .catch(() => null),
-    );
+export async function photoToTerminal(photo: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+  return Uint8Array.from((await pictureToBitmap(photo, "threshold")).bits);
+}
+
+/** The bytes of a stored photo: an `items/` key in storage, or an absolute URL. */
+export async function loadPhoto(imageKey: string): Promise<Uint8Array> {
+  if (/^https?:\/\//.test(imageKey)) {
+    const response = await fetch(imageKey);
+    if (!response.ok) throw new Error(`Photo ${imageKey}: HTTP ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
   }
-  return (await cache.get(imageKey)) ?? null;
+  const photo = await platform.storage.get(imageKey);
+  if (!photo) throw new Error(`Missing photo ${imageKey}`);
+  return readBlobBytes(photo);
 }
 
 /**
@@ -207,20 +195,20 @@ export function withOpacity(b: Bitmap): Uint8Array {
   return planes;
 }
 
+/** A stored 96 x 96 picture, or null when there is none of that size. */
+function stored(bits: Uint8Array | null): Bitmap | null {
+  if (bits?.length !== ITEM_IMAGE_BYTES) return null;
+  return { width: ITEM_IMAGE_SIZE, height: ITEM_IMAGE_SIZE, bits: Uint8Array.from(bits) };
+}
+
 /**
  * What the terminal shows for an item: its own black and white picture,
- * else its photo in black and white, else the catalogue fallback.
+ * else its photo in black and white, else the catalogue fallback. Both
+ * pictures are stored, so this decodes nothing.
  */
-export async function itemImage(
-  imageKey: string | null,
-  terminalImage?: Uint8Array | null,
-): Promise<Bitmap> {
-  if (terminalImage?.length === ITEM_IMAGE_BYTES) {
-    return {
-      width: ITEM_IMAGE_SIZE,
-      height: ITEM_IMAGE_SIZE,
-      bits: Uint8Array.from(terminalImage),
-    };
-  }
-  return (await photoBitmap(imageKey)) ?? fallbackProductImage();
+export function itemImage(
+  terminalImage: Uint8Array | null,
+  terminalPhoto: Uint8Array | null,
+): Bitmap {
+  return stored(terminalImage) ?? stored(terminalPhoto) ?? fallbackProductImage();
 }

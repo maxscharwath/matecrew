@@ -833,8 +833,12 @@ function CanBody({
       angularDamping={ANGULAR_DAMPING}
       friction={CAN_FRICTION}
       restitution={CAN_RESTITUTION}
-      onCollisionEnter={() => void (contacts.current += 1)}
-      onCollisionExit={() => void (contacts.current = Math.max(0, contacts.current - 1))}
+      onCollisionEnter={() => {
+        contacts.current += 1;
+      }}
+      onCollisionExit={() => {
+        contacts.current = Math.max(0, contacts.current - 1);
+      }}
     >
       <CylinderCollider
         args={[CAN_HEIGHT / 2, CAN_DIAMETER / 2]}
@@ -1127,6 +1131,51 @@ function Knockdown({ state, labels, onReport, onPose }: KnockdownProps) {
     });
   };
 
+  /** Once everything rests (or the wait runs out), score the level. */
+  const judge = (dt: number) => {
+    const g = game.current;
+    const bodies = [...cans.current, ...slugs.current].filter(
+      (b): b is RapierRigidBody => b !== null,
+    );
+    const still = bodies.every((b) => speedOf(b) < REST_SPEED && spinOf(b) < REST_SPIN);
+    g.restFor = still ? g.restFor + dt : 0;
+    g.judgingFor += dt;
+    if (g.restFor >= REST_SECONDS || g.judgingFor > KNOCKDOWN_TIMEOUT) {
+      g.judging = false;
+      const down = countDown();
+      const cleared = down >= spots.length;
+      g.nextLevel = cleared ? Math.min(level + 1, LAST_ROWS - FIRST_ROWS) : level;
+      g.nextIn = LEVEL_PAUSE;
+      onReport?.({
+        level: level + 1,
+        rows,
+        down,
+        total: spots.length,
+        shotsLeft: shotCount - g.fired,
+        result: cleared ? "cleared" : "failed",
+      });
+    }
+  };
+
+  /** Same level again: stand the pyramid back up, pocket the slugs. */
+  const replay = () => {
+    cans.current.forEach((c, i) => {
+      if (!c) return;
+      c.setTranslation(spots[i], true);
+      c.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+      c.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      c.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    });
+    slugs.current.forEach((b, i) => {
+      if (!b) return;
+      b.setTranslation({ x: 0, y: -20 - i, z: 0 }, true);
+      b.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      b.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    });
+    game.current.fired = 0;
+    onReport?.({ level: level + 1, rows, down: 0, total: spots.length, shotsLeft: shotCount });
+  };
+
   useFrame((_, dt) => {
     const s = state.current;
     const g = game.current;
@@ -1145,52 +1194,12 @@ function Knockdown({ state, labels, onReport, onPose }: KnockdownProps) {
       g.restFor = 0;
     }
 
-    if (g.judging) {
-      const bodies = [...cans.current, ...slugs.current].filter(
-        (b): b is RapierRigidBody => b !== null,
-      );
-      const still = bodies.every((b) => speedOf(b) < REST_SPEED && spinOf(b) < REST_SPIN);
-      g.restFor = still ? g.restFor + dt : 0;
-      g.judgingFor += dt;
-      if (g.restFor >= REST_SECONDS || g.judgingFor > KNOCKDOWN_TIMEOUT) {
-        g.judging = false;
-        const down = countDown();
-        const cleared = down >= spots.length;
-        g.nextLevel = cleared ? Math.min(level + 1, LAST_ROWS - FIRST_ROWS) : level;
-        g.nextIn = LEVEL_PAUSE;
-        onReport?.({
-          level: level + 1,
-          rows,
-          down,
-          total: spots.length,
-          shotsLeft: shotCount - g.fired,
-          result: cleared ? "cleared" : "failed",
-        });
-      }
-    }
+    if (g.judging) judge(dt);
     if (g.nextIn > 0) {
       g.nextIn -= dt;
       if (g.nextIn <= 0) {
-        if (g.nextLevel === level) {
-          // Same level again: stand the pyramid back up, pocket the slugs.
-          cans.current.forEach((c, i) => {
-            if (!c) return;
-            c.setTranslation(spots[i], true);
-            c.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-            c.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            c.setAngvel({ x: 0, y: 0, z: 0 }, true);
-          });
-          slugs.current.forEach((b, i) => {
-            if (!b) return;
-            b.setTranslation({ x: 0, y: -20 - i, z: 0 }, true);
-            b.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            b.setAngvel({ x: 0, y: 0, z: 0 }, true);
-          });
-          g.fired = 0;
-          onReport?.({ level: level + 1, rows, down: 0, total: spots.length, shotsLeft: shotCount });
-        } else {
-          setLevel(g.nextLevel);
-        }
+        if (g.nextLevel === level) replay();
+        else setLevel(g.nextLevel);
       }
     }
   });
@@ -1458,6 +1467,50 @@ function distanceFor(height: number, fill: number): number {
   return height / (fill * 2 * Math.tan(halfFov));
 }
 
+/** The environment, the sun and, past icon size, the shadow on the floor. */
+function Lighting({
+  icon,
+  knockdown,
+  rows,
+}: {
+  readonly icon: boolean;
+  readonly knockdown: boolean;
+  readonly rows: number;
+}) {
+  return (
+    <>
+      <Studio resolution={icon ? 256 : 512} />
+      <Sun
+        // The gallery plays far down the range; the light and its shadow
+        // frustum go where the cans are.
+        centre={knockdown ? [0, 0, -RANGE_FOR_ROWS(rows) * 0.5] : [0, 0, 0]}
+        // Wide enough to keep a shadow under a can shot clean off the range.
+        reach={knockdown ? RANGE_FOR_ROWS(rows) * 0.9 + 10 : 8}
+      />
+      {!icon && (
+        // The floor is invisible; only the shadow it catches is drawn.
+        <mesh
+          receiveShadow
+          rotation-x={-Math.PI / 2}
+          position-y={FLOOR_Y - 0.001}
+        >
+          <planeGeometry args={[80, 80]} />
+          <shadowMaterial transparent opacity={0.38} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+/** Crosshair to aim, a hand to turn. */
+function cursorClass(interactive: boolean, knockdown: boolean, dragging: boolean): string {
+  // Let the surrounding Link or button take clicks when the can is
+  // just a picture; a static canvas has no business eating them.
+  if (!interactive) return "pointer-events-none";
+  if (knockdown) return "cursor-crosshair touch-none";
+  return dragging ? "cursor-grabbing touch-none" : "cursor-grab touch-none";
+}
+
 export function MateCan3D({
   className,
   detail = "full",
@@ -1474,9 +1527,10 @@ export function MateCan3D({
   const knockdown = mode === "knockdown";
   const physics = flip || knockdown;
   // The flip game needs air above the table; the others frame the can tight.
+  const tightFill = icon ? 0.92 : 0.78;
   const distance = flip
     ? distanceFor(CAN_HEIGHT * FLIP_VIEW_HEIGHTS, 1)
-    : distanceFor(CAN_HEIGHT, icon ? 0.92 : 0.78);
+    : distanceFor(CAN_HEIGHT, tightFill);
   const lookAtY = flip ? FLIP_LOOK_AT : 0;
   const state = useRef<CanState>(createCanState(intro));
   const focus = useRef(new THREE.Vector3());
@@ -1541,26 +1595,40 @@ export function MateCan3D({
     }
     setDragging(false);
   };
+  const pointerHandlers = interactive
+    ? { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp }
+    : {};
+
+  const gameLabels = labels?.length ? labels : [label];
+  const game = knockdown ? (
+    <Knockdown
+      textureUrl={textureUrl}
+      turn={turn}
+      state={state}
+      labels={gameLabels}
+      onReport={onReport}
+      onPose={(next, nextRows) => {
+        setPose(next);
+        setRows(nextRows);
+      }}
+    />
+  ) : (
+    <FlipCan
+      state={state}
+      labels={gameLabels}
+      focus={focus}
+      onLand={onLand}
+    />
+  );
 
   return (
     <div
       className={cn(
         "relative",
-        interactive
-          ? knockdown
-            ? "cursor-crosshair touch-none"
-            : dragging
-              ? "cursor-grabbing touch-none"
-              : "cursor-grab touch-none"
-          : // Let the surrounding Link or button take clicks when the can is
-            // just a picture; a static canvas has no business eating them.
-            "pointer-events-none",
+        cursorClass(interactive, knockdown, dragging),
         className,
       )}
-      onPointerDown={interactive ? onPointerDown : undefined}
-      onPointerMove={interactive ? onPointerMove : undefined}
-      onPointerUp={interactive ? onPointerUp : undefined}
-      onPointerCancel={interactive ? onPointerUp : undefined}
+      {...pointerHandlers}
     >
       <Canvas
         style={{ position: "absolute", inset: 0 }}
@@ -1575,26 +1643,7 @@ export function MateCan3D({
         <Suspense fallback={null}>
           {physics ? (
             <Physics gravity={[0, -GRAVITY, 0]} timeStep={PHYSICS_STEP}>
-              {knockdown ? (
-                <Knockdown
-                  textureUrl={textureUrl}
-                  turn={turn}
-                  state={state}
-                  labels={labels?.length ? labels : [label]}
-                  onReport={onReport}
-                  onPose={(next, nextRows) => {
-                    setPose(next);
-                    setRows(nextRows);
-                  }}
-                />
-              ) : (
-                <FlipCan
-                  state={state}
-                  labels={labels?.length ? labels : [label]}
-                  focus={focus}
-                  onLand={onLand}
-                />
-              )}
+              {game}
               <Floor />
             </Physics>
           ) : (
@@ -1607,25 +1656,7 @@ export function MateCan3D({
               swayScale={icon ? 2 : 1}
             />
           )}
-          <Studio resolution={icon ? 256 : 512} />
-          <Sun
-            // The gallery plays far down the range; the light and its shadow
-            // frustum go where the cans are.
-            centre={knockdown ? [0, 0, -RANGE_FOR_ROWS(rows) * 0.5] : [0, 0, 0]}
-            // Wide enough to keep a shadow under a can shot clean off the range.
-            reach={knockdown ? RANGE_FOR_ROWS(rows) * 0.9 + 10 : 8}
-          />
-          {!icon && (
-            // The floor is invisible; only the shadow it catches is drawn.
-            <mesh
-              receiveShadow
-              rotation-x={-Math.PI / 2}
-              position-y={FLOOR_Y - 0.001}
-            >
-              <planeGeometry args={[80, 80]} />
-              <shadowMaterial transparent opacity={0.38} />
-            </mesh>
-          )}
+          <Lighting icon={icon} knockdown={knockdown} rows={rows} />
         </Suspense>
         <Rig
           distance={distance}

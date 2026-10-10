@@ -1,16 +1,13 @@
-import { prisma } from "@/lib/prisma";
+import { commitBatch, expectRows, guardedChunks, newId, prisma, retryOnConflict } from "@/lib/prisma";
 import { buildCostingLedger } from "@/lib/costing";
-import { roundCents } from "@/lib/money";
+import { fromCents, roundCents, toCents } from "@/lib/money";
 import {
   calculateReimbursements,
   matchBalances,
   sliceLedger,
 } from "@/lib/reimbursement-calc";
-import {
-  buildSettlementKey,
-  buildUserSettlementKey,
-  deleteFile,
-} from "@/lib/storage";
+import { buildSettlementKey, buildUserSettlementKey } from "@/lib/storage";
+import { platform } from "@/platform";
 
 /**
  * Reimbursement period lifecycle, shared by the admin screen's server actions
@@ -81,41 +78,41 @@ export async function backfillReimbursementPeriods(
   // case, and it should not replay the whole history to create nothing.
   if (missing.length === 0) return { kind: "ok", created: 0 };
 
-  let created = 0;
-
   // Replayed once for the whole backfill rather than once per month — the
   // months are slices of one causal history.
   const ledger = await buildCostingLedger(officeId);
 
-  for (const { month, year } of missing) {
+  const periods = missing.flatMap(({ month, year }) => {
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     // Day 0 of the next month is the last day of this one.
     const endDate = new Date(Date.UTC(year, month, 0));
 
     const result = sliceLedger(ledger, startDate, endDate);
-    if (result.totalConsumption === 0 && result.totalCost === 0) continue;
+    if (result.totalConsumption === 0 && result.totalCost === 0) return [];
+    return [{ row: { id: newId(), officeId, month, year, startDate, endDate }, lines: result.lines }];
+  });
+  if (periods.length === 0) return { kind: "ok", created: 0 };
 
-    await prisma.reimbursementPeriod.create({
-      data: {
-        officeId,
-        month,
-        year,
-        startDate,
-        endDate,
-        lines: {
-          create: result.lines.map((l) => ({
-            fromUserId: l.fromUserId,
-            toUserId: l.toUserId,
-            amount: l.amount,
-            currency: "CHF",
-          })),
-        },
-      },
-    });
-    created++;
-  }
+  // Computed above, committed here in one atomic batch: every period with its
+  // lines, or nothing. A concurrent backfill that created one of the months
+  // first makes the batch fail on the (office, year, month) key.
+  const lines = periods.flatMap((period) =>
+    period.lines.map((l) => ({
+      periodId: period.row.id,
+      fromUserId: l.fromUserId,
+      toUserId: l.toUserId,
+      amountCents: toCents(l.amount),
+      currency: "CHF",
+    })),
+  );
+  await commitBatch((db) => [
+    db.reimbursementPeriod.createMany({
+      data: periods.map((period) => period.row),
+    }),
+    ...(lines.length > 0 ? [db.reimbursementLine.createMany({ data: lines })] : []),
+  ]);
 
-  return { kind: "ok", created };
+  return { kind: "ok", created: periods.length };
 }
 
 export type SyncPeriodResult =
@@ -134,12 +131,38 @@ export async function syncReimbursementPeriod(
   officeId: string,
   periodId: string,
 ): Promise<SyncPeriodResult> {
+  const synced = await retryOnConflict(() => replacePendingLines(officeId, periodId));
+  if (!synced) return { kind: "not_found" };
+  const { result, paidLines, newLineCount } = synced;
+
+  // Any cached settlement PDF now describes stale lines.
+  const affectedUserIds = new Set([
+    ...result.shares.map((s) => s.userId),
+    ...paidLines.flatMap((l) => [l.fromUserId, l.toUserId]),
+  ]);
+  await Promise.allSettled([
+    platform.storage.delete(buildSettlementKey(periodId)),
+    ...[...affectedUserIds].map((uid) =>
+      platform.storage.delete(buildUserSettlementKey(periodId, uid)),
+    ),
+  ]);
+
+  return { kind: "ok", lines: newLineCount + paidLines.length };
+}
+
+/**
+ * Reads the period, recomputes its PENDING lines and swaps them in one atomic
+ * batch. Guards: the PENDING lines deleted must be exactly the ones read (none
+ * paid meanwhile), and no other PENDING line may exist (no concurrent sync
+ * added its own); otherwise the batch rolls back and the caller retries.
+ */
+async function replacePendingLines(officeId: string, periodId: string) {
   const period = await prisma.reimbursementPeriod.findUnique({
     where: { id: periodId },
     include: { lines: true },
   });
 
-  if (!period || period.officeId !== officeId) return { kind: "not_found" };
+  if (!period || period.officeId !== officeId) return null;
 
   const result = await calculateReimbursements(
     officeId,
@@ -159,7 +182,7 @@ export async function syncReimbursementPeriod(
   }
 
   for (const paid of paidLines) {
-    const amount = paid.amount.toNumber();
+    const amount = fromCents(paid.amountCents);
     balanceMap.set(
       paid.fromUserId,
       (balanceMap.get(paid.fromUserId) ?? 0) - amount,
@@ -174,34 +197,25 @@ export async function syncReimbursementPeriod(
     })),
   );
 
-  await prisma.$transaction([
-    prisma.reimbursementLine.deleteMany({
-      where: { id: { in: pendingLineIds } },
-    }),
-    ...newLines.map((l) =>
-      prisma.reimbursementLine.create({
-        data: {
-          periodId,
-          fromUserId: l.fromUserId,
-          toUserId: l.toUserId,
-          amount: l.amount,
-          currency: "CHF",
-        },
-      }),
+  await commitBatch((db) => [
+    ...guardedChunks(pendingLineIds).map((ids) =>
+      expectRows(db.reimbursementLine.deleteMany({ where: { periodId, status: "PENDING", id: { in: ids } } }), ids.length),
     ),
+    expectRows(db.reimbursementLine.deleteMany({ where: { periodId, status: "PENDING" } }), 0),
+    ...(newLines.length > 0
+      ? [
+          db.reimbursementLine.createMany({
+            data: newLines.map((l) => ({
+              periodId,
+              fromUserId: l.fromUserId,
+              toUserId: l.toUserId,
+              amountCents: toCents(l.amount),
+              currency: "CHF",
+            })),
+          }),
+        ]
+      : []),
   ]);
 
-  // Any cached settlement PDF now describes stale lines.
-  const affectedUserIds = new Set([
-    ...result.shares.map((s) => s.userId),
-    ...paidLines.flatMap((l) => [l.fromUserId, l.toUserId]),
-  ]);
-  await Promise.allSettled([
-    deleteFile(buildSettlementKey(periodId)),
-    ...[...affectedUserIds].map((uid) =>
-      deleteFile(buildUserSettlementKey(periodId, uid)),
-    ),
-  ]);
-
-  return { kind: "ok", lines: newLines.length + paidLines.length };
+  return { result, paidLines, newLineCount: newLines.length };
 }

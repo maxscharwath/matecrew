@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { fromCents } from "@/lib/money";
 import { resolveAvatarUrl } from "@/lib/storage";
 import { buildCostingLedger } from "@/lib/costing";
 import { sliceLedger } from "@/lib/reimbursement-calc";
@@ -129,7 +130,7 @@ export async function PeriodsSection({ officeId }: { readonly officeId: string }
               fromUserImage: resolveAvatarUrl(l.fromUser.image),
               toUserName: l.toUser.name,
               toUserImage: resolveAvatarUrl(l.toUser.image),
-              amount: l.amount.toNumber(),
+              amount: fromCents(l.amountCents),
               status: l.status,
             })),
           ),

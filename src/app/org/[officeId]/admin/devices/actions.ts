@@ -7,7 +7,13 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { normalizeBadgeUid } from "@/lib/device/codes";
 import { toRow, type ConsoleCommand } from "@/lib/device/commands";
+import { deviceTheme } from "@/lib/device/contract";
 import type { LiveStatus } from "@/lib/device/live";
+import { defaultDeviceTheme } from "@/lib/device/state";
+import { locales } from "@/i18n/request";
+
+/** The language choice that follows the office's. */
+const OFFICE_LOCALE = "office";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -20,26 +26,46 @@ export async function updateDevice(
   deviceId: string,
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireOrgRoles(officeId, "ADMIN");
+  const { session } = await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations("devices");
 
   const parsed = z
     .object({
       name: z.string().trim().min(1, t("nameRequired")).max(60),
       firstItemId: z.string().min(1).nullable(),
+      locale: z.enum([OFFICE_LOCALE, ...locales]),
+      theme: deviceTheme,
     })
-    .safeParse({ name: formData.get("name"), firstItemId: formData.get("firstItemId") });
+    .safeParse({
+      name: formData.get("name"),
+      firstItemId: formData.get("firstItemId"),
+      locale: formData.get("locale") ?? OFFICE_LOCALE,
+      theme: formData.get("theme") ?? defaultDeviceTheme(),
+    });
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
 
-  const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
+  const device = await prisma.device.findFirst({
+    where: { id: deviceId, officeId },
+    select: { name: true, leftItemId: true, locale: true, theme: true },
+  });
   if (!device) return { success: false, error: t("notFound") };
   const { name, firstItemId } = parsed.data;
   if (firstItemId && !(await prisma.item.count({ where: { id: firstItemId, officeId } }))) {
     return { success: false, error: t("notFound") };
   }
+  // Null follows the office's language and the site's theme, as long as they are the ones chosen.
+  const locale = parsed.data.locale === OFFICE_LOCALE ? null : parsed.data.locale;
+  const theme = parsed.data.theme === defaultDeviceTheme() ? null : parsed.data.theme;
 
   // The picker opens on the left key's item; that is all the keys still have to set.
-  await prisma.device.update({ where: { id: deviceId }, data: { name, leftItemId: firstItemId } });
+  await prisma.device.update({ where: { id: deviceId }, data: { name, leftItemId: firstItemId, locale, theme } });
+  // What the terminal shows changed: a sync, as the console's button sends, redraws it now (or
+  // at its next connection).
+  const changed =
+    device.name !== name || device.leftItemId !== firstItemId || device.locale !== locale || device.theme !== theme;
+  if (changed) {
+    await prisma.deviceCommand.create({ data: { deviceId, sentById: session.user.id, ...toRow({ kind: "sync" }) } });
+  }
   revalidateDevices(officeId);
   return { success: true };
 }

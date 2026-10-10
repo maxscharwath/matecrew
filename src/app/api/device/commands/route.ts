@@ -4,8 +4,6 @@ import { authenticateDevice, unauthorized } from "@/lib/device/auth";
 import { COMMAND_WAIT_MAX_SECONDS, isWatched, takeCommands } from "@/lib/device/commands";
 import type { CommandsResponse } from "@/lib/device/contract";
 
-export const maxDuration = 60;
-
 /**
  * What an admin did from the console. With `?wait=N` the request is held up
  * to N seconds until something arrives, so a key pressed on the site reaches

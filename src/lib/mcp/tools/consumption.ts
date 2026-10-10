@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma } from "@/lib/prisma";
 import { getTodayDate, toISODateString } from "@/lib/date";
 import { stockDeltaOps } from "@/lib/stock";
 import { McpToolError, resolveOffice } from "@/lib/mcp/context";
@@ -127,20 +127,30 @@ export function registerConsumptionTools(server: McpServer): void {
         };
       }
 
-      await prisma.$transaction([
-        prisma.consumptionEntry.update({
-          where: { id: entryId },
-          data: { cancelledAt: new Date() },
-        }),
-        ...stockDeltaOps({
-          officeId: scope.officeId,
-          itemId: entry.itemId,
-          delta: entry.qty,
-          reason: "UNSERVED",
-          note: "Consumption cancelled by user",
-          userId: actor.userId,
-        }),
-      ]);
+      // Read above, one atomic batch here. The guard only cancels an entry
+      // that is still live, so a repeated call cannot restock twice.
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.consumptionEntry.updateMany({
+              where: { id: entryId, cancelledAt: null },
+              data: { cancelledAt: new Date() },
+            }),
+            1,
+          ),
+          ...stockDeltaOps(db, {
+            officeId: scope.officeId,
+            itemId: entry.itemId,
+            delta: entry.qty,
+            reason: "UNSERVED",
+            note: "Consumption cancelled by user",
+            userId: actor.userId,
+          }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        return { ok: true, status: "already_cancelled", message: "That entry was already cancelled." };
+      }
 
       return {
         ok: true,

@@ -1,8 +1,9 @@
 "use server";
 
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, newId } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth-utils";
+import { createMembershipWrites } from "@/lib/membership-roles";
 import { getTranslations } from "next-intl/server";
 
 type CreateResult =
@@ -27,47 +28,33 @@ export async function createOffice(formData: FormData): Promise<CreateResult> {
     return { success: false, error: parsed.error.issues[0].message };
   }
 
+  const officeId = newId();
+  const defaultItemId = newId();
+  // One atomic batch: the office, its default item (every office starts with
+  // one so the request and stock flows have something to attach to) and that
+  // item's stock pool, the creator's admin membership, and their default
+  // office if they had none. A taken name rolls it all back.
   try {
-    const office = await prisma.office.create({
-      data: {
-        name: parsed.data.name,
-        timezone: parsed.data.timezone,
-        // Every office starts with one default item so the request/stock flows
-        // have something to attach to.
-        items: {
-          create: { name: t("items.defaultItemName"), isDefault: true },
-        },
-      },
-      include: { items: true },
-    });
-
-    const defaultItemId = office.items[0].id;
-
-    await prisma.$transaction([
-      prisma.membership.create({
-        data: {
-          userId: session.user.id,
-          officeId: office.id,
-          roles: ["ADMIN"],
-        },
+    await commitBatch((db) => [
+      db.office.createMany({
+        data: [{ id: officeId, name: parsed.data.name, timezone: parsed.data.timezone }],
       }),
-      prisma.stock.create({
-        data: { officeId: office.id, itemId: defaultItemId, currentQty: 0 },
+      db.item.createMany({
+        data: [{ id: defaultItemId, officeId, name: t("items.defaultItemName"), isDefault: true }],
       }),
-      prisma.user.updateMany({
+      db.stock.createMany({ data: [{ officeId, itemId: defaultItemId, currentQty: 0 }] }),
+      ...createMembershipWrites(db, { id: newId(), userId: session.user.id, officeId, roles: ["ADMIN"] }),
+      db.user.updateMany({
         where: { id: session.user.id, defaultOfficeId: null },
-        data: { defaultOfficeId: office.id },
+        data: { defaultOfficeId: officeId },
       }),
     ]);
-
-    return { success: true, officeId: office.id };
   } catch (e) {
-    if (
-      e instanceof Error &&
-      e.message.includes("Unique constraint failed")
-    ) {
+    if (e instanceof BatchConflictError && e.reason === "unique") {
       return { success: false, error: t("errors.officeNameExists") };
     }
     throw e;
   }
+
+  return { success: true, officeId };
 }

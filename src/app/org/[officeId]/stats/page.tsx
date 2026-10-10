@@ -79,7 +79,9 @@ export default async function StatsPage({ params, searchParams }: Props) {
     year: "numeric",
     timeZone: "UTC",
   });
-  const rangeLabel = `${dateFmt.format(new Date(`${stats.range.start}T00:00:00Z`))} – ${dateFmt.format(new Date(`${stats.range.end}T00:00:00Z`))}`;
+  const formatDay = (isoDay: string) =>
+    dateFmt.format(new Date(`${isoDay}T00:00:00Z`));
+  const rangeLabel = `${formatDay(stats.range.start)} – ${formatDay(stats.range.end)}`;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -336,6 +338,18 @@ function KpiCard({
   );
 }
 
+/** A trophy and two medals for the podium, the plain rank below it. */
+function RankMark({ rank }: { readonly rank: number }) {
+  if (rank === 1) return <Trophy className="size-4.5 text-amber-500" />;
+  if (rank === 2) return <Medal className="size-4.5 text-zinc-400" />;
+  if (rank === 3) return <Medal className="size-4.5 text-amber-700" />;
+  return (
+    <span className="text-sm font-medium text-muted-foreground tabular-nums">
+      {rank}
+    </span>
+  );
+}
+
 function Leaderboard({
   users,
   meId,
@@ -362,17 +376,7 @@ function Leaderboard({
             )}
           >
             <span className="flex w-7 shrink-0 items-center justify-center">
-              {rank === 1 ? (
-                <Trophy className="size-4.5 text-amber-500" />
-              ) : rank === 2 ? (
-                <Medal className="size-4.5 text-zinc-400" />
-              ) : rank === 3 ? (
-                <Medal className="size-4.5 text-amber-700" />
-              ) : (
-                <span className="text-sm font-medium text-muted-foreground tabular-nums">
-                  {rank}
-                </span>
-              )}
+              <RankMark rank={rank} />
             </span>
             <Avatar size="sm">
               <AvatarImage src={u.image} alt={u.name} />

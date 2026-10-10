@@ -7,7 +7,8 @@ import { requireSession } from "@/lib/auth-utils";
 import { setLocaleCookie } from "@/lib/locale";
 import { revokeMcpConnection } from "@/lib/mcp/connections";
 import { type Locale, locales } from "@/i18n/request";
-import { uploadFile, deleteFile, buildAvatarKey } from "@/lib/storage";
+import { buildAvatarKey } from "@/lib/storage";
+import { platform } from "@/platform";
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg"]);
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -61,7 +62,7 @@ export async function updateProfile(
 
     const imageKey = buildAvatarKey(userId);
     const buffer = Buffer.from(await avatarFile.arrayBuffer());
-    await uploadFile({ key: imageKey, body: buffer, contentType: avatarFile.type });
+    await platform.storage.put(imageKey, buffer, { contentType: avatarFile.type });
     imageUpdate = { image: imageKey };
   } else if (removeAvatar) {
     imageUpdate = { image: null };
@@ -74,7 +75,7 @@ export async function updateProfile(
       select: { image: true },
     });
     if (current?.image?.startsWith("avatars/")) {
-      await deleteFile(current.image).catch(() => {});
+      await platform.storage.delete(current.image).catch(() => {});
     }
   }
 

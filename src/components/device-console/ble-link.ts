@@ -1,8 +1,92 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BleDevice, isSupported, type LinkError } from "@matecrew/device-ui/link";
+import { BleDevice, isSupported, type DeviceInfo, type LinkError } from "@matecrew/device-ui/link";
+import { deviceLogEntry, parseHeap, type LogEntry, type MemorySample } from "./device-log";
 import { PANEL_HEIGHT, PANEL_WIDTH, type MirrorFrame } from "./frame-bits";
+
+/** Lines kept from a terminal's log, and memory readings for the charts. */
+const LOG_MAX = 500;
+const MEMORY_MAX = 90;
+/** How often a paired terminal's info (uptime, Wi-Fi, heap) is read again. */
+const INFO_MS = 10_000;
+
+export type BleSession = {
+  /** What the terminal says about itself, read again every 10 s; null until the first read. */
+  info: DeviceInfo | null;
+  /** Why the last read of its info failed (a newer protocol, the link lost); null once one works. */
+  infoError: LinkError | null;
+  /** Its log, oldest first: every line the firmware writes, once paired. */
+  logs: LogEntry[];
+  /** Its free memory, from the `heap:` lines of the log, oldest first. */
+  memory: MemorySample[];
+  refresh: () => void;
+  clearLogs: () => void;
+};
+
+type SessionState = {
+  device: BleDevice | null;
+  info: DeviceInfo | null;
+  infoError: LinkError | null;
+  logs: LogEntry[];
+  memory: MemorySample[];
+};
+
+const fresh = (device: BleDevice | null): SessionState => ({ device, info: null, infoError: null, logs: [], memory: [] });
+
+/**
+ * A terminal connected over Bluetooth as a debugger sees it: its info, its log as it writes it
+ * and its memory over time. Listening to the log pairs (the browser asks for the terminal's code).
+ */
+export function useBleSession(device: BleDevice | null): BleSession {
+  const [state, setState] = useState<SessionState>(() => fresh(null));
+  // What belongs to another device (or none) is dropped, not mixed in.
+  const update = useCallback(
+    (change: (current: SessionState) => SessionState) =>
+      setState((current) => change(current.device === device ? current : fresh(device))),
+    [device],
+  );
+  const read = useCallback(async () => {
+    if (!device) return;
+    const info = await device.info();
+    update((current) =>
+      info.ok ? { ...current, info: info.value, infoError: null } : { ...current, infoError: info.error },
+    );
+  }, [device, update]);
+
+  useEffect(() => {
+    if (!device) return;
+    let count = 0;
+    void read();
+    const timer = setInterval(() => void read(), INFO_MS);
+    const stop = device.onEvent((event) => {
+      const at = Date.now();
+      const entry = deviceLogEntry(event, `ble-${++count}`, at);
+      const sample = event.t === "log" ? parseHeap(event.msg, at) : null;
+      if (!entry && !sample) return;
+      update((current) => ({
+        ...current,
+        logs: entry ? [...current.logs, entry].slice(-LOG_MAX) : current.logs,
+        memory: sample ? [...current.memory, sample].slice(-MEMORY_MAX) : current.memory,
+      }));
+    });
+    return () => {
+      clearInterval(timer);
+      stop();
+    };
+  }, [device, read, update]);
+
+  const clearLogs = useCallback(() => update((current) => ({ ...current, logs: [] })), [update]);
+  const shown = state.device === device ? state : fresh(device);
+  return {
+    info: shown.info,
+    infoError: shown.infoError,
+    logs: shown.logs,
+    memory: shown.memory,
+    refresh: () => void read(),
+    clearLogs,
+  };
+}
 
 /**
  * The screen a terminal mirrors over Bluetooth, live, as the console's frames; null until the

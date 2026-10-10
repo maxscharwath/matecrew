@@ -339,9 +339,23 @@
     "title": "Tâches cron",
     "subtitle": "Tâches planifiées pour {office}.",
     "scheduledTasks": "Tâches planifiées",
-    "taskCount": "{count} cron job{count, plural, one {} other {s}} configuré{count, plural, one {} other {s}} via Upstash QStash.",
+    "taskCount": "{count} tâche{count, plural, one {} other {s}} planifiée{count, plural, one {} other {s}}. Heures en UTC.",
     "executing": "Exécution...",
-    "execute": "Exécuter"
+    "execute": "Exécuter",
+    "tasks": {
+      "session-notifications": {
+        "name": "Notifications des sessions",
+        "description": "Publie le message de commande de chaque session à son heure de début et l'alerte au runner à son heure limite, dans le fuseau du bureau. Exécuter envoie les messages de commande du jour pour ce bureau."
+      },
+      "oauth-token-prune": {
+        "name": "Nettoyage des jetons du connecteur",
+        "description": "Supprime les jetons du connecteur MCP dont le jeton de rafraîchissement a expiré."
+      },
+      "monthly-reimbursement": {
+        "name": "Remboursements mensuels",
+        "description": "Clôture le mois précédent et envoie à chaque membre son décompte par e-mail."
+      }
+    }
   },
   "settings": {
     "title": "Paramètres du bureau",
@@ -718,6 +732,8 @@
     "notificationsSent": "{count} notification(s) envoyée(s) : {sessions}",
     "notificationErrors": "{count} erreur(s) : {errors}",
     "periodCreated": "Période {month}/{year} créée · {lines} ligne(s) de remboursement.",
+    "statementsNotQueued": "Période {month}/{year} créée, mais les décomptes n'ont pas pu être mis en file : envoyez-les depuis la carte de la période.",
+    "oauthTokensPruned": "{count} jeton(s) du connecteur expiré(s) supprimé(s).",
     "mergeFailed": "Échec de la fusion des comptes.",
     "mergeSameAccount": "Impossible de fusionner un compte avec lui-même.",
     "mergeNotFound": "Un ou les deux comptes n'existent plus.",
@@ -1025,7 +1041,11 @@
       "saved": "Image du terminal enregistrée",
       "noPhoto": "Cet article n'a pas de photo.",
       "brush": "Pinceau",
-      "brushSize": "Pinceau de {size} px"
+      "brushSize": "Pinceau de {size} px",
+      "backfillHint": "{count, plural, one {# photo n'a} other {# photos n'ont}} pas encore d'image pour le terminal : il affiche l'image par défaut à la place.",
+      "backfill": "Calculer",
+      "backfillDone": "{count, plural, one {# image du terminal calculée} other {# images du terminal calculées}}",
+      "backfillFailed": "{count, plural, one {# photo illisible} other {# photos illisibles}}"
     }
   },
   "oauthConsent": {
@@ -1134,23 +1154,19 @@
   },
   "deviceBluetooth": {
     "title": "Bluetooth",
-    "subtitle": "Configure un terminal neuf ou pilote un terminal à portée, depuis ce navigateur.",
+    "subtitle": "Configure un terminal neuf, ou pilote et débogue un terminal à portée, directement depuis ce navigateur.",
     "open": "Bluetooth",
     "back": "Terminaux",
     "unsupported": "Ce navigateur ne parle pas Bluetooth. Utilise Chrome ou Edge sur Android, Windows, macOS ou ChromeOS. Sur iPhone, configure le terminal avec le QR affiché sur son écran.",
-    "connect": "Chercher un terminal",
-    "connecting": "Connexion…",
     "disconnect": "Déconnecter",
     "disconnected": "Terminal déconnecté.",
-    "pairingHint": "Avant d'afficher l'écran ou d'envoyer un changement, le navigateur demande un code : celui affiché sur l'écran du terminal (BLE · 6 chiffres).",
     "info": {
-      "firmware": "Firmware",
-      "hardwareId": "Identifiant",
-      "wifi": "Wi-Fi",
       "site": "Site",
       "linked": "Relié à un site",
       "notLinked": "Pas encore relié",
-      "uptime": "Allumé depuis {minutes} min"
+      "link": "Liaison",
+      "noWifi": "Pas de Wi-Fi",
+      "heap": "RAM libre"
     },
     "setup": {
       "title": "Configurer ce terminal",
@@ -1161,31 +1177,26 @@
       "password": "Mot de passe Wi-Fi",
       "name": "Nom du terminal",
       "defaultName": "Terminal",
-      "submit": "Configurer",
+      "submit": "Configurer et relier",
       "sending": "Envoi au terminal…",
-      "waiting": "Le terminal redémarre et se relie au site…",
       "linked": "Terminal relié. Ouvre sa page pour le régler.",
-      "openDevice": "Ouvrir le terminal",
+      "openDevice": "Ouvrir sa console",
       "timeout": "Le terminal ne s'est pas relié dans les 10 minutes. Vérifie le Wi-Fi sur son écran.",
-      "alreadyLinked": "Ce terminal est déjà relié à un site : sa configuration se fait depuis sa page."
-    },
-    "control": {
-      "title": "Piloter et déboguer",
-      "description": "En direct par Bluetooth, sans passer par le site.",
-      "left": "Touche gauche",
-      "right": "Touche droite",
-      "both": "Les deux",
-      "badge": "UID du badge",
-      "sendBadge": "Badger",
-      "sync": "Synchroniser",
-      "restart": "Redémarrer",
-      "log": "Journal",
-      "logEmpty": "Les lignes du terminal s'affichent ici une fois appairé.",
-      "firmware": "Mettre à jour le firmware",
-      "firmwareHint": "Un fichier .bin du firmware ; le terminal vérifie l'image et redémarre dessus.",
-      "upload": "Envoyer",
-      "uploading": "Envoi {percent} %",
-      "updated": "Firmware envoyé : le terminal redémarre dessus."
+      "noNetworks": "Le terminal n'a entendu aucun réseau : tape son nom.",
+      "passwordHint": "8 à 64 caractères, ou rien pour un réseau ouvert.",
+      "showPassword": "Afficher le mot de passe",
+      "hidePassword": "Masquer le mot de passe",
+      "waitingHint": "Garde cette page ouverte : elle indique quand le terminal est relié. Le Bluetooth peut couper pendant que le terminal rejoint le Wi-Fi.",
+      "retry": "Réessayer",
+      "progress": {
+        "send": "Réglages envoyés",
+        "sendDetail": "Le Wi-Fi, l'adresse de ce site et l'autorisation, par Bluetooth",
+        "join": "Rejoint le Wi-Fi",
+        "joinNamed": "Rejoint {network}",
+        "joinDetail": "Avec le mot de passe donné",
+        "link": "Relié à ce bureau",
+        "linkDetail": "Il utilise l'autorisation auprès du site : aucun code à saisir"
+      }
     },
     "errors": {
       "unsupported": "Bluetooth indisponible dans ce navigateur.",
@@ -1200,13 +1211,37 @@
       "forbidden": "Seul un admin du bureau peut relier un terminal."
     },
     "screen": {
-      "title": "Écran",
-      "description": "L'écran du terminal, en direct par Bluetooth. Un clic dessus y appuie.",
       "waiting": "En attente de l'écran : le navigateur demande le code affiché sur le terminal.",
       "unsupported": "Le firmware de ce terminal ne partage pas encore son écran : mets-le à jour.",
       "failed": "Écran indisponible : {message}",
-      "tap": "Clique sur un bouton affiché pour l'actionner sur le terminal"
-    }
+      "tap": "Clique sur un bouton affiché pour l'actionner sur le terminal",
+      "live": "Copie par Bluetooth"
+    },
+    "connectCard": {
+      "title": "Se connecter à un terminal à proximité",
+      "description": "Le Bluetooth atteint un terminal à quelques mètres, sans le site ni son Wi-Fi : pour en configurer un neuf, ou pour suivre son écran, son journal et sa mémoire pendant que tu le débogues.",
+      "step1": "Réveille le terminal : touche une de ses touches.",
+      "step2": "Clique sur Trouver un terminal et choisis-le dans la liste du navigateur (matecrew-…).",
+      "step3": "Quand le navigateur le demande, tape le code à 6 chiffres affiché sur son écran.",
+      "connect": "Trouver un terminal",
+      "connecting": "Connexion…",
+      "note": "Chrome ou Edge sur ordinateur ou sur Android. Sur iPhone, configure le terminal avec le QR code affiché sur son écran."
+    },
+    "bar": {
+      "gone": "Terminal",
+      "setupMode": "Mode configuration",
+      "linked": "Relié",
+      "reading": "Lecture du terminal…",
+      "disconnected": "Bluetooth déconnecté : la configuration continue par le site.",
+      "refresh": "Relire",
+      "reconnect": "Reconnecter"
+    },
+    "linked": {
+      "ours": "C'est {name}, un terminal de ce bureau.",
+      "elsewhere": "Ce terminal est relié à un autre bureau ou site ({site}).",
+      "openConsole": "Ouvrir sa console"
+    },
+    "actionsHint": "Directement au terminal, par Bluetooth."
   },
   "devices": {
     "keys": {
@@ -1294,7 +1329,10 @@
       "status": {
         "waiting": "en attente",
         "delivered": "reçue",
-        "dropped": "expirée"
+        "dropped": "expirée",
+        "title": "État",
+        "uptime": "Allumé depuis",
+        "uptimeValue": "{hours, plural, =0 {} other {# h }}{minutes} min"
       },
       "kind": {
         "keyLeft": "Touche gauche",
@@ -1327,10 +1365,7 @@
         "linkLive": "Les commandes arrivent en une seconde",
         "linkQueued": "Les commandes attendent sa prochaine connexion",
         "lastSeen": "Dernier contact",
-        "firmwareReported": "Annoncé à sa dernière synchro",
-        "notReported": "Pas encore remonté",
         "batteryLow": "faible",
-        "batteryImplausible": "Mesure non plausible",
         "signal": {
           "excellent": "Excellent",
           "good": "Bon",
@@ -1338,23 +1373,7 @@
           "weak": "Faible"
         },
         "screen": "Écran",
-        "screenNone": "Pas reçu",
-        "screenLive": "Copié tant que la console est ouverte",
-        "screenLast": "Le dernier qu'il a envoyé",
-        "screenHint": "Envoyé dès que le terminal voit la console"
-      },
-      "monitor": {
-        "title": "Moniteur",
-        "count": "{count, plural, one {# ligne} other {# lignes}}",
-        "clear": "Effacer",
-        "empty": "Rien pour l'instant.",
-        "kind": {
-          "input": "entrée",
-          "system": "système",
-          "screen": "écran",
-          "link": "liaison",
-          "error": "erreur"
-        }
+        "screenNone": "Pas reçu"
       },
       "log": {
         "opened": "Console ouverte : tant qu'elle le reste, le terminal copie son écran ici et prend les commandes aussitôt.",
@@ -1369,22 +1388,12 @@
         "bleConnected": "Connecté à {name} par Bluetooth. Le navigateur demande le code affiché sur son écran pour l'appairer.",
         "bleDisconnected": "Bluetooth déconnecté : l'écran repasse par le site.",
         "bleScreen": "Écran par Bluetooth : il vient directement du terminal, sans passer par le site.",
-        "viaBluetooth": "{what} · par Bluetooth"
+        "viaBluetooth": "{what} · par Bluetooth",
+        "firmwareSending": "Envoi d'un firmware par Bluetooth…",
+        "firmwareSent": "Firmware envoyé : le terminal redémarre dessus."
       },
       "controls": {
-        "title": "Commandes",
-        "live": "Le terminal répond en direct : chaque commande lui parvient en une seconde.",
-        "keys": "Touches",
-        "left": "Gauche",
-        "right": "Droite",
-        "both": "Les deux",
-        "badge": "Badge",
-        "uid": "UID du badge",
-        "randomUid": "UID aléatoire",
-        "tap": "Badger",
-        "badgeHint": "8 à 20 chiffres hexadécimaux. Le lecteur sous l'écran (B) liste les badges du bureau.",
-        "terminal": "Terminal",
-        "openApp": "Ouvrir une app…"
+        "live": "Le terminal répond en direct : chaque commande lui parvient en une seconde."
       },
       "board": {
         "subtitle": "Son câblage ; une broche s'allume quand la console l'actionne.",
@@ -1403,7 +1412,9 @@
           "panelSck": "Écran SCK",
           "keyRight": "Touche droite (TTP223)",
           "panelMosi": "Écran MOSI"
-        }
+        },
+        "show": "Afficher le câblage",
+        "hide": "Masquer le câblage"
       },
       "noScreen": {
         "title": "En attente de l'écran du terminal",
@@ -1432,7 +1443,80 @@
         "mismatch": "{name} est un autre terminal : choisissez celui-ci dans la liste.",
         "failed": "Bluetooth : {message}",
         "screenFailed": "Pas d'écran par Bluetooth ({message}).",
-        "sendFailed": "Pas envoyé par Bluetooth ({message}) : envoyé par le site."
+        "sendFailed": "Pas envoyé par Bluetooth ({message}) : envoyé par le site.",
+        "connectNearby": "Se connecter en Bluetooth",
+        "unsupported": "Pas de Bluetooth dans ce navigateur : utilise Chrome ou Edge."
+      },
+      "logs": {
+        "title": "Journal",
+        "filter": "Afficher",
+        "filters": {
+          "all": "Tout",
+          "device": "Terminal",
+          "console": "Console",
+          "problems": "Problèmes"
+        },
+        "search": "Rechercher",
+        "clearSearch": "Effacer la recherche",
+        "copy": "Copier",
+        "copyFailed": "Impossible de copier le journal.",
+        "download": "Télécharger",
+        "clear": "Effacer",
+        "empty": "Rien pour l'instant.",
+        "emptyFiltered": "Aucune ligne ne correspond.",
+        "latest": "Dernières lignes",
+        "bluetoothNotice": "Le journal du terminal et sa mémoire arrivent par Bluetooth, à quelques mètres.",
+        "kind": {
+          "input": "entrée",
+          "system": "système",
+          "screen": "écran",
+          "link": "liaison",
+          "error": "erreur"
+        }
+      },
+      "memory": {
+        "title": "Mémoire",
+        "readings": "{count, plural, one {# mesure} other {# mesures}}",
+        "needsBluetooth": "La mémoire libre arrive en direct par Bluetooth : connecte-toi à proximité pour la suivre pendant que tu utilises le terminal.",
+        "waiting": "En attente d'une mesure : le terminal en note une après chaque dessin.",
+        "kb": "{value} Ko",
+        "mb": "{value} Mo",
+        "lowest": "min. {value}",
+        "sinceBoot": "min. depuis le démarrage",
+        "metrics": {
+          "internal": "RAM interne",
+          "largest": "Plus grand bloc",
+          "psram": "PSRAM",
+          "stackMin": "Marge de pile"
+        },
+        "hints": {
+          "internal": "RAM interne libre : piles des tâches, DMA, Wi-Fi. Le Wi-Fi échoue sous 40 Ko.",
+          "largest": "Le plus grand bloc contigu de RAM interne : le maximum qu'une allocation peut obtenir.",
+          "psram": "RAM externe libre : écrans, JSON, l'image.",
+          "stackMin": "Le moins de pile qu'il restait à la tâche de rendu depuis le démarrage. Sous 3 Ko, un écran plus profond peut la faire déborder."
+        },
+        "levels": {
+          "warning": "Bas",
+          "critical": "Critique"
+        }
+      },
+      "actions": {
+        "title": "Actions",
+        "sync": "Synchroniser",
+        "restart": "Redémarrer",
+        "about": "Page À propos",
+        "aboutHint": "Les deux touches ensemble : la page À propos du terminal",
+        "openApp": "Ouvrir une app…",
+        "forgetWifi": "Oublier le Wi-Fi",
+        "forgetWifiConfirm": "{name} va oublier le Wi-Fi et revenir à l'écran de configuration. Continuer ?",
+        "firmware": "Firmware",
+        "chooseFirmware": "Choisir un fichier .bin",
+        "firmwareVersion": "Version {version} · {size} Mo",
+        "notFirmware": "Ce n'est pas une image de firmware pour ce terminal.",
+        "sendFirmware": "Envoyer au terminal",
+        "cancel": "Retirer",
+        "uploading": "Envoi {percent} %",
+        "firmwareHint": "Par Bluetooth : le terminal vérifie l'image et redémarre dessus."
       }
     },
     "virtual": {
@@ -1501,7 +1585,28 @@
     "noTakes": "Aucune prise pour l'instant.",
     "badgeLastPass": "dernier passage {when}",
     "badgeTakes": "{count, plural, =0 {aucune prise} one {# prise} other {# prises}}",
-    "badgeFirstSeen": "vu depuis le {when}"
+    "badgeFirstSeen": "vu depuis le {when}",
+    "display": {
+      "title": "Affichage",
+      "hint": "Sa langue et l'allure de ses écrans. L'enregistrement lance une synchro : le terminal change aussitôt (ou à sa prochaine connexion).",
+      "language": "Langue",
+      "officeLanguage": "Celle du bureau ({language})",
+      "theme": "Thème",
+      "sample": "Aa",
+      "default": "Par défaut du site",
+      "themes": {
+        "paper": "Papier",
+        "dark": "Sombre",
+        "flipper": "Flipper",
+        "macos": "macOS"
+      },
+      "themeHints": {
+        "paper": "Clair, typo éditoriale",
+        "dark": "Encre claire sur noir",
+        "flipper": "Typo pixel",
+        "macos": "Mac classique"
+      }
+    }
   },
   "deviceLink": {
     "title": "Lier un appareil",

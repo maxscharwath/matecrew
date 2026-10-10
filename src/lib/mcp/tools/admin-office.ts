@@ -2,11 +2,9 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentTimeInTimezone } from "@/lib/date";
-import { trySyncSessionSchedules } from "@/lib/schedule-sync";
 import { buildTestMessage, sendSlackMessage } from "@/lib/slack";
 import { sendSessionNotifications } from "@/lib/notifications";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
-import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
 
@@ -117,15 +115,6 @@ export function registerAdminOfficeTools(server: McpServer): void {
           );
         }
         throw error;
-      }
-
-      // Timezone changes move every session's UTC slot; connecting or clearing
-      // the Slack channel changes whether this office is scheduled at all.
-      const slackChanged =
-        slackChannelId !== undefined &&
-        (slackChannelId.trim() || null) !== scope.slackChannelId;
-      if ((timezone !== undefined && timezone !== scope.timezone) || slackChanged) {
-        await notifyQuietly("schedule-sync", () => trySyncSessionSchedules());
       }
 
       return {

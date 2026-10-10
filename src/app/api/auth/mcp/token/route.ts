@@ -24,9 +24,6 @@ import { prisma } from "@/lib/prisma";
  * `[...all]` catch-all; both hand off to the same `auth.handler`.
  */
 
-// Prisma needs Node APIs, so this cannot run on the edge.
-export const runtime = "nodejs";
-
 /** The `redirect_uri` the authorization code was issued for, if any. */
 async function issuedRedirectUri(code: string): Promise<string | null> {
   const verification = await prisma.verification.findUnique({

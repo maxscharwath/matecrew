@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, prisma, retryOnConflict } from "@/lib/prisma";
 import { requireMembership } from "@/lib/auth-utils";
 import { getTodayDate } from "@/lib/date";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
+import { platform } from "@/platform";
 import { resolveItemId } from "@/lib/items";
-import { stockDeltaOps } from "@/lib/stock";
+import { stockAtLeast, stockDeltaOps } from "@/lib/stock";
 import { cancelConsumptionEntry } from "@/lib/cancel-consumption";
 
 type ActionResult = { success: true } | { success: false; error: string };
@@ -19,13 +20,32 @@ export async function takeACan(
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
   const userId = session.user.id;
-  const today = getTodayDate();
 
   const resolvedItemId = await resolveItemId(officeId, itemId);
   if (!resolvedItemId) {
     return { success: false, error: t("errors.itemNotFound") };
   }
 
+  const result = await retryOnConflict(() => takeOnce(officeId, resolvedItemId, userId, t));
+  if (!result.success) return result;
+
+  platform.runInBackground(checkAndAlertLowStock(officeId, resolvedItemId), "low-stock alert");
+
+  revalidatePath(`/org/${officeId}/dashboard`);
+  return { success: true };
+}
+
+/**
+ * Checks the pool, then records the can in one atomic batch. The guard needs
+ * the can the check saw to still be there: when the last one went to someone
+ * else in between, the batch is rolled back and the check runs again.
+ */
+async function takeOnce(
+  officeId: string,
+  resolvedItemId: string,
+  userId: string,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+): Promise<ActionResult> {
   const stock = await prisma.stock.findUnique({
     where: { officeId_itemId: { officeId, itemId: resolvedItemId } },
   });
@@ -37,18 +57,21 @@ export async function takeACan(
     return { success: false, error: t("errors.cannotReduceBelowZero", { current: stock.currentQty, adjustment: -1 }) };
   }
 
-  await prisma.$transaction([
-    prisma.consumptionEntry.create({
-      data: {
-        officeId,
-        userId,
-        itemId: resolvedItemId,
-        date: today,
-        qty: 1,
-        source: "MANUAL",
-      },
+  await commitBatch((db) => [
+    stockAtLeast(db, officeId, resolvedItemId, 1),
+    db.consumptionEntry.createMany({
+      data: [
+        {
+          officeId,
+          userId,
+          itemId: resolvedItemId,
+          date: getTodayDate(),
+          qty: 1,
+          source: "MANUAL",
+        },
+      ],
     }),
-    ...stockDeltaOps({
+    ...stockDeltaOps(db, {
       officeId,
       itemId: resolvedItemId,
       delta: -1,
@@ -57,10 +80,6 @@ export async function takeACan(
       userId,
     }),
   ]);
-
-  checkAndAlertLowStock(officeId, resolvedItemId).catch(() => {});
-
-  revalidatePath(`/org/${officeId}/dashboard`);
   return { success: true };
 }
 

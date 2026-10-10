@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { getOptionalSession } from "@/lib/auth-utils";
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
 import { formatUserCode } from "@/lib/device/codes";
 import { DeviceLinkForm } from "@/components/device-link-form";
 import { findPendingLink } from "@/lib/device/links";
@@ -25,7 +26,7 @@ export default async function LinkDevicePage({ searchParams }: Props) {
 
   const link = code ? await findPendingLink(code) : null;
   const adminOffices = await prisma.office.findMany({
-    where: { memberships: { some: { userId: session.user.id, roles: { has: "ADMIN" } } } },
+    where: { memberships: { some: { userId: session.user.id, ...hasRoleWhere("ADMIN") } } },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });

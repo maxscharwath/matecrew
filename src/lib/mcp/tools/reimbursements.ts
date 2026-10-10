@@ -5,7 +5,7 @@ import { toISODateString } from "@/lib/date";
 import { McpToolError, resolveOffice } from "@/lib/mcp/context";
 import { defineTool } from "@/lib/mcp/tool";
 import { officeArg } from "@/lib/mcp/schemas";
-import { roundCents } from "@/lib/money";
+import { fromCents } from "@/lib/money";
 
 /**
  * The money side, from a member's point of view. Reimbursement periods are
@@ -53,21 +53,21 @@ export function registerReimbursementTools(server: McpServer): void {
         ],
       });
 
-      let owe = 0;
-      let owed = 0;
+      // Totals in integer cents: exact, converted to francs once.
+      let oweCents = 0;
+      let owedCents = 0;
       const rows = lines.map((line) => {
-        const amount = line.amount.toNumber();
         const youOwe = line.fromUserId === actor.userId;
         if (line.status === "PENDING") {
-          if (youOwe) owe += amount;
-          else owed += amount;
+          if (youOwe) oweCents += line.amountCents;
+          else owedCents += line.amountCents;
         }
         return {
           lineId: line.id,
           period: `${line.period.year}-${String(line.period.month).padStart(2, "0")}`,
           direction: youOwe ? "you_owe" : "owed_to_you",
           counterparty: youOwe ? line.toUser.name : line.fromUser.name,
-          amount,
+          amount: fromCents(line.amountCents),
           currency: line.currency,
           status: line.status,
           paidAt: line.paidAt,
@@ -76,9 +76,9 @@ export function registerReimbursementTools(server: McpServer): void {
 
       return {
         office: scope.officeName,
-        pendingTotalYouOwe: roundCents(owe),
-        pendingTotalOwedToYou: roundCents(owed),
-        netBalance: roundCents(owe - owed),
+        pendingTotalYouOwe: fromCents(oweCents),
+        pendingTotalOwedToYou: fromCents(owedCents),
+        netBalance: fromCents(oweCents - owedCents),
         lines: rows,
         note:
           rows.length === 0
@@ -139,18 +139,24 @@ export function registerReimbursementTools(server: McpServer): void {
         };
       }
 
-      await prisma.reimbursementLine.update({
-        where: { id: lineId },
+      // Conditional on PENDING, in one statement: a settle racing another
+      // keeps the first one's paidAt instead of overwriting it.
+      const settled = await prisma.reimbursementLine.updateMany({
+        where: { id: lineId, status: "PENDING" },
         data: { status: "PAID", paidAt: new Date() },
       });
+      if (settled.count === 0) {
+        return { ok: true, status: "already_paid", message: "That payment was already marked paid." };
+      }
 
+      const amount = fromCents(line.amountCents);
       return {
         ok: true,
-        amount: line.amount.toNumber(),
+        amount,
         currency: line.currency,
         from: line.fromUser.name,
         to: line.toUser.name,
-        message: `Marked ${line.amount.toNumber()} ${line.currency} from ${
+        message: `Marked ${amount} ${line.currency} from ${
           line.fromUser.name
         } to ${line.toUser.name} as paid.`,
       };

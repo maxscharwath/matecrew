@@ -23,20 +23,127 @@ export interface NotificationResult {
   error?: string;
 }
 
+interface NotifyOptions {
+  /** Limit to one office (admin trigger). */
+  officeId?: string;
+  /** Notify every session of today not notified yet, whatever the time (admin trigger). */
+  skipTimeWindow?: boolean;
+}
+
+interface SlackOffice {
+  id: string;
+  name: string;
+  slackChannelId: string;
+  timezone: string;
+  locale: string;
+}
+
+interface DaySession {
+  dayOfWeek: number;
+}
+
+/** Whether office-local `time` (HH:mm) fell within the detection window ending now. */
+function isInWindow(time: string, nowMinutes: number): boolean {
+  const diff = nowMinutes - timeToMinutes(time);
+  return diff >= 0 && diff < SCHEDULE_STEP_MINUTES * 2;
+}
+
+/**
+ * Today's sessions of each office whose `timeOf` falls in the detection
+ * window (unless skipped) and that `notifiedOf` does not mark as done today.
+ */
+function dueSessions<S extends DaySession>(
+  offices: readonly (Omit<SlackOffice, "slackChannelId"> & { slackChannelId: string | null; mateSessions: S[] })[],
+  options: NotifyOptions | undefined,
+  today: Date,
+  timeOf: (session: S) => string,
+  notifiedOf: (session: S) => Date | null,
+): { office: SlackOffice; session: S }[] {
+  return offices.flatMap(({ mateSessions, slackChannelId, ...office }) => {
+    if (!slackChannelId) return [];
+    const dayOfWeek = getDayOfWeek(office.timezone);
+    const nowMinutes = timeToMinutes(getCurrentTimeInTimezone(office.timezone));
+    return mateSessions
+      .filter((session) => session.dayOfWeek === dayOfWeek)
+      .filter((session) => options?.skipTimeWindow || isInWindow(timeOf(session), nowMinutes))
+      .filter((session) => notifiedOf(session)?.getTime() !== today.getTime())
+      .map((session) => ({ office: { ...office, slackChannelId }, session }));
+  });
+}
+
+/** One after the other: Slack rate-limits posting to a channel. */
+function inSequence<T, R>(items: readonly T[], run: (item: T) => Promise<R>): Promise<R[]> {
+  return items.reduce<Promise<R[]>>(
+    async (previous, item) => [...(await previous), await run(item)],
+    Promise.resolve([]),
+  );
+}
+
+function failed(kind: string, office: string, session: string, error: unknown): NotificationResult {
+  console.error(`[notifications] ${kind} failed for ${office} / ${session}:`, error);
+  return {
+    office,
+    session,
+    ok: false,
+    error: error instanceof Error ? error.message : "Unknown error",
+  };
+}
+
+interface StartSession extends DaySession {
+  id: string;
+  startTime: string;
+  cutoffTime: string;
+  label: string | null;
+  lastNotifiedDate: Date | null;
+}
+
+/** Posts one session's request message and records it as today's. */
+async function postSessionRequest(office: SlackOffice, session: StartSession, today: Date): Promise<NotificationResult> {
+  const name = session.label ?? session.startTime;
+  try {
+    const [items, requesterGroups] = await Promise.all([
+      getActiveItems(office.id),
+      listRequestersByItem({
+        officeId: office.id,
+        mateSessionId: session.id,
+        date: today,
+      }),
+    ]);
+    const { blocks, fallback } = await buildSessionRequestMessage({
+      officeId: office.id,
+      officeName: office.name,
+      mateSessionId: session.id,
+      sessionLabel: session.label,
+      cutoffTime: session.cutoffTime,
+      date: toISODateString(today),
+      locale: office.locale,
+      items,
+      requesterGroups,
+    });
+    const posted = await sendSlackMessage(office.slackChannelId, blocks, fallback);
+
+    await prisma.mateSession.update({
+      where: { id: session.id },
+      data: {
+        lastNotifiedDate: today,
+        lastNotifiedMessageTs: posted.ts,
+        lastNotifiedChannelId: posted.channel,
+      },
+    });
+
+    return { office: office.name, session: name, ok: true };
+  } catch (e) {
+    return failed("daily-request", office.name, name, e);
+  }
+}
+
 /**
  * Send Slack notifications for sessions whose startTime falls within the cron detection window.
- * Used by the QStash cron and skips sessions already notified today.
- *
- * @param officeFilter — optional officeId to limit to a single office (for admin trigger)
- * @param skipTimeWindow — if true, notify all un-notified sessions for today regardless of time (manual trigger)
+ * Used by the session-notifications scheduled task (src/jobs) and skips sessions already notified today.
  */
-export async function sendSessionNotifications(options?: {
-  officeId?: string;
-  skipTimeWindow?: boolean;
-}): Promise<NotificationResult[]> {
+export async function sendSessionNotifications(options?: NotifyOptions): Promise<NotificationResult[]> {
   // Single query joins offices + their sessions so the cron tick avoids the
-  // N+1 roundtrip pattern and returns instantly when nothing is configured —
-  // both reduce time the Neon compute is awake.
+  // N+1 roundtrip pattern and returns instantly when nothing is configured.
   const offices = await prisma.office.findMany({
     where: {
       slackChannelId: { not: null },
@@ -65,85 +172,70 @@ export async function sendSessionNotifications(options?: {
   if (offices.length === 0) return [];
 
   const today = getTodayDate();
-  const todayIso = toISODateString(today);
-  const results: NotificationResult[] = [];
+  const due = dueSessions(
+    offices,
+    options,
+    today,
+    (session) => session.startTime,
+    (session) => session.lastNotifiedDate,
+  );
+  return inSequence(due, ({ office, session }) => postSessionRequest(office, session, today));
+}
 
-  for (const office of offices) {
-    const dayOfWeek = getDayOfWeek(office.timezone);
-    const currentTime = getCurrentTimeInTimezone(office.timezone);
-    const nowMinutes = timeToMinutes(currentTime);
+interface CutoffSession extends DaySession {
+  id: string;
+  cutoffTime: string;
+  label: string | null;
+  cutoffNotifiedDate: Date | null;
+}
 
-    const sessions = office.mateSessions.filter((s) => s.dayOfWeek === dayOfWeek);
+/**
+ * Posts one session's cutoff alert and records it as today's. Null when no
+ * one registered: the session is still marked so the slot is not reprocessed
+ * all day, and nothing is reported.
+ */
+async function postCutoffAlert(office: SlackOffice, session: CutoffSession, today: Date): Promise<NotificationResult | null> {
+  const name = session.label ?? session.cutoffTime;
+  try {
+    const requesterGroups = await listRequestersByItem({
+      officeId: office.id,
+      mateSessionId: session.id,
+      date: today,
+      status: "REQUESTED",
+    });
 
-    for (const session of sessions) {
-      // Time window check (skipped for manual admin triggers)
-      if (!options?.skipTimeWindow) {
-        const sessionMinutes = timeToMinutes(session.startTime);
-        const diff = nowMinutes - sessionMinutes;
-        if (diff < 0 || diff >= SCHEDULE_STEP_MINUTES * 2) continue;
-      }
-
-      // Idempotency: skip if already notified today
-      if (session.lastNotifiedDate?.getTime() === today.getTime()) {
-        continue;
-      }
-
-      try {
-        const [items, requesterGroups] = await Promise.all([
-          getActiveItems(office.id),
-          listRequestersByItem({
-            officeId: office.id,
-            mateSessionId: session.id,
-            date: today,
-          }),
-        ]);
-        const { blocks, fallback } = await buildSessionRequestMessage({
-          officeId: office.id,
-          officeName: office.name,
-          mateSessionId: session.id,
-          sessionLabel: session.label,
-          cutoffTime: session.cutoffTime,
-          date: todayIso,
-          locale: office.locale,
-          items,
-          requesterGroups,
-        });
-        const posted = await sendSlackMessage(
-          office.slackChannelId!,
-          blocks,
-          fallback,
-        );
-
-        await prisma.mateSession.update({
-          where: { id: session.id },
-          data: {
-            lastNotifiedDate: today,
-            lastNotifiedMessageTs: posted.ts,
-            lastNotifiedChannelId: posted.channel,
-          },
-        });
-
-        results.push({
-          office: office.name,
-          session: session.label ?? session.startTime,
-          ok: true,
-        });
-      } catch (e) {
-        console.error(
-          `[notifications] daily-request failed for ${office.name} / ${session.label ?? session.startTime}:`,
-          e,
-        );
-        results.push({
-          office: office.name,
-          session: session.label ?? session.startTime,
-          ok: false,
-          error: e instanceof Error ? e.message : "Unknown error",
-        });
-      }
+    if (requesterGroups.length === 0) {
+      await prisma.mateSession.update({
+        where: { id: session.id },
+        data: { cutoffNotifiedDate: today },
+      });
+      return null;
     }
-  }
 
-  return results;
+    const { blocks, fallback } = await buildSessionCutoffMessage({
+      officeId: office.id,
+      officeName: office.name,
+      mateSessionId: session.id,
+      sessionLabel: session.label,
+      date: toISODateString(today),
+      locale: office.locale,
+      requesterGroups,
+    });
+    const posted = await sendSlackMessage(office.slackChannelId, blocks, fallback);
+
+    await prisma.mateSession.update({
+      where: { id: session.id },
+      data: {
+        cutoffNotifiedDate: today,
+        cutoffNotifiedMessageTs: posted.ts,
+        cutoffNotifiedChannelId: posted.channel,
+      },
+    });
+
+    return { office: office.name, session: name, ok: true };
+  } catch (e) {
+    return failed("cutoff", office.name, name, e);
+  }
 }
 
 /**
@@ -151,10 +243,7 @@ export async function sendSessionNotifications(options?: {
  * button. Mirrors `sendSessionNotifications` but keyed off `cutoffTime` and
  * `cutoffNotifiedDate`. Skips silently when no one registered.
  */
-export async function sendCutoffNotifications(options?: {
-  officeId?: string;
-  skipTimeWindow?: boolean;
-}): Promise<NotificationResult[]> {
+export async function sendCutoffNotifications(options?: NotifyOptions): Promise<NotificationResult[]> {
   const offices = await prisma.office.findMany({
     where: {
       slackChannelId: { not: null },
@@ -182,89 +271,15 @@ export async function sendCutoffNotifications(options?: {
   if (offices.length === 0) return [];
 
   const today = getTodayDate();
-  const todayIso = toISODateString(today);
-  const results: NotificationResult[] = [];
-
-  for (const office of offices) {
-    const dayOfWeek = getDayOfWeek(office.timezone);
-    const currentTime = getCurrentTimeInTimezone(office.timezone);
-    const nowMinutes = timeToMinutes(currentTime);
-
-    const sessions = office.mateSessions.filter((s) => s.dayOfWeek === dayOfWeek);
-
-    for (const session of sessions) {
-      if (!options?.skipTimeWindow) {
-        const sessionMinutes = timeToMinutes(session.cutoffTime);
-        const diff = nowMinutes - sessionMinutes;
-        if (diff < 0 || diff >= SCHEDULE_STEP_MINUTES * 2) continue;
-      }
-
-      if (session.cutoffNotifiedDate?.getTime() === today.getTime()) {
-        continue;
-      }
-
-      try {
-        const requesterGroups = await listRequestersByItem({
-          officeId: office.id,
-          mateSessionId: session.id,
-          date: today,
-          status: "REQUESTED",
-        });
-
-        if (requesterGroups.length === 0) {
-          // Still mark notified so we don't reprocess this slot all day.
-          await prisma.mateSession.update({
-            where: { id: session.id },
-            data: { cutoffNotifiedDate: today },
-          });
-          continue;
-        }
-
-        const { blocks, fallback } = await buildSessionCutoffMessage({
-          officeId: office.id,
-          officeName: office.name,
-          mateSessionId: session.id,
-          sessionLabel: session.label,
-          date: todayIso,
-          locale: office.locale,
-          requesterGroups,
-        });
-        const posted = await sendSlackMessage(
-          office.slackChannelId!,
-          blocks,
-          fallback,
-        );
-
-        await prisma.mateSession.update({
-          where: { id: session.id },
-          data: {
-            cutoffNotifiedDate: today,
-            cutoffNotifiedMessageTs: posted.ts,
-            cutoffNotifiedChannelId: posted.channel,
-          },
-        });
-
-        results.push({
-          office: office.name,
-          session: session.label ?? session.cutoffTime,
-          ok: true,
-        });
-      } catch (e) {
-        console.error(
-          `[notifications] cutoff failed for ${office.name} / ${session.label ?? session.cutoffTime}:`,
-          e,
-        );
-        results.push({
-          office: office.name,
-          session: session.label ?? session.cutoffTime,
-          ok: false,
-          error: e instanceof Error ? e.message : "Unknown error",
-        });
-      }
-    }
-  }
-
-  return results;
+  const due = dueSessions(
+    offices,
+    options,
+    today,
+    (session) => session.cutoffTime,
+    (session) => session.cutoffNotifiedDate,
+  );
+  const results = await inSequence(due, ({ office, session }) => postCutoffAlert(office, session, today));
+  return results.filter((result): result is NotificationResult => result !== null);
 }
 
 /**

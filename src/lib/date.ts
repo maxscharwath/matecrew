@@ -1,6 +1,14 @@
 /**
- * Returns today's date with time zeroed to midnight UTC.
- * Matches Prisma's @db.Date storage format.
+ * Day columns (`DailyRequest.date`, `ConsumptionEntry.date`, period bounds,
+ * `MateSession.*NotifiedDate`) hold a calendar day as a DateTime at UTC
+ * midnight. The database stores whatever it is given, so every day written or
+ * compared must come from one of the helpers below: two values of the same
+ * day are then equal, and range filters on them stay exact.
+ */
+
+/**
+ * Returns today's date with time zeroed to midnight UTC: the value a day
+ * column stores for today.
  */
 export function getTodayDate(): Date {
   const now = new Date();
@@ -8,10 +16,14 @@ export function getTodayDate(): Date {
 }
 
 /**
- * Creates a UTC midnight Date for a given year/month/day.
- * Use this instead of `new Date(year, month, day)` when comparing
- * against Prisma @db.Date columns to avoid timezone drift.
+ * The UTC day `date` falls on, at UTC midnight. For a day that arrives from
+ * outside (a server action argument), so a stray time of day can never be
+ * stored in a day column.
  */
+export function toUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
 /**
  * The calendar day `at` falls on in `timezone`, as a UTC-midnight Date like
  * `getTodayDate()` returns. A terminal can sync a take hours after it happened,
@@ -28,6 +40,11 @@ export function getDateInTimezone(at: Date, timezone: string): Date {
   return new Date(Date.UTC(part("year"), part("month") - 1, part("day")));
 }
 
+/**
+ * Creates a UTC midnight Date for a given year/month/day.
+ * Use this instead of `new Date(year, month, day)` when comparing
+ * against day columns to avoid timezone drift.
+ */
 export function utcDate(year: number, month: number, day: number = 1): Date {
   return new Date(Date.UTC(year, month, day));
 }
@@ -100,7 +117,7 @@ export function timeToMinutes(hhmm: string): number {
 /**
  * Session start/cutoff times must align to this interval (in minutes).
  * Also bounds the cron detection window in sendSessionNotifications, so any
- * minor delay between the QStash trigger and handler execution still hits the
+ * minor delay between the cron trigger and handler execution still hits the
  * right session.
  */
 export const SCHEDULE_STEP_MINUTES = 5;
@@ -108,7 +125,7 @@ export const SCHEDULE_STEP_MINUTES = 5;
 /**
  * A settlement period as a month: "juillet 2026", "July 2026".
  *
- * UTC because period bounds are `@db.Date` values at UTC midnight — reading
+ * UTC because period bounds are days stored at UTC midnight — reading
  * them in a local timezone west of London would name the month before.
  */
 export function formatMonthLabel(date: Date, locale: string): string {

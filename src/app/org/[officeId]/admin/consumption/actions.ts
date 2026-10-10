@@ -2,10 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, expectRows, prisma, retryOnConflict } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { checkAndAlertLowStockMany } from "@/lib/stock-alerts";
-import { stockDeltaOps } from "@/lib/stock";
+import { platform } from "@/platform";
+import { stockAtLeast, stockDeltaOps } from "@/lib/stock";
 
 type ActionResult = { success: true; count: number } | { success: false; error: string };
 
@@ -21,6 +22,10 @@ interface ConsumptionRow {
   deductStock: boolean;
 }
 
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+
+type ResolvedRow = ConsumptionRow & { resolvedItemId: string };
+
 export async function bulkCreateConsumption(
   officeId: string,
   rows: ConsumptionRow[],
@@ -32,6 +37,23 @@ export async function bulkCreateConsumption(
     return { success: false, error: t("bulkConsumption.noRows") };
   }
 
+  const result = await retryOnConflict(() => recordBulkConsumption(officeId, rows, membership.userId, t));
+  if (!result.success) return result;
+
+  revalidatePath(`/org/${officeId}/admin/consumption`);
+  revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  revalidatePath(`/org/${officeId}/admin/stock`);
+  revalidatePath(`/org/${officeId}/dashboard`);
+
+  return result;
+}
+
+/** Resolves each row's item (falling back to the office default), or the error of the first invalid row. */
+async function resolveRows(
+  officeId: string,
+  rows: readonly ConsumptionRow[],
+  t: Translate,
+): Promise<{ resolved: ResolvedRow[] } | { error: string }> {
   const [memberships, officeItems] = await Promise.all([
     prisma.membership.findMany({ where: { officeId }, select: { userId: true } }),
     prisma.item.findMany({ where: { officeId }, select: { id: true, isDefault: true } }),
@@ -40,31 +62,39 @@ export async function bulkCreateConsumption(
   const itemIds = new Set(officeItems.map((i) => i.id));
   const defaultItemId = officeItems.find((i) => i.isDefault)?.id ?? null;
 
-  // Resolve each row's item (falling back to the office default) and validate.
-  const resolved: (ConsumptionRow & { resolvedItemId: string })[] = [];
+  const resolved: ResolvedRow[] = [];
+  for (const row of rows) {
+    if (!memberIds.has(row.userId)) return { error: t("errors.userNotFound") };
+    if (row.qty < 1) return { error: t("errors.qtyMustBePositive") };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) return { error: t("bulkConsumption.invalidDate") };
+    const resolvedItemId = row.itemId ?? defaultItemId;
+    if (!resolvedItemId || !itemIds.has(resolvedItemId)) return { error: t("errors.itemNotFound") };
+    resolved.push({ ...row, resolvedItemId });
+  }
+  return { resolved };
+}
+
+/**
+ * Validates the rows against the current members, items and stock, then
+ * records them in one atomic batch. Each item's pool is guarded at the level
+ * the check saw: if a take lowers it in between, the batch is rolled back
+ * and `retryOnConflict` runs the check again on the fresh level.
+ */
+async function recordBulkConsumption(
+  officeId: string,
+  rows: readonly ConsumptionRow[],
+  actingUserId: string,
+  t: Translate,
+): Promise<ActionResult> {
+  const resolution = await resolveRows(officeId, rows, t);
+  if ("error" in resolution) return { success: false, error: resolution.error };
+  const { resolved } = resolution;
+
   // qty to deduct from stock, per item
   const deductByItem = new Map<string, number>();
-
-  for (const row of rows) {
-    if (!memberIds.has(row.userId)) {
-      return { success: false, error: t("errors.userNotFound") };
-    }
-    if (row.qty < 1) {
-      return { success: false, error: t("errors.qtyMustBePositive") };
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
-      return { success: false, error: t("bulkConsumption.invalidDate") };
-    }
-    const resolvedItemId = row.itemId ?? defaultItemId;
-    if (!resolvedItemId || !itemIds.has(resolvedItemId)) {
-      return { success: false, error: t("errors.itemNotFound") };
-    }
-    resolved.push({ ...row, resolvedItemId });
+  for (const row of resolved) {
     if (row.deductStock) {
-      deductByItem.set(
-        resolvedItemId,
-        (deductByItem.get(resolvedItemId) ?? 0) + row.qty,
-      );
+      deductByItem.set(row.resolvedItemId, (deductByItem.get(row.resolvedItemId) ?? 0) + row.qty);
     }
   }
 
@@ -89,36 +119,29 @@ export async function bulkCreateConsumption(
     }
   }
 
-  const consumptionOps = resolved.map((row) =>
-    prisma.consumptionEntry.create({
-      data: {
+  await commitBatch((db) => [
+    ...[...deductByItem.entries()].map(([itemId, deduct]) => stockAtLeast(db, officeId, itemId, deduct)),
+    db.consumptionEntry.createMany({
+      data: resolved.map((row) => ({
         officeId,
         userId: row.userId,
         itemId: row.resolvedItemId,
         date: new Date(row.date),
         qty: row.qty,
-        source: "MANUAL",
-      },
+        source: "MANUAL" as const,
+      })),
     }),
-  );
-
-  const stockOps = [...deductByItem.entries()].flatMap(([itemId, deduct]) =>
-    stockDeltaOps({
-      officeId,
-      itemId,
-      delta: -deduct,
-      reason: "SERVED",
-      note: `Bulk consumption (${deduct})`,
-      userId: membership.userId,
-    }),
-  );
-
-  await prisma.$transaction([...consumptionOps, ...stockOps]);
-
-  revalidatePath(`/org/${officeId}/admin/consumption`);
-  revalidatePath(`/org/${officeId}/admin/reimbursements`);
-  revalidatePath(`/org/${officeId}/admin/stock`);
-  revalidatePath(`/org/${officeId}/dashboard`);
+    ...[...deductByItem.entries()].flatMap(([itemId, deduct]) =>
+      stockDeltaOps(db, {
+        officeId,
+        itemId,
+        delta: -deduct,
+        reason: "SERVED",
+        note: `Bulk consumption (${deduct})`,
+        userId: actingUserId,
+      }),
+    ),
+  ]);
 
   return { success: true, count: rows.length };
 }
@@ -146,6 +169,37 @@ export async function swapConsumptionItem(
   const { membership } = await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
 
+  const result = await retryOnConflict(() => swapOnce(officeId, entryId, newItemId, membership.userId, t));
+  if (!result.success) return result;
+
+  // Both pools moved: the new item may have dipped under the threshold, and the
+  // old one may have recovered above it, which re-arms its alert.
+  platform.runInBackground(checkAndAlertLowStockMany(officeId, [result.fromItemId, newItemId]), "low-stock alert");
+
+  revalidatePath(`/org/${officeId}/admin/consumption`);
+  revalidatePath(`/org/${officeId}/admin/stock`);
+  revalidatePath(`/org/${officeId}/admin/reimbursements`);
+  revalidatePath(`/org/${officeId}/reimbursements`);
+  revalidatePath(`/org/${officeId}/dashboard`);
+  revalidatePath(`/org/${officeId}/runner`);
+  revalidatePath(`/org/${officeId}/stats`);
+
+  return { success: true, from: result.from, to: result.to };
+}
+
+/**
+ * Reads the entry, the target item and its pool, then commits the swap in one
+ * atomic batch. Guards: the entry is still live and still on its old item,
+ * and the target pool still has the cans the check saw; otherwise the batch
+ * is rolled back and `retryOnConflict` validates again on fresh data.
+ */
+async function swapOnce(
+  officeId: string,
+  entryId: string,
+  newItemId: string,
+  actingUserId: string,
+  t: Translate,
+): Promise<(Extract<SwapResult, { success: true }> & { fromItemId: string }) | Extract<SwapResult, { success: false }>> {
   const entry = await prisma.consumptionEntry.findUnique({
     where: { id: entryId },
     include: { item: { select: { name: true } } },
@@ -209,48 +263,40 @@ export async function swapConsumptionItem(
         })
       : null;
 
-  await prisma.$transaction([
-    prisma.consumptionEntry.update({
-      where: { id: entryId },
-      data: { itemId: newItemId },
-    }),
+  await commitBatch((db) => [
+    expectRows(
+      db.consumptionEntry.updateMany({
+        where: { id: entryId, itemId: entry.itemId, cancelledAt: null },
+        data: { itemId: newItemId },
+      }),
+      1,
+    ),
+    stockAtLeast(db, officeId, newItemId, entry.qty),
     ...(order
       ? [
-          prisma.dailyRequest.update({
+          db.dailyRequest.updateMany({
             where: { id: order.id },
             data: { itemId: newItemId },
           }),
         ]
       : []),
-    ...stockDeltaOps({
+    ...stockDeltaOps(db, {
       officeId,
       itemId: entry.itemId,
       delta: entry.qty,
       reason: "UNSERVED",
       note: `Swapped to ${newItem.name}`,
-      userId: membership.userId,
+      userId: actingUserId,
     }),
-    ...stockDeltaOps({
+    ...stockDeltaOps(db, {
       officeId,
       itemId: newItemId,
       delta: -entry.qty,
       reason: "SERVED",
       note: `Swapped from ${entry.item.name}`,
-      userId: membership.userId,
+      userId: actingUserId,
     }),
   ]);
 
-  // Both pools moved: the new item may have dipped under the threshold, and the
-  // old one may have recovered above it, which re-arms its alert.
-  checkAndAlertLowStockMany(officeId, [entry.itemId, newItemId]).catch(() => {});
-
-  revalidatePath(`/org/${officeId}/admin/consumption`);
-  revalidatePath(`/org/${officeId}/admin/stock`);
-  revalidatePath(`/org/${officeId}/admin/reimbursements`);
-  revalidatePath(`/org/${officeId}/reimbursements`);
-  revalidatePath(`/org/${officeId}/dashboard`);
-  revalidatePath(`/org/${officeId}/runner`);
-  revalidatePath(`/org/${officeId}/stats`);
-
-  return { success: true, from: entry.item.name, to: newItem.name };
+  return { success: true, from: entry.item.name, to: newItem.name, fromItemId: entry.itemId };
 }

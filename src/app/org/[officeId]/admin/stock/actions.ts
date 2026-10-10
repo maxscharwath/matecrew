@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma, retryOnConflict } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { checkAndAlertLowStockMany } from "@/lib/stock-alerts";
 import { recordStockCount } from "@/lib/stock-count";
-import { stockDeltaOps } from "@/lib/stock";
+import { stockDeltaOps, stockUnchanged } from "@/lib/stock";
 import { getTranslations } from "next-intl/server";
 
 type SaveShelfResult =
@@ -99,10 +99,11 @@ export async function saveShelf(
   }
 
   if (thresholds.length > 0) {
-    await prisma.$transaction(
+    // Independent writes, committed together: no read to guard.
+    await commitBatch((db) =>
       thresholds.map((th) =>
-        prisma.item.update({
-          where: { id: th.itemId },
+        db.item.updateMany({
+          where: { id: th.itemId, officeId },
           data: { lowStockThreshold: th.threshold },
         }),
       ),
@@ -163,9 +164,11 @@ export async function saveShelf(
  * Moves stock to the quantities given without billing anyone: the gap is
  * recorded as an ADJUSTMENT, which `@/lib/costing` ignores.
  *
- * Current quantities are read inside the transaction that writes the movement,
- * so a round served in between is not silently overwritten by a number typed
- * minutes ago.
+ * Current quantities are read, the gaps computed, then everything is written
+ * in one atomic batch whose guards require every pool to still be at the level
+ * read. A round served in between rolls the batch back and the corrections
+ * are computed again from the fresh levels, so it is not silently overwritten
+ * by a number typed minutes ago.
  */
 async function applyCorrections(opts: {
   officeId: string;
@@ -174,8 +177,8 @@ async function applyCorrections(opts: {
   note: string | null;
 }): Promise<{ itemId: string; delta: number }[]> {
   const { officeId, userId, quantities, note } = opts;
-  return prisma.$transaction(async (tx) => {
-    const stocks = await tx.stock.findMany({
+  return retryOnConflict(async () => {
+    const stocks = await prisma.stock.findMany({
       where: { officeId, itemId: { in: quantities.map((q) => q.itemId) } },
       select: { itemId: true, currentQty: true },
     });
@@ -188,19 +191,21 @@ async function applyCorrections(opts: {
       }))
       .filter((g) => g.delta !== 0);
 
-    await Promise.all(
-      gaps.flatMap((g) =>
-        stockDeltaOps({
-          officeId,
-          itemId: g.itemId,
-          delta: g.delta,
-          reason: "ADJUSTMENT",
-          note,
-          userId,
-          client: tx,
-        }),
-      ),
-    );
+    if (gaps.length > 0) {
+      await commitBatch((db) => [
+        ...gaps.map((g) => stockUnchanged(db, officeId, g.itemId, currentByItem.get(g.itemId))),
+        ...gaps.flatMap((g) =>
+          stockDeltaOps(db, {
+            officeId,
+            itemId: g.itemId,
+            delta: g.delta,
+            reason: "ADJUSTMENT",
+            note,
+            userId,
+          }),
+        ),
+      ]);
+    }
     return gaps;
   });
 }
@@ -260,32 +265,53 @@ export async function cancelStockCount(
         month: count.countedAt.getUTCMonth() + 1,
       },
     },
-    select: { statementsSentAt: true },
+    select: { id: true, statementsSentAt: true },
   });
   if (period?.statementsSentAt) {
     return { success: false, error: t("stock.countPeriodSettled") };
   }
 
+  // Read above, one atomic batch here. Guards: the count is still live (a
+  // count is undone once), and its period, when it exists, still has no
+  // statements out.
   const gaps = count.lines.filter((l) => l.delta !== 0);
-  await prisma.$transaction(async (tx) => {
-    await tx.stockCount.update({
-      where: { id: count.id },
-      data: { cancelledAt: new Date() },
-    });
-    await Promise.all(
-      gaps.flatMap((l) =>
-        stockDeltaOps({
+  try {
+    await commitBatch((db) => [
+      expectRows(
+        db.stockCount.updateMany({
+          where: { id: count.id, cancelledAt: null },
+          data: { cancelledAt: new Date() },
+        }),
+        1,
+      ),
+      ...(period
+        ? [
+            expectRows(
+              db.reimbursementPeriod.updateMany({
+                where: { id: period.id, statementsSentAt: null },
+                data: { statementsSentAt: null },
+              }),
+              1,
+            ),
+          ]
+        : []),
+      ...gaps.flatMap((l) =>
+        stockDeltaOps(db, {
           officeId,
           itemId: l.itemId,
           delta: -l.delta,
           reason: "ADJUSTMENT",
           note: t("stock.countCancelledNote"),
           userId: membership.userId,
-          client: tx,
         }),
       ),
-    );
-  });
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) {
+      return { success: false, error: t("stock.countAlreadyCancelled") };
+    }
+    throw error;
+  }
 
   revalidateShelf(officeId);
   return {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, prisma, retryOnConflict } from "@/lib/prisma";
+import { findByIdOrName } from "@/lib/mcp/name-match";
 import { getCurrentTimeInTimezone, getDayOfWeek, getTodayDate, toISODateString } from "@/lib/date";
 import { getActiveItems, resolveItemId } from "@/lib/items";
 import {
@@ -11,7 +12,7 @@ import {
 import { getSessionsForDay, isSessionOpen } from "@/lib/session-utils";
 import { refreshSlackSessionMessage } from "@/lib/notifications";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
-import { stockDeltaOps } from "@/lib/stock";
+import { stockDeltaOps, stockUnchanged } from "@/lib/stock";
 import { McpToolError, resolveOffice, type OfficeScope } from "@/lib/mcp/context";
 import { notifyQuietly } from "@/lib/mcp/notify";
 import { defineTool } from "@/lib/mcp/tool";
@@ -24,13 +25,13 @@ async function resolveItemByNameOrId(
 ): Promise<string | null> {
   if (!item) return null;
   const wanted = item.trim();
-  const match = await prisma.item.findFirst({
-    where: {
-      officeId,
-      OR: [{ id: wanted }, { name: { equals: wanted, mode: "insensitive" } }],
-    },
-    select: { id: true, active: true, name: true },
-  });
+  const match = findByIdOrName(
+    await prisma.item.findMany({
+      where: { officeId },
+      select: { id: true, active: true, name: true },
+    }),
+    wanted,
+  );
   if (!match) {
     const available = await prisma.item.findMany({
       where: { officeId, active: true },
@@ -387,42 +388,8 @@ export function registerOrderTools(server: McpServer): void {
         );
       }
 
-      const stock = await prisma.stock.findUnique({
-        where: { officeId_itemId: { officeId: scope.officeId, itemId } },
-        select: { currentQty: true, item: { select: { name: true } } },
-      });
-      if (!stock) {
-        throw new McpToolError(
-          "That item has no stock pool in this office yet.",
-        );
-      }
-      if (stock.currentQty <= 0) {
-        throw new McpToolError(
-          `${stock.item.name} is out of stock (0 left), so the can cannot be recorded. An admin may need to record a delivery.`,
-        );
-      }
-
       const today = getTodayDate();
-      await prisma.$transaction([
-        prisma.consumptionEntry.create({
-          data: {
-            officeId: scope.officeId,
-            userId: actor.userId,
-            itemId,
-            date: today,
-            qty: 1,
-            source: "MANUAL",
-          },
-        }),
-        ...stockDeltaOps({
-          officeId: scope.officeId,
-          itemId,
-          delta: -1,
-          reason: "SERVED",
-          note: "Self-serve",
-          userId: actor.userId,
-        }),
-      ]);
+      const stock = await retryOnConflict(() => takeCan(scope.officeId, itemId, actor.userId, today));
 
       await notifyQuietly("low-stock", () =>
         checkAndAlertLowStock(scope.officeId, itemId),
@@ -432,11 +399,43 @@ export function registerOrderTools(server: McpServer): void {
         ok: true,
         item: stock.item.name,
         date: toISODateString(today),
-        remainingStock: stock.currentQty - 1,
-        message: `Recorded one ${stock.item.name} for you. ${
-          stock.currentQty - 1
-        } left in ${scope.officeName}.`,
+        remainingStock: stock.remaining,
+        message: `Recorded one ${stock.item.name} for you. ${stock.remaining} left in ${scope.officeName}.`,
       };
     },
   );
+}
+
+/**
+ * Checks the pool, then records the can in one atomic batch. The guard needs
+ * the pool to still be at the level read, so the remaining count reported is
+ * exact; a take in between rolls the batch back and this runs again.
+ */
+async function takeCan(
+  officeId: string,
+  itemId: string,
+  userId: string,
+  today: Date,
+): Promise<{ item: { name: string }; remaining: number }> {
+  const stock = await prisma.stock.findUnique({
+    where: { officeId_itemId: { officeId, itemId } },
+    select: { currentQty: true, item: { select: { name: true } } },
+  });
+  if (!stock) {
+    throw new McpToolError("That item has no stock pool in this office yet.");
+  }
+  if (stock.currentQty <= 0) {
+    throw new McpToolError(
+      `${stock.item.name} is out of stock (0 left), so the can cannot be recorded. An admin may need to record a delivery.`,
+    );
+  }
+
+  await commitBatch((db) => [
+    stockUnchanged(db, officeId, itemId, stock.currentQty),
+    db.consumptionEntry.createMany({
+      data: [{ officeId, userId, itemId, date: today, qty: 1, source: "MANUAL" }],
+    }),
+    ...stockDeltaOps(db, { officeId, itemId, delta: -1, reason: "SERVED", note: "Self-serve", userId }),
+  ]);
+  return { item: stock.item, remaining: stock.currentQty - 1 };
 }

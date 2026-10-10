@@ -117,6 +117,34 @@ export async function StockPredictionSection({ officeId }: PredictionProps) {
       timeZone: "Europe/Zurich",
     });
 
+  const reorderCell = (item: (typeof forecast.items)[number]) => {
+    if (item.isLow) {
+      return (
+        <Badge variant="destructive" className="gap-1">
+          <AlertTriangle className="size-3" />
+          {t("stock.prediction.reorderNow")}
+        </Badge>
+      );
+    }
+    if (item.prediction.predictedDepletionDate === null) {
+      return (
+        <span className="text-muted-foreground">
+          {t("stock.prediction.noTrend")}
+        </span>
+      );
+    }
+    return (
+      <span className="whitespace-nowrap">
+        {formatDate(item.prediction.predictedDepletionDate)}
+        <span className="ml-2 text-muted-foreground tabular-nums">
+          {t("stock.prediction.inDays", {
+            days: Math.round(item.prediction.daysUntilThreshold ?? 0),
+          })}
+        </span>
+      </span>
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -230,25 +258,7 @@ export async function StockPredictionSection({ officeId }: PredictionProps) {
                       {/* A date when there is one, and otherwise the reason
                           there isn't — an empty cell would read as "fine". */}
                       <TableCell className="text-right">
-                        {item.isLow ? (
-                          <Badge variant="destructive" className="gap-1">
-                            <AlertTriangle className="size-3" />
-                            {t("stock.prediction.reorderNow")}
-                          </Badge>
-                        ) : item.prediction.predictedDepletionDate === null ? (
-                          <span className="text-muted-foreground">
-                            {t("stock.prediction.noTrend")}
-                          </span>
-                        ) : (
-                          <span className="whitespace-nowrap">
-                            {formatDate(item.prediction.predictedDepletionDate)}
-                            <span className="ml-2 text-muted-foreground tabular-nums">
-                              {t("stock.prediction.inDays", {
-                                days: Math.round(item.prediction.daysUntilThreshold ?? 0),
-                              })}
-                            </span>
-                          </span>
-                        )}
+                        {reorderCell(item)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -266,21 +276,27 @@ interface ChartProps {
   readonly officeId: string;
 }
 
-export async function StockChartSection({ officeId }: ChartProps) {
-  const forecast = await loadStockForecast(officeId);
-  if (forecast.items.length === 0) return null;
+type ChartRow = Record<string, string | number | null>;
+type StockForecast = Awaited<ReturnType<typeof loadStockForecast>>;
 
-  const historyStart = new Date();
-  historyStart.setDate(historyStart.getDate() - HISTORY_DAYS);
+interface ChartSeries {
+  readonly key: string;
+  readonly forecastKey: string;
+  readonly itemId: string;
+}
+
+interface ItemProjection {
+  readonly itemId: string;
+  readonly points: { date: string; qty: number }[];
+}
+
+/** One row per day from `historyStart` to today, each item at its quantity that day. */
+function historyRows(
+  forecast: StockForecast,
+  series: readonly ChartSeries[],
+  historyStart: Date,
+): ChartRow[] {
   const history = forecast.movements.filter((m) => m.createdAt >= historyStart);
-
-  const series = forecast.items.map((item, idx) => ({
-    key: `item${idx}`,
-    forecastKey: `item${idx}f`,
-    itemId: item.itemId,
-    name: item.name,
-    color: item.color,
-  }));
 
   // Back-solve each item's starting quantity from its current qty minus the
   // deltas inside the window, then walk forward day by day.
@@ -307,7 +323,7 @@ export async function StockChartSection({ officeId }: ChartProps) {
     movementsByDay.set(day, list);
   }
 
-  const chartData: Record<string, string | number | null>[] = [];
+  const chartData: ChartRow[] = [];
   const cursor = new Date(historyStart);
   const today = new Date();
 
@@ -316,7 +332,7 @@ export async function StockChartSection({ officeId }: ChartProps) {
     for (const m of movementsByDay.get(day) ?? []) {
       runningByItem.set(m.itemId, (runningByItem.get(m.itemId) ?? 0) + m.delta);
     }
-    const row: Record<string, string | number | null> = { date: day };
+    const row: ChartRow = { date: day };
     for (const s of series) {
       row[s.key] = runningByItem.get(s.itemId) ?? 0;
       row[s.forecastKey] = null;
@@ -324,6 +340,52 @@ export async function StockChartSection({ officeId }: ChartProps) {
     chartData.push(row);
     cursor.setDate(cursor.getDate() + 1);
   }
+  return chartData;
+}
+
+/** Appends the projected days after `todayRow`, the last row of the history. */
+function appendProjection(
+  chartData: ChartRow[],
+  todayRow: ChartRow,
+  series: readonly ChartSeries[],
+  projections: readonly ItemProjection[],
+  horizonDays: number,
+) {
+  const pointsByItem = new Map(projections.map((p) => [p.itemId, p.points]));
+  // The dashed line starts where the solid one ends, so the two halves read
+  // as one curve rather than as two charts sharing an axis.
+  for (const s of series) {
+    if (pointsByItem.has(s.itemId)) todayRow[s.forecastKey] = todayRow[s.key];
+  }
+
+  for (let d = 0; d < horizonDays; d++) {
+    const row: ChartRow = {
+      date: projections[0].points[d].date,
+    };
+    for (const s of series) {
+      row[s.key] = null;
+      row[s.forecastKey] = pointsByItem.get(s.itemId)?.[d].qty ?? null;
+    }
+    chartData.push(row);
+  }
+}
+
+export async function StockChartSection({ officeId }: ChartProps) {
+  const forecast = await loadStockForecast(officeId);
+  if (forecast.items.length === 0) return null;
+
+  const historyStart = new Date();
+  historyStart.setDate(historyStart.getDate() - HISTORY_DAYS);
+
+  const series = forecast.items.map((item, idx) => ({
+    key: `item${idx}`,
+    forecastKey: `item${idx}f`,
+    itemId: item.itemId,
+    name: item.name,
+    color: item.color,
+  }));
+
+  const chartData = historyRows(forecast, series, historyStart);
 
   // Only project when something is actually moving: a flat line drawn out for
   // another month says "nothing will change", which is a claim the data does
@@ -339,25 +401,9 @@ export async function StockChartSection({ officeId }: ChartProps) {
       ),
     }));
 
-  const pointsByItem = new Map(projections.map((p) => [p.itemId, p.points]));
   const todayRow = chartData.at(-1);
   if (projections.length > 0 && todayRow) {
-    // The dashed line starts where the solid one ends, so the two halves read
-    // as one curve rather than as two charts sharing an axis.
-    for (const s of series) {
-      if (pointsByItem.has(s.itemId)) todayRow[s.forecastKey] = todayRow[s.key];
-    }
-
-    for (let d = 0; d < forecast.horizonDays; d++) {
-      const row: Record<string, string | number | null> = {
-        date: projections[0].points[d].date,
-      };
-      for (const s of series) {
-        row[s.key] = null;
-        row[s.forecastKey] = pointsByItem.get(s.itemId)?.[d].qty ?? null;
-      }
-      chartData.push(row);
-    }
+    appendProjection(chartData, todayRow, series, projections, forecast.horizonDays);
   }
 
   return (

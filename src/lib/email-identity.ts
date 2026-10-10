@@ -15,6 +15,7 @@
  *
  * When unset, it defaults to treating `owt.swiss` and `openwt.com` as aliases.
  */
+import { platform } from "@/platform";
 
 const DEFAULT_ALIAS_GROUPS = "owt.swiss,openwt.com";
 
@@ -36,7 +37,7 @@ function parseAliasGroups(raw: string): string[][] {
  * their own canonical domain.
  */
 function buildCanonicalDomainMap(): Map<string, string> {
-  const raw = process.env.EMAIL_DOMAIN_ALIASES ?? DEFAULT_ALIAS_GROUPS;
+  const raw = platform.env.get("EMAIL_DOMAIN_ALIASES") ?? DEFAULT_ALIAS_GROUPS;
   const map = new Map<string, string>();
   for (const group of parseAliasGroups(raw)) {
     const canonical = group[0];
@@ -52,7 +53,7 @@ const canonicalDomainMap = buildCanonicalDomainMap();
 
 /** The configured alias groups, for display in the admin UI. */
 export function getDomainAliasGroups(): string[][] {
-  return parseAliasGroups(process.env.EMAIL_DOMAIN_ALIASES ?? DEFAULT_ALIAS_GROUPS);
+  return parseAliasGroups(platform.env.get("EMAIL_DOMAIN_ALIASES") ?? DEFAULT_ALIAS_GROUPS);
 }
 
 /** Resolve a domain to its canonical form (itself if not aliased). */

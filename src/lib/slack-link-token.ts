@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { platform } from "@/platform";
 
 export interface SlackLinkPayload {
   slackUserId: string;
@@ -14,9 +15,7 @@ export interface SlackLinkPayload {
 const TTL_SECONDS = 600;
 
 function getSecret(): string {
-  const secret = process.env.BETTER_AUTH_SECRET;
-  if (!secret) throw new Error("BETTER_AUTH_SECRET is not configured");
-  return secret;
+  return platform.env.require("BETTER_AUTH_SECRET");
 }
 
 function sign(body: string, secret: string): string {

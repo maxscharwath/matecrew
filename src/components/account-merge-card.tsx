@@ -116,14 +116,15 @@ export function AccountMergeCard({ officeId, group }: AccountMergeCardProps) {
 
   const target = group.users.find((u) => u.id === targetId);
 
-  const buttonLabel = isPending
-    ? progress
+  let buttonLabel = t("accounts.mergeButton", { count: sources.length });
+  if (isPending) {
+    buttonLabel = progress
       ? t("accounts.mergingProgress", {
           done: progress.done,
           total: progress.total,
         })
-      : t("accounts.merging")
-    : t("accounts.mergeButton", { count: sources.length });
+      : t("accounts.merging");
+  }
 
   return (
     <Card>

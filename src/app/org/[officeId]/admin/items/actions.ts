@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, newId, prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
-import { uploadFile, deleteFile, buildItemImageKey } from "@/lib/storage";
-import { optimizeImage } from "@/lib/image";
-import { ITEM_IMAGE_BYTES, photoBitmap, pictureToBitmap } from "@/lib/device/bitmap";
+import { buildItemImageKey } from "@/lib/storage";
+import { platform } from "@/platform";
+import { ITEM_IMAGE_BYTES, loadPhoto, photoToTerminal, pictureToBitmap } from "@/lib/device/bitmap";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -49,15 +49,21 @@ export async function createItem(
     _max: { sortOrder: true },
   });
 
-  // A brand-new item starts with an empty stock pool.
-  await prisma.item.create({
-    data: {
-      officeId,
-      name: parsed.data.name,
-      sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
-      stock: { create: { officeId, currentQty: 0 } },
-    },
-  });
+  // A brand-new item starts with an empty stock pool: both rows in one atomic
+  // batch. The name was checked above; one created in between is a unique-key
+  // conflict that rolls the batch back.
+  const id = newId();
+  try {
+    await commitBatch((db) => [
+      db.item.createMany({
+        data: [{ id, officeId, name: parsed.data.name, sortOrder: (maxSort._max.sortOrder ?? 0) + 1 }],
+      }),
+      db.stock.createMany({ data: [{ officeId, itemId: id, currentQty: 0 }] }),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return { success: false, error: t("items.nameExists") };
+    throw error;
+  }
 
   revalidateItemPages(officeId);
   return { success: true };
@@ -153,19 +159,22 @@ export async function setItemImage(
     return { success: false, error: t("errors.fileTooLarge", { name: file.name }) };
   }
 
-  let buffer: Buffer;
+  let photo: Uint8Array;
+  let terminalPhoto: Uint8Array<ArrayBuffer>;
   try {
-    buffer = await optimizeImage(Buffer.from(await file.arrayBuffer()));
+    photo = await platform.images.optimizeForWeb(new Uint8Array(await file.arrayBuffer()));
+    // Worked out now, from the stored photo, so the terminal never decodes a picture.
+    terminalPhoto = await photoToTerminal(photo);
   } catch {
     return { success: false, error: t("errors.invalidFileType", { name: file.name }) };
   }
   const key = buildItemImageKey(itemId, "image.webp");
-  await uploadFile({ key, body: buffer, contentType: "image/webp" });
+  await platform.storage.put(key, photo, { contentType: "image/webp" });
 
-  await prisma.item.update({ where: { id: itemId }, data: { imageKey: key } });
+  await prisma.item.update({ where: { id: itemId }, data: { imageKey: key, terminalPhoto } });
 
   // Best-effort cleanup of the previous image.
-  if (item.imageKey) deleteFile(item.imageKey).catch(() => {});
+  if (item.imageKey) platform.runInBackground(platform.storage.delete(item.imageKey), "item image cleanup");
 
   revalidateItemPages(officeId);
   return { success: true };
@@ -184,8 +193,8 @@ export async function removeItemImage(
   });
   if (!item) return { success: false, error: t("errors.itemNotFound") };
 
-  await prisma.item.update({ where: { id: itemId }, data: { imageKey: null } });
-  if (item.imageKey) deleteFile(item.imageKey).catch(() => {});
+  await prisma.item.update({ where: { id: itemId }, data: { imageKey: null, terminalPhoto: null } });
+  if (item.imageKey) platform.runInBackground(platform.storage.delete(item.imageKey), "item image cleanup");
 
   revalidateItemPages(officeId);
   return { success: true };
@@ -282,17 +291,27 @@ export async function setDefaultItem(
   });
   if (!item) return { success: false, error: t("errors.itemNotFound") };
 
-  // Exactly one default per office.
-  await prisma.$transaction([
-    prisma.item.updateMany({
-      where: { officeId, isDefault: true },
-      data: { isDefault: false },
-    }),
-    prisma.item.update({
-      where: { id: itemId },
-      data: { isDefault: true },
-    }),
-  ]);
+  // Exactly one default per office, in one atomic batch. The guard only
+  // promotes the item while it is still active; archived in between, the
+  // batch is rolled back and the old default stays.
+  try {
+    await commitBatch((db) => [
+      db.item.updateMany({
+        where: { officeId, isDefault: true },
+        data: { isDefault: false },
+      }),
+      expectRows(
+        db.item.updateMany({
+          where: { id: itemId, officeId, active: true },
+          data: { isDefault: true },
+        }),
+        1,
+      ),
+    ]);
+  } catch (error) {
+    if (error instanceof BatchConflictError) return { success: false, error: t("errors.itemNotFound") };
+    throw error;
+  }
 
   revalidateItemPages(officeId);
   return { success: true };
@@ -301,7 +320,7 @@ export async function setDefaultItem(
 type PictureResult = { success: true; bits: string } | { success: false; error: string };
 
 /**
- * An uploaded picture as the terminal's 24 x 24 black and white, for the
+ * An uploaded picture as the terminal's 96 x 96 black and white, for the
  * editor to show before anything is saved. A drawing keeps sharp edges; a
  * photo can be dithered instead.
  */
@@ -318,22 +337,43 @@ export async function terminalImageFromFile(
   if (file.size > MAX_IMAGE_SIZE) return { success: false, error: t("errors.fileTooLarge", { name: file.name }) };
   try {
     const mode = formData.get("mode") === "dither" ? "dither" : "threshold";
-    const picture = await pictureToBitmap(Buffer.from(await file.arrayBuffer()), mode);
+    const picture = await pictureToBitmap(new Uint8Array(await file.arrayBuffer()), mode);
     return { success: true, bits: Buffer.from(picture.bits).toString("base64") };
   } catch {
     return { success: false, error: t("errors.invalidFileType", { name: file.name }) };
   }
 }
 
-/** The item's photo at 24 x 24 in black and white, as a start for drawing. */
+/** The item's photo at 96 x 96 in black and white, as a start for drawing. */
 export async function terminalImageFromPhoto(officeId: string, itemId: string): Promise<PictureResult> {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
-  const item = await prisma.item.findFirst({ where: { id: itemId, officeId }, select: { imageKey: true } });
+  const item = await prisma.item.findFirst({ where: { id: itemId, officeId }, select: { terminalPhoto: true } });
   if (!item) return { success: false, error: t("errors.itemNotFound") };
-  const picture = await photoBitmap(item.imageKey);
-  if (!picture) return { success: false, error: t("items.terminalImage.noPhoto") };
-  return { success: true, bits: Buffer.from(picture.bits).toString("base64") };
+  if (!item.terminalPhoto) return { success: false, error: t("items.terminalImage.noPhoto") };
+  return { success: true, bits: Buffer.from(item.terminalPhoto).toString("base64") };
+}
+
+/**
+ * Works out the terminal picture of every photo in the office that has none:
+ * photos stored before pictures were computed at upload, as copied from the
+ * previous hosting. Run once from the items page; then nothing is left to do.
+ */
+export async function computeTerminalPhotos(officeId: string): Promise<{ computed: number; failed: number }> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const items = await prisma.item.findMany({
+    where: { officeId, imageKey: { not: null }, terminalPhoto: null },
+    select: { id: true, imageKey: true },
+  });
+  const results = await Promise.allSettled(
+    items.map(async ({ id, imageKey }) => {
+      const terminalPhoto = await photoToTerminal(await loadPhoto(imageKey ?? ""));
+      await prisma.item.update({ where: { id }, data: { terminalPhoto } });
+    }),
+  );
+  const failed = results.filter((result) => result.status === "rejected").length;
+  if (failed < results.length) revalidateItemPages(officeId);
+  return { computed: results.length - failed, failed };
 }
 
 /** Saves the terminal's picture of the item; null goes back to the dithered photo. */
@@ -348,7 +388,7 @@ export async function setTerminalImage(
   if (bytes && bytes.length !== ITEM_IMAGE_BYTES) return { success: false, error: t("errors.itemNotFound") };
   const updated = await prisma.item.updateMany({
     where: { id: itemId, officeId },
-    data: { terminalImage: bytes ? new Uint8Array(bytes) : null },
+    data: { terminalImage: bytes ? Uint8Array.from(bytes) : null },
   });
   if (updated.count === 0) return { success: false, error: t("errors.itemNotFound") };
   revalidateItemPages(officeId);

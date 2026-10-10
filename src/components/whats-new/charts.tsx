@@ -232,8 +232,9 @@ export function Meter({
   const pct = (n: number) => `${Math.min((n / scale) * 100, 100)}%`;
   // Amber below the ideal line, coral past the max: the same steps the stats
   // screen uses for its risk ratings.
-  const fill =
-    value <= ideal ? SERIES[0] : value <= max ? SERIES[1] : SERIES[3];
+  let fill: (typeof SERIES)[number] = SERIES[3];
+  if (value <= ideal) fill = SERIES[0];
+  else if (value <= max) fill = SERIES[1];
 
   return (
     <div className="mb-3 rounded-lg border p-3">

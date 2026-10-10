@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import { commitBatch, prisma, retryOnConflict } from "@/lib/prisma";
+import { findByIdOrName } from "@/lib/mcp/name-match";
 import { toISODateString } from "@/lib/date";
 import { ITEM_DISPLAY_ORDER, resolveItemRefs, sumStockQty } from "@/lib/items";
 import { roundCents } from "@/lib/money";
@@ -9,7 +10,7 @@ import {
   checkAndAlertLowStock,
   checkAndAlertLowStockMany,
 } from "@/lib/stock-alerts";
-import { effectiveLowStockThreshold, stockDeltaOps } from "@/lib/stock";
+import { effectiveLowStockThreshold, stockDeltaOps, stockUnchanged } from "@/lib/stock";
 import { recordStockCount } from "@/lib/stock-count";
 import { McpToolError, resolveAdminOffice } from "@/lib/mcp/context";
 import { notifyQuietly } from "@/lib/mcp/notify";
@@ -166,40 +167,24 @@ export function registerAdminStockTools(server: McpServer): void {
         throw new McpToolError("An adjustment of zero would change nothing.");
       }
 
-      const target = await prisma.item.findFirst({
-        where: {
-          officeId: scope.officeId,
-          OR: [
-            { id: item.trim() },
-            { name: { equals: item.trim(), mode: "insensitive" } },
-          ],
-        },
-        select: { id: true, name: true, lowStockThreshold: true },
-      });
+      const target = findByIdOrName(
+        await prisma.item.findMany({
+          where: { officeId: scope.officeId },
+          select: { id: true, name: true, lowStockThreshold: true },
+        }),
+        item,
+      );
       if (!target) {
         throw new McpToolError(
           `No item called "${item}" in ${scope.officeName}. Call matecrew_list_items to see them.`,
         );
       }
 
-      const stock = await prisma.stock.findUnique({
-        where: { officeId_itemId: { officeId: scope.officeId, itemId: target.id } },
-        select: { currentQty: true },
-      });
-      const currentQty = stock?.currentQty ?? 0;
-      const newQty = currentQty + adjustment;
-      if (newQty < 0) {
-        throw new McpToolError(
-          `That would take ${target.name} to ${newQty}. Only ${currentQty} are in stock.`,
-        );
-      }
-
-      await prisma.$transaction(
-        stockDeltaOps({
+      const { currentQty, newQty } = await retryOnConflict(() =>
+        adjustStock({
           officeId: scope.officeId,
-          itemId: target.id,
-          delta: adjustment,
-          reason: "ADJUSTMENT",
+          item: target,
+          adjustment,
           note: note || null,
           userId: actor.userId,
         }),
@@ -316,4 +301,35 @@ export function registerAdminStockTools(server: McpServer): void {
       };
     },
   );
+}
+
+/**
+ * Reads the pool, checks the adjustment keeps it at zero or above, then
+ * applies it in one atomic batch. The guard requires the pool to still be at
+ * the level read, so the reported before/after is exact and a take in between
+ * cannot push it below zero: the batch is rolled back and this runs again.
+ */
+async function adjustStock(opts: {
+  readonly officeId: string;
+  readonly item: { readonly id: string; readonly name: string };
+  readonly adjustment: number;
+  readonly note: string | null;
+  readonly userId: string;
+}): Promise<{ currentQty: number; newQty: number }> {
+  const { officeId, item, adjustment, note, userId } = opts;
+  const stock = await prisma.stock.findUnique({
+    where: { officeId_itemId: { officeId, itemId: item.id } },
+    select: { currentQty: true },
+  });
+  const currentQty = stock?.currentQty ?? 0;
+  const newQty = currentQty + adjustment;
+  if (newQty < 0) {
+    throw new McpToolError(`That would take ${item.name} to ${newQty}. Only ${currentQty} are in stock.`);
+  }
+
+  await commitBatch((db) => [
+    stockUnchanged(db, officeId, item.id, stock?.currentQty),
+    ...stockDeltaOps(db, { officeId, itemId: item.id, delta: adjustment, reason: "ADJUSTMENT", note, userId }),
+  ]);
+  return { currentQty, newQty };
 }

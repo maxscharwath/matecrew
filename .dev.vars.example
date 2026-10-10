@@ -1,0 +1,47 @@
+# Variables for `bun run preview` (wrangler, local Workers runtime).
+# Copy to .dev.vars and fill in; .dev.vars is git-ignored.
+# In production, the variables under "Secrets" are set with
+# `wrangler secret put <NAME>`, the others as Worker vars.
+# Bindings (DB, FILES, JOBS, ASSETS) are declared in wrangler.jsonc, not here.
+
+# Which Next.js .env files OpenNext loads in the Worker (development locally).
+NEXTJS_ENV=
+
+# --- Secrets ---
+BETTER_AUTH_SECRET=
+MICROSOFT_CLIENT_SECRET=
+SLACK_BOT_TOKEN=
+SLACK_SIGNING_SECRET=
+RESEND_API_KEY=
+# Signs the platform bridge's requests (src/platform/cloudflare/bridge), through
+# which the Vercel deployment uses this Worker's D1, R2 and Queue. It grants
+# full database and file access: a database credential. At least 32
+# characters (`openssl rand -base64 48`); unset, the bridge is off.
+PLATFORM_BRIDGE_SECRET=
+
+# --- Vars ---
+# Must be the exact public origin: it is the OAuth issuer advertised to MCP
+# clients. NEXT_PUBLIC_APP_URL is also inlined into the client bundle at
+# build time, so it must be set when building too.
+BETTER_AUTH_URL=
+NEXT_PUBLIC_APP_URL=
+
+# Sign-in rules
+ALLOWED_EMAIL_DOMAINS=
+DISABLE_PASSWORD_AUTH=
+EMAIL_DOMAIN_ALIASES=
+
+# Microsoft SSO
+MICROSOFT_CLIENT_ID=
+MICROSOFT_TENANT_ID=
+
+# Slack bot
+SLACK_BOT_USERNAME=
+SLACK_BOT_ICON_URL=
+
+# Resend sender (password reset, settlement statements)
+EMAIL_FROM=
+
+# Terminal: optional downloadable app (hello | showcase) and theme.
+DEVICE_UI_APP=
+DEVICE_UI_THEME=

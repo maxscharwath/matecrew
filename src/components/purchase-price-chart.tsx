@@ -112,12 +112,9 @@ export function PurchasePriceChart({
                   const s = series[ctx.datasetIndex];
                   const billing = (ctx.raw as number).toFixed(2);
                   const paid = s?.purchase[ctx.dataIndex];
-                  const suffix =
-                    paid != null
-                      ? ` (${paidLabel}: CHF ${paid.toFixed(2)})`
-                      : s?.estimated[ctx.dataIndex]
-                        ? ` (${estimatedLabel})`
-                        : "";
+                  let suffix = "";
+                  if (paid != null) suffix = ` (${paidLabel}: CHF ${paid.toFixed(2)})`;
+                  else if (s?.estimated[ctx.dataIndex]) suffix = ` (${estimatedLabel})`;
                   return `${ctx.dataset.label}: ${billingLabel} CHF ${billing}${suffix}`;
                 },
               },

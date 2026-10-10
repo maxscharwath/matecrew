@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
+import { hasRoleWhere } from "@/lib/membership-roles";
 import { requireSession } from "@/lib/auth-utils";
 import { findPendingLink } from "@/lib/device/links";
 
@@ -27,11 +28,11 @@ export async function approveDeviceLink(formData: FormData): Promise<LinkResult>
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
 
   // Only an admin of the chosen office may give a terminal access to it.
-  const membership = await prisma.membership.findUnique({
-    where: { userId_officeId: { userId: session.user.id, officeId: parsed.data.officeId } },
+  const membership = await prisma.membership.findFirst({
+    where: { userId: session.user.id, officeId: parsed.data.officeId, ...hasRoleWhere("ADMIN") },
     include: { office: { select: { name: true } } },
   });
-  if (!membership?.roles.includes("ADMIN")) {
+  if (!membership) {
     return { success: false, error: t("deviceLink.noAdminOffice") };
   }
 

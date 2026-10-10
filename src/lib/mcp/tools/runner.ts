@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { prisma } from "@/lib/prisma";
+import { BatchConflictError, commitBatch, expectRows, prisma } from "@/lib/prisma";
 import { getDayOfWeek, getTodayDate, toISODateString } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
 import { serveSession } from "@/lib/serve-session";
@@ -210,29 +210,45 @@ export function registerRunnerTools(server: McpServer): void {
         };
       }
 
-      await prisma.$transaction([
-        prisma.dailyRequest.update({
-          where: { id: requestId },
-          data: { status: "SERVED" },
-        }),
-        prisma.consumptionEntry.create({
-          data: {
+      // Read above, one atomic batch here. The guard only serves an order
+      // that is still unserved, so a repeated call cannot consume twice.
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.dailyRequest.updateMany({
+              where: { id: requestId, status: request.status },
+              data: { status: "SERVED" },
+            }),
+            1,
+          ),
+          db.consumptionEntry.createMany({
+            data: [
+              {
+                officeId: scope.officeId,
+                userId: request.userId,
+                itemId: request.itemId,
+                date: request.date,
+                qty: 1,
+                source: "DAILY_REQUEST",
+              },
+            ],
+          }),
+          ...stockDeltaOps(db, {
             officeId: scope.officeId,
-            userId: request.userId,
             itemId: request.itemId,
-            date: request.date,
-            qty: 1,
-            source: "DAILY_REQUEST",
-          },
-        }),
-        ...stockDeltaOps({
-          officeId: scope.officeId,
-          itemId: request.itemId,
-          delta: -1,
-          reason: "SERVED",
-          userId: actor.userId,
-        }),
-      ]);
+            delta: -1,
+            reason: "SERVED",
+            userId: actor.userId,
+          }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        return {
+          ok: true,
+          status: "already_served",
+          message: `${request.user.name}'s ${request.item.name} was already served.`,
+        };
+      }
 
       await notifyQuietly("low-stock", () =>
         checkAndAlertLowStock(scope.officeId, request.itemId),
@@ -271,28 +287,38 @@ export function registerRunnerTools(server: McpServer): void {
         );
       }
 
-      await prisma.$transaction([
-        prisma.dailyRequest.update({
-          where: { id: requestId },
-          data: { status: "REQUESTED" },
-        }),
-        prisma.consumptionEntry.deleteMany({
-          where: {
+      // Read above, one atomic batch here. The guard only reverts an order
+      // that is still served, so a repeated call cannot restock twice.
+      try {
+        await commitBatch((db) => [
+          expectRows(
+            db.dailyRequest.updateMany({
+              where: { id: requestId, status: "SERVED" },
+              data: { status: "REQUESTED" },
+            }),
+            1,
+          ),
+          db.consumptionEntry.deleteMany({
+            where: {
+              officeId: scope.officeId,
+              userId: request.userId,
+              itemId: request.itemId,
+              date: request.date,
+              source: "DAILY_REQUEST",
+            },
+          }),
+          ...stockDeltaOps(db, {
             officeId: scope.officeId,
-            userId: request.userId,
             itemId: request.itemId,
-            date: request.date,
-            source: "DAILY_REQUEST",
-          },
-        }),
-        ...stockDeltaOps({
-          officeId: scope.officeId,
-          itemId: request.itemId,
-          delta: 1,
-          reason: "UNSERVED",
-          userId: actor.userId,
-        }),
-      ]);
+            delta: 1,
+            reason: "UNSERVED",
+            userId: actor.userId,
+          }),
+        ]);
+      } catch (error) {
+        if (!(error instanceof BatchConflictError)) throw error;
+        throw new McpToolError("That order is no longer served, so there is nothing to undo.");
+      }
 
       return {
         ok: true,

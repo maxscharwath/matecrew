@@ -1,0 +1,87 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "matecrew",
+  // OWT
+  "account_id": "fb4a07dcf42e0226490dbaea4aa55bba",
+  // OpenNext's fetch handler plus the cron and queue handlers. Build with
+  // `bun run preview` (PLATFORM=cloudflare opennextjs-cloudflare build).
+  "main": "src/platform/cloudflare/worker.ts",
+  // The upload must stay under 10 MiB gzipped (Workers Paid): minified it is
+  // about 8 MiB, unminified about 9.
+  "minify": true,
+  "compatibility_date": "2026-10-01",
+  // nodejs_compat also copies vars and secrets into process.env.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // The worker entry is bundled by wrangler, outside Next: resolve the
+  // platform the same way next.config.ts does for PLATFORM=cloudflare.
+  "alias": {
+    "@/platform/active": "./src/platform/cloudflare/index.ts",
+    "server-only": "./src/platform/cloudflare/server-only.ts",
+    "#open-next/worker": "./.open-next/worker.js",
+    "#open-next/init": "./.open-next/cloudflare/init.js"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "matecrew",
+      // Placeholder: the user creates the database in the EU jurisdiction
+      // (`wrangler d1 create matecrew --jurisdiction eu`) and pastes its id
+      // here. Local dev and preview do not need it.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // SQL migrations, applied in order by `wrangler d1 migrations apply`.
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      // Avatars, item pictures, invoices, settlement PDFs, firmware. Created
+      // by the user in the EU jurisdiction (personal data):
+      // `wrangler r2 bucket create matecrew-files --jurisdiction eu`.
+      "binding": "FILES",
+      "bucket_name": "matecrew-files",
+      "jurisdiction": "eu"
+    }
+  ],
+  // Item photos and the terminal's 1-bit pictures (src/platform/cloudflare/images).
+  "images": {
+    "binding": "IMAGES"
+  },
+  // Created by the user: `wrangler queues create matecrew-jobs` and
+  // `wrangler queues create matecrew-jobs-dlq`.
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOBS",
+        "queue": "matecrew-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        // Background jobs (src/jobs), one message per office and period.
+        "queue": "matecrew-jobs",
+        // One job per invocation: each gets its own CPU budget.
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "dead_letter_queue": "matecrew-jobs-dlq"
+      }
+    ]
+  },
+  "triggers": {
+    // Must match src/jobs/schedules.ts (checked by tests/platform/schedules.test.ts).
+    "crons": ["*/5 * * * *", "0 2 * * *", "0 2 1 * *"]
+  },
+  // Rendering and mailing statement PDFs and replaying a month's costing
+  // ledger exceed the default 30 s of CPU on large offices. Workers Paid only.
+  "limits": {
+    "cpu_ms": 60000
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

@@ -5,7 +5,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import { sendPaymentReminderEmail } from "@/lib/email";
 import { buildUserSettlement } from "@/lib/settlement-pdf";
 import { formatMonthLabel } from "@/lib/date";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, fromCents } from "@/lib/money";
 
 /**
  * The nudge an admin sends when a bill has been sitting unpaid.
@@ -51,8 +51,59 @@ export interface Debtor {
 /** Resend allows a couple of requests a second; offices are small, so wait. */
 const SEND_INTERVAL_MS = 600;
 
-/** Decimal sums leave rounding dust; a "CHF 0.00" debt is not a debt. */
-const EPSILON = 0.01;
+/** A period being tallied: amounts in integer cents, so sums are exact. */
+interface PeriodTally {
+  readonly periodId: string;
+  readonly year: number;
+  readonly month: number;
+  readonly startDate: Date;
+  readonly currency: string;
+  cents: number;
+  /** Creditor name → cents, in the order they were met. */
+  readonly creditors: Map<string, number>;
+}
+
+/** A debtor being tallied. */
+interface DebtorTally {
+  readonly userId: string;
+  readonly name: string;
+  readonly email: string | null;
+  readonly image: string | null;
+  readonly locale: string;
+  /** Currency → cents, in the order they were met. */
+  readonly totals: Map<string, number>;
+  readonly periods: PeriodTally[];
+}
+
+function addTo<K>(map: Map<K, number>, key: K, cents: number): void {
+  map.set(key, (map.get(key) ?? 0) + cents);
+}
+
+/** The tally as the caller reads it: amounts in francs, settled periods and currencies dropped. */
+function toDebtor(tally: DebtorTally): Debtor {
+  return {
+    userId: tally.userId,
+    name: tally.name,
+    email: tally.email,
+    image: tally.image,
+    locale: tally.locale,
+    totals: [...tally.totals]
+      .filter(([, cents]) => cents > 0)
+      .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
+    periods: tally.periods
+      .filter((p) => p.cents > 0)
+      .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())
+      .map((p) => ({
+        periodId: p.periodId,
+        year: p.year,
+        month: p.month,
+        startDate: p.startDate,
+        amount: fromCents(p.cents),
+        currency: p.currency,
+        creditors: [...p.creditors].map(([name, cents]) => ({ name, amount: fromCents(cents) })),
+      })),
+  };
+}
 
 /**
  * Everybody who still owes the office money, with the periods they owe it for.
@@ -66,7 +117,7 @@ export async function getOfficeDebtors(officeId: string): Promise<Debtor[]> {
     prisma.reimbursementLine.findMany({
       where: { status: "PENDING", period: { officeId } },
       select: {
-        amount: true,
+        amountCents: true,
         currency: true,
         fromUser: {
           select: {
@@ -90,16 +141,15 @@ export async function getOfficeDebtors(officeId: string): Promise<Debtor[]> {
   ]);
 
   const members = new Set(memberships.map((m) => m.userId));
-  const byUser = new Map<string, Debtor>();
+  const byUser = new Map<string, DebtorTally>();
   // Keyed by `${userId}:${periodId}:${currency}` — a period frozen under two
   // currencies is two rows, the same way the debt banner treats it.
-  const byPeriod = new Map<string, DebtorPeriod>();
+  const byPeriod = new Map<string, PeriodTally>();
 
   for (const line of lines) {
     const user = line.fromUser;
     if (!members.has(user.id)) continue;
 
-    const amount = line.amount.toNumber();
     let debtor = byUser.get(user.id);
     if (!debtor) {
       debtor = {
@@ -108,15 +158,12 @@ export async function getOfficeDebtors(officeId: string): Promise<Debtor[]> {
         email: user.email,
         image: user.image,
         locale: user.locale,
-        totals: [],
+        totals: new Map(),
         periods: [],
       };
       byUser.set(user.id, debtor);
     }
-
-    const total = debtor.totals.find((t) => t.currency === line.currency);
-    if (total) total.amount += amount;
-    else debtor.totals.push({ currency: line.currency, amount });
+    addTo(debtor.totals, line.currency, line.amountCents);
 
     const key = `${user.id}:${line.period.id}:${line.currency}`;
     let period = byPeriod.get(key);
@@ -126,28 +173,21 @@ export async function getOfficeDebtors(officeId: string): Promise<Debtor[]> {
         year: line.period.year,
         month: line.period.month,
         startDate: line.period.startDate,
-        amount: 0,
         currency: line.currency,
-        creditors: [],
+        cents: 0,
+        creditors: new Map(),
       };
       byPeriod.set(key, period);
       debtor.periods.push(period);
     }
-    period.amount += amount;
-
-    const creditor = period.creditors.find((c) => c.name === line.toUser.name);
-    if (creditor) creditor.amount += amount;
-    else period.creditors.push({ name: line.toUser.name, amount });
+    period.cents += line.amountCents;
+    addTo(period.creditors, line.toUser.name, line.amountCents);
   }
 
+  // Cents add up exactly, so a settled period sums to zero rather than to
+  // rounding dust, and anything above zero is a real debt.
   return [...byUser.values()]
-    .map((debtor) => ({
-      ...debtor,
-      totals: debtor.totals.filter((t) => t.amount > EPSILON),
-      periods: debtor.periods
-        .filter((p) => p.amount > EPSILON)
-        .sort((a, b) => a.startDate.getTime() - b.startDate.getTime()),
-    }))
+    .map(toDebtor)
     .filter((debtor) => debtor.periods.length > 0)
     .sort((a, b) => sumAmounts(b.totals) - sumAmounts(a.totals));
 }
@@ -155,6 +195,46 @@ export async function getOfficeDebtors(officeId: string): Promise<Debtor[]> {
 /** Only for ordering the list — never shown, so mixing currencies is safe. */
 function sumAmounts(totals: { amount: number }[]): number {
   return totals.reduce((sum, t) => sum + t.amount, 0);
+}
+
+/** A debtor's statement PDFs, with what each says about shrinkage and cans. */
+async function gatherStatements(debtor: Debtor) {
+  // The PDF is the one they can already download for that period, built
+  // through the same path so a reminder can never attach a document that
+  // disagrees with the button on their settlements page.
+  const attachments: { filename: string; content: Buffer }[] = [];
+  // Keyed by period, so the mail can name the coulage inside each amount
+  // and say how many matés the amount is for.
+  const lossByPeriod = new Map<string, number>();
+  const qtyByPeriod = new Map<string, number>();
+  for (const period of debtor.periods) {
+    const statement = await buildUserSettlement({
+      periodId: period.periodId,
+      userId: debtor.userId,
+      wantBytes: true,
+    });
+    if (!statement?.buffer) continue;
+    attachments.push({
+      filename: `matecrew-${period.year}-${String(period.month).padStart(2, "0")}.pdf`,
+      content: statement.buffer,
+    });
+    // Only when the period is still owed in full. Part-paid, the pending
+    // amount is no longer the whole bill, and "incl. X of shrinkage" would
+    // be describing a figure that is not on the line above it.
+    const stillWholeBill =
+      Math.abs(statement.netOwed - period.amount) < 0.011;
+    if (statement.lossShare >= 0.005 && stillWholeBill) {
+      lossByPeriod.set(period.periodId, statement.lossShare);
+    }
+    // Cans are not money: the count is true whatever has been paid off,
+    // so unlike the coulage it needs no reconciliation guard.
+    if (statement.qty > 0) qtyByPeriod.set(period.periodId, statement.qty);
+  }
+  return { attachments, lossByPeriod, qtyByPeriod };
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : "Unknown error";
 }
 
 export interface RemindersResult {
@@ -203,38 +283,8 @@ export async function sendPaymentReminders(
     }
     try {
       const { locale } = debtor;
-
-      // The PDF is the one they can already download for that period, built
-      // through the same path so a reminder can never attach a document that
-      // disagrees with the button on their settlements page.
-      const attachments: { filename: string; content: Buffer }[] = [];
-      // Keyed by period, so the mail can name the coulage inside each amount
-      // and say how many matés the amount is for.
-      const lossByPeriod = new Map<string, number>();
-      const qtyByPeriod = new Map<string, number>();
-      for (const period of debtor.periods) {
-        const statement = await buildUserSettlement({
-          periodId: period.periodId,
-          userId: debtor.userId,
-          wantBytes: true,
-        });
-        if (!statement?.buffer) continue;
-        attachments.push({
-          filename: `matecrew-${period.year}-${String(period.month).padStart(2, "0")}.pdf`,
-          content: statement.buffer,
-        });
-        // Only when the period is still owed in full. Part-paid, the pending
-        // amount is no longer the whole bill, and "incl. X of shrinkage" would
-        // be describing a figure that is not on the line above it.
-        const stillWholeBill =
-          Math.abs(statement.netOwed - period.amount) < 0.011;
-        if (statement.lossShare >= 0.005 && stillWholeBill) {
-          lossByPeriod.set(period.periodId, statement.lossShare);
-        }
-        // Cans are not money: the count is true whatever has been paid off,
-        // so unlike the coulage it needs no reconciliation guard.
-        if (statement.qty > 0) qtyByPeriod.set(period.periodId, statement.qty);
-      }
+      const { attachments, lossByPeriod, qtyByPeriod } =
+        await gatherStatements(debtor);
       if (attachments.length === 0) {
         skipped++;
         continue;
@@ -277,7 +327,7 @@ export async function sendPaymentReminders(
     } catch (e) {
       failed.push({
         name: debtor.name,
-        error: e instanceof Error ? e.message : "Unknown error",
+        error: errorMessage(e),
       });
     }
 
