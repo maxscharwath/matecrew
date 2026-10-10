@@ -5,8 +5,8 @@ use embedded_svc::http::{client::Client, Method};
 use embedded_svc::io::Write;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use matecrew_core::contract::{
-    CommandsResponse, DeviceState, LinkError, LinkGranted, LinkStart, StatusReport, Take,
-    TakesRequest, TakesResponse,
+    CommandsResponse, DeviceState, LinkError, LinkGranted, LinkStart, ServeRequest,
+    ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
@@ -204,6 +204,16 @@ impl Api {
             Method::Post,
             "/api/device/takes",
             Body::json(&TakesRequest { takes })?,
+            TIMEOUT,
+        )?)
+    }
+
+    /// "Servi" on the preparation screen: the site serves the session for this badge.
+    pub fn serve(&self, request: &ServeRequest) -> Result<ServeResponse> {
+        expect_json(self.send(
+            Method::Post,
+            "/api/device/serve",
+            Body::json(request)?,
             TIMEOUT,
         )?)
     }

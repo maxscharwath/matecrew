@@ -124,6 +124,27 @@ impl Runtime {
                 let confirm = *confirm;
                 self.choose_dialog(confirm)
             }
+            Some(Action::Sequence { actions }) => {
+                let steps: Vec<String> = actions
+                    .iter()
+                    .filter(|step| !matches!(self.scene.actions.get(*step), Some(Action::Sequence { .. })))
+                    .cloned()
+                    .collect();
+                let mut effects = vec![];
+                for step in steps {
+                    effects.extend(self.handle(&step));
+                }
+                effects
+            }
+            Some(Action::SetStateBound { key, value }) => {
+                let value = value.resolve(&self.data, None).into_owned();
+                let mut local = self.data["local"].clone();
+                local[key] = value;
+                if serde_json::to_vec(&local).is_ok_and(|bytes| bytes.len() <= MAX_LOCAL_STATE) {
+                    self.data["local"] = local;
+                }
+                vec![]
+            }
             Some(Action::SetState { key, value }) => {
                 let mut local = self.data["local"].clone();
                 local[key] = value.clone();
@@ -292,7 +313,7 @@ mod tests {
         let mut app = runtime();
         app.restore(&json!({"local":{"notice":"Cached","unknown":true},"outside":{"secret":true}}));
         assert_eq!(app.data()["local"]["notice"], "Cached");
-        assert_eq!(app.data()["local"]["theme"], "flipper");
+        assert_eq!(app.data()["local"]["theme"], "paper");
         assert!(app.data()["local"].get("unknown").is_none());
         assert!(app.data().get("outside").is_none());
         let before = app.data()["local"].clone();

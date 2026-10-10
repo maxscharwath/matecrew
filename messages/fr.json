@@ -1142,6 +1142,8 @@
       "batteryLow": "Batterie faible",
       "lowStock": "stock bas",
       "preparation": "Préparation",
+      "serve": "Servi",
+      "others": "Autres",
       "preparationOf": "Préparation · {label}",
       "toPrepare": "{count, plural, one {# maté} other {# matés}}",
       "chartTotal": "Stock total · {days} jours",
@@ -1268,12 +1270,14 @@
       "sensors": "Capteurs",
       "battery": "Batterie",
       "signal": "Wi-Fi",
-      "sensorsHint": "Envoyés au site à la prochaine synchro.",
+      "usb": "Sur USB (en charge)",
+      "sensorsHint": "Affichés tout de suite, envoyés au site à la prochaine synchro.",
       "queue": "{count, plural, =0 {File d'attente} one {# prise en attente} other {# prises en attente}}",
       "queueEmpty": "Tout est envoyé. Coupe le Wi-Fi pour voir les prises s'accumuler.",
       "monitor": "Moniteur",
       "theme": {
         "label": "Thème de l’appareil",
+        "paper": "Papier",
         "dark": "Sombre"
       },
       "buzzer": {

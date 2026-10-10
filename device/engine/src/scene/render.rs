@@ -17,14 +17,16 @@ impl Scene {
         data: &Value,
         scale: u32,
     ) -> Result<(), D::Error> {
-        let theme = data
-            .get("local")
+        self.render_with_theme(target, data, scale, self.theme_for(data))
+    }
+    /// The theme the app chose (local state), else the one it declared.
+    pub(crate) fn theme_for(&self, data: &Value) -> Theme {
+        data.get("local")
             .and_then(|v| v.get("theme"))
             .or_else(|| self.state.get("theme"))
             .and_then(Value::as_str)
             .map(Theme::from_name)
-            .unwrap_or_default();
-        self.render_with_theme(target, data, scale, theme)
+            .unwrap_or_default()
     }
     pub fn render_with_theme<D: DrawTarget<Color = BinaryColor>>(
         &self,
@@ -56,39 +58,52 @@ impl Scene {
         if self.validate().is_err() || scale == 0 || scale > 16 {
             return Ok(());
         }
-        let mut themed = Themed { target, theme };
+        let flip = std::cell::Cell::new(false);
+        let mut themed = Themed { target, theme, flip: &flip };
         let mut px = Pixelated::new(&mut themed, scale);
         if clear {
             px.clear(BinaryColor::Off)?;
         }
-        let mut viewport = px.clipped(&Rectangle::new(
-            Point::zero(),
-            Size::new(self.width, self.height),
-        ));
+        let screen = Rectangle::new(Point::zero(), Size::new(self.width, self.height));
+        let mut viewport = crate::clip::Clip::new(&mut px, screen);
+        let area = super::layout::absolute(&self.root, screen, super::layout::Env { data, theme }, None);
         draw_node(
             &self.root,
             &mut viewport,
-            Point::zero(),
+            area,
             data,
             None,
             Rectangle::new(Point::zero(), Size::new(self.width, self.height)),
             &mut RenderPass {
                 remaining: 2048,
                 theme,
+                flip: &flip,
             },
         )
     }
 }
 fn content(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.chars().take(512).collect(),
-        Value::Number(_) | Value::Bool(_) => value.to_string(),
-        _ => "—".into(),
-    }
+    super::expr::text(value)
 }
-struct RenderPass {
+struct RenderPass<'a> {
     remaining: usize,
     theme: Theme,
+    /// Shared with the `Themed` target: true inside ink surfaces.
+    flip: &'a std::cell::Cell<bool>,
+}
+impl RenderPass<'_> {
+    /// Ink and paper are swapped where we draw (dark theme, or inside an ink surface).
+    fn swapped(&self) -> bool {
+        (self.theme == Theme::Dark) != self.flip.get()
+    }
+}
+/// A surface whose content reads in paper.
+fn ink_surface(node: &Node) -> bool {
+    match node {
+        Node::Panel { style: Some(style), .. } => style.background == 1 && style.opacity == 100,
+        Node::Panel { inverted, .. } => *inverted,
+        _ => false,
+    }
 }
 fn panel<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
@@ -108,10 +123,11 @@ fn panel<D: DrawTarget<Color = BinaryColor>>(
         })
         .draw(d)
 }
+/// Draw `node` in `area`, the rectangle layout gave it.
 fn draw_node<D: DrawTarget<Color = BinaryColor>>(
     node: &Node,
     d: &mut D,
-    origin: Point,
+    area: Rectangle,
     data: &Value,
     item: Option<&Value>,
     clip: Rectangle,
@@ -121,20 +137,20 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
         return Ok(());
     }
     pass.remaining -= 1;
-    let area = node.rect().area(origin);
+    let env = super::layout::Env { data, theme: pass.theme };
     // Shadows may extend beyond the surface, but never beyond its parent's clip.
     if let Node::Panel { style: Some(style), .. } = node {
-        style.shadow(&mut d.clipped(&clip), area, pass.theme.radius(false))?;
+        style.shadow(&mut crate::clip::Clip::new(d, clip), area, pass.theme.radius(false))?;
     }
     if area.intersection(&d.bounding_box()).size == Size::zero() {
         return Ok(());
     }
     let clip = clip.intersection(&area);
-    let mut cell = d.clipped(&clip);
+    let mut cell = crate::clip::Clip::new(d, clip);
     match node {
         Node::Router { .. } => {
             if let Some(route) = node.active_route(data) {
-                draw_node(route, d, area.top_left, data, item, clip, pass)?;
+                draw_node(route, d, super::layout::absolute(route, area, env, item), data, item, clip, pass)?;
             }
         }
         Node::Group { children, .. }
@@ -148,22 +164,15 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                     panel(&mut cell, area, *inverted, pass.theme.radius(false))?;
                 }
             }
-            let mut offset = area.top_left;
-            for child in children {
-                draw_node(child, d, offset, data, item, clip, pass)?;
-                match node {
-                    Node::Row { gap, .. } => {
-                        offset.x = offset.x.saturating_add(
-                            child.rect().width.min(4096) as i32 + (*gap).min(4096) as i32,
-                        )
-                    }
-                    Node::Column { gap, .. } => {
-                        offset.y = offset.y.saturating_add(
-                            child.rect().height.min(4096) as i32 + (*gap).min(4096) as i32,
-                        )
-                    }
-                    _ => {}
-                }
+            let ink = ink_surface(node);
+            if ink {
+                pass.flip.set(!pass.flip.get());
+            }
+            for (child, placed) in children.iter().zip(super::layout::place(node, area, env, item)) {
+                draw_node(child, d, placed, data, item, clip, pass)?;
+            }
+            if ink {
+                pass.flip.set(!pass.flip.get());
             }
         }
         Node::Text {
@@ -175,15 +184,20 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
             typography,
             ..
         } => {
-            let resolved = typography.as_ref().map_or_else(|| super::typography::Resolved::plain(pass.theme.font(*font)), |style| style.resolve(pass.theme, *font));
+            let string = content(&value.resolve(data, item));
+            // `fit` text takes the largest size of its family that holds it in this box.
+            let resolved = match typography.as_ref().filter(|style| style.fit) {
+                Some(_) => super::layout::text_font(node, pass.theme, &string, area.size.width as i32).expect("a text node").0,
+                None => typography.as_ref().map_or_else(|| super::typography::Resolved::plain(pass.theme.font(*font)), |style| style.resolve(pass.theme, *font)),
+            };
             let font = resolved.font;
             let extra = resolved.extra();
             let available = (area.size.width as i32 - extra).max(0);
-            let string = content(value.resolve(data, item));
             let metrics = font.get_font_bounding_box(u8g2_fonts::types::VerticalPosition::Baseline);
             let baseline = -metrics.top_left.y;
             let line_height = metrics.size.height as i32 + 2;
-            let visible_lines = (area.size.height as i32 / line_height).max(1) as usize;
+            // The last line needs its glyphs, not the gap after it.
+            let visible_lines = ((area.size.height as i32 + 2) / line_height).max(1) as usize;
             let (x, alignment) = match align {
                 Align::Left => (area.top_left.x, HorizontalAlignment::Left),
                 Align::Center => (
@@ -195,18 +209,19 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                     HorizontalAlignment::Right,
                 ),
             };
-            for (i, line) in text::lines(
+            for (i, line) in text::spaced_lines(
                 font,
                 &string,
                 available,
                 usize::from((*max_lines).min(8)).min(visible_lines),
+                resolved.tracking,
             )
             .iter()
             .enumerate()
             {
                 let line_baseline = area.top_left.y + baseline + i as i32 * line_height;
                 let mut ink = super::typography::Ink { target: &mut cell, baseline: line_baseline, italic: resolved.italic, embolden: resolved.embolden, max_shift: extra };
-                text::label(
+                text::spaced_label(
                     &mut ink,
                     font,
                     line,
@@ -218,9 +233,11 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                         BinaryColor::On
                     },
                     alignment,
+                    resolved.tracking,
                 )?;
             }
         }
+        Node::Button { ghost: true, .. } => {}
         Node::Button {
             label, dock, icon, ..
         } => {
@@ -228,10 +245,28 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                 &mut cell,
                 area,
                 pass.theme,
-                &content(label.resolve(data, item)),
+                &content(&label.resolve(data, item)),
                 *dock,
                 icon.as_ref(),
             )?;
+        }
+        Node::Progress { value, .. } if matches!(pass.theme, Theme::Paper | Theme::Dark) => {
+            // A pill: hairline track, solid bar inset by 3 px, never thinner than a dot.
+            let percent = value.resolve(data, item).as_f64().unwrap_or(0.0).clamp(0.0, 100.0);
+            let pill = |area: Rectangle| {
+                let r = area.size.height / 2;
+                RoundedRectangle::new(area, CornerRadii::new(Size::new(r, r)))
+            };
+            pill(area)
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+                .draw(&mut cell)?;
+            let inner = Size::new(area.size.width.saturating_sub(6), area.size.height.saturating_sub(6));
+            if percent > 0.0 && inner.height > 0 {
+                let width = ((inner.width as f64 * percent / 100.0) as u32).clamp(inner.height.min(inner.width), inner.width);
+                pill(Rectangle::new(area.top_left + Point::new(3, 3), Size::new(width, inner.height)))
+                    .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+                    .draw(&mut cell)?;
+            }
         }
         Node::Progress { value, .. } => {
             panel(&mut cell, area, false, pass.theme.radius(false))?;
@@ -252,10 +287,10 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
             }
         }
         Node::Chart { value, max, .. } | Node::Plot { value, max, .. } => {
-            let (stroke, axes) = if let Node::Plot { stroke, axes, .. } = node {
-                (*stroke, *axes)
+            let (stroke, axes, weight, fill) = if let Node::Plot { stroke, axes, weight, fill, .. } = node {
+                (*stroke, *axes, u32::from(*weight).clamp(1, 4), *fill)
             } else {
-                (0, false)
+                (0, false, 1, 0)
             };
             let maximum = max.resolve(data, item).as_f64().unwrap_or(1.0).max(1.0);
             if axes {
@@ -273,32 +308,36 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
             }
             if let Some(samples) = value.resolve(data, item).as_array() {
                 let n = samples.len().min(64);
+                // Keep thick lines inside the cell: inset by half the weight.
+                let inset = (weight / 2) as i32;
+                let span_x = area.size.width.saturating_sub(1 + 2 * inset as u32);
+                let span_y = area.size.height.saturating_sub(1 + 2 * inset as u32);
                 let point = |i: usize| {
                     area.top_left
                         + Point::new(
-                            (i as u32 * area.size.width.saturating_sub(1)
-                                / (n as u32).saturating_sub(1).max(1))
-                                as i32,
-                            area.size.height.saturating_sub(1) as i32
+                            inset + (i as u32 * span_x / (n as u32).saturating_sub(1).max(1)) as i32,
+                            inset + span_y as i32
                                 - (samples[i].as_f64().unwrap_or(0.0).clamp(0.0, maximum) / maximum
-                                    * area.size.height.saturating_sub(1) as f64)
-                                    as i32,
+                                    * span_y as f64) as i32,
                         )
                 };
-                let mut phase = 0;
+                if fill > 0 && n > 1 {
+                    let base = area.top_left.y + area.size.height as i32 - 1;
+                    for i in 1..n {
+                        let (a, b) = (point(i - 1), point(i));
+                        for x in a.x..=b.x {
+                            let y = a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x).max(1);
+                            cell.draw_iter(
+                                (y..=base)
+                                    .map(|y| Point::new(x, y))
+                                    .filter(|p| super::charts::toned(*p, fill))
+                                    .map(|p| Pixel(p, BinaryColor::On)),
+                            )?;
+                        }
+                    }
+                }
                 for i in 1..n {
-                    let pixels = Line::new(point(i - 1), point(i))
-                        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-                        .pixels();
-                    cell.draw_iter(pixels.filter(|_| {
-                        let on = match stroke {
-                            1 => phase % 3 == 0,
-                            2 => phase % 6 < 3,
-                            _ => true,
-                        };
-                        phase += 1;
-                        on
-                    }))?;
+                    super::charts::thick(&mut cell, point(i - 1), point(i), stroke, weight)?;
                 }
                 if n > 0 {
                     Pixel(point(n - 1), BinaryColor::On).draw(&mut cell)?;
@@ -306,7 +345,7 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
             }
         }
         Node::When { value, child, .. } | Node::Modal { value, child, .. } => {
-            if value.resolve(data, item).as_bool().unwrap_or(false) {
+            if super::expr::truthy(&value.resolve(data, item)) {
                 if matches!(node, Node::Modal { .. }) {
                     cell.draw_iter(
                         area.points()
@@ -314,21 +353,24 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                             .map(|p| Pixel(p, BinaryColor::Off)),
                     )?;
                 }
-                draw_node(child, d, area.top_left, data, item, clip, pass)?;
+                draw_node(child, d, super::layout::absolute(child, area, env, item), data, item, clip, pass)?;
             }
         }
         Node::Image {
             value,
             source_width,
             source_height,
+            inverted,
+            packed,
             ..
         } => {
-            if let Some(values) = value.resolve(data, item).as_array() {
-                let bits: Vec<u8> = values
-                    .iter()
-                    .take(65536)
-                    .map(|v| v.as_u64().unwrap_or(0) as u8)
-                    .collect();
+            let bits: Option<std::borrow::Cow<[u8]>> = match packed {
+                Some(bits) => Some(bits.as_slice().into()),
+                None => value.resolve(data, item).as_array().map(|values| {
+                    values.iter().take(65536).map(|v| v.as_u64().unwrap_or(0) as u8).collect::<Vec<_>>().into()
+                }),
+            };
+            if let Some(bits) = bits {
                 if let Some(sprite) = crate::sprite::PackedSprite::new(
                     &bits,
                     Size::new(*source_width, *source_height),
@@ -337,7 +379,7 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                         &mut cell,
                         area.top_left,
                         area.size,
-                        BinaryColor::On,
+                        if *inverted { BinaryColor::Off } else { BinaryColor::On },
                         None,
                     )?;
                 }
@@ -351,16 +393,19 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
             axes,
             grid,
             legend,
+            stacked,
             ..
         } => {
+            let (values, max) = (values.resolve(data, item), max.resolve(data, item));
             super::charts::Chart {
-                data: values.resolve(data, item),
-                max: max.resolve(data, item),
+                data: &values,
+                max: &max,
                 series,
                 x_key,
                 axes: *axes,
                 grid: *grid,
                 legend: *legend,
+                stacked: *stacked,
             }
             .draw(&mut cell, area, pass.theme)?;
         }
@@ -405,60 +450,36 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                 }
             }
         }
-        Node::Qr { value, .. } => {
+        Node::Qr { value, style, ecc, quiet, logo, .. } => {
             if let Some(payload) = value
                 .resolve(data, item)
                 .as_str()
                 .filter(|s| s.len() <= 2048)
             {
-                if let Ok(qr) = qrcodegen::QrCode::encode_text(payload, qrcodegen::QrCodeEcc::Low) {
-                    let side = qr.size() as u32 + 8;
-                    let module = area.size.width.min(area.size.height) / side;
-                    if module > 0 {
-                        // QR keeps black modules on white even in a dark theme.
-                        let ink = if pass.theme == Theme::Dark {
-                            cell.fill_solid(&area, BinaryColor::On)?;
-                            BinaryColor::Off
-                        } else {
-                            BinaryColor::On
-                        };
-                        let offset = Point::new(
-                            (area.size.width - side * module) as i32 / 2,
-                            (area.size.height - side * module) as i32 / 2,
-                        );
-                        for y in 0..qr.size() {
-                            for x in 0..qr.size() {
-                                if qr.get_module(x, y) {
-                                    cell.fill_solid(
-                                        &Rectangle::new(
-                                            area.top_left
-                                                + offset
-                                                + Point::new(
-                                                    (x + 4) * module as i32,
-                                                    (y + 4) * module as i32,
-                                                ),
-                                            Size::new(module, module),
-                                        ),
-                                        ink,
-                                    )?;
-                                }
-                            }
-                        }
-                    }
-                }
+                // QR keeps black modules on white even in a dark theme.
+                let (paper, ink) = if pass.swapped() {
+                    (BinaryColor::On, BinaryColor::Off)
+                } else {
+                    (BinaryColor::Off, BinaryColor::On)
+                };
+                super::qr::Qr { payload, style: *style, ecc: *ecc, quiet: *quiet, logo: logo.as_ref(), paper, ink }
+                    .draw(&mut cell, area)?;
             }
         }
         Node::Repeat {
             value, child, gap, ..
         } => {
-            if let Some(items) = value.resolve(data, item).as_array() {
-                for (i, entry) in items.iter().take(32).enumerate() {
-                    let origin = area.top_left
-                        + Point::new(
-                            0,
-                            i as i32 * (child.rect().height as i32 + (*gap).min(4096) as i32),
-                        );
-                    draw_node(child, d, origin, data, Some(entry), clip, pass)?;
+            let list = value.resolve(data, item);
+            if let Some(items) = list.as_array() {
+                let mut y = 0i32;
+                for entry in items.iter().take(32) {
+                    let bounds = Rectangle::new(
+                        area.top_left + Point::new(0, y),
+                        Size::new(area.size.width, area.size.height.saturating_sub(y.max(0) as u32)),
+                    );
+                    let placed = super::layout::absolute(child, bounds, env, Some(entry));
+                    draw_node(child, d, placed, data, Some(entry), clip, pass)?;
+                    y = y.saturating_add(placed.size.height as i32 + (*gap).min(4096) as i32);
                 }
             }
         }

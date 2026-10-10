@@ -1,4 +1,4 @@
-//! Terminal host adapter. All layouts are compiled from screens/terminal.tsx.
+//! Terminal host adapter. All layouts are compiled from apps/mate (see device.config.ts).
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use matecrew_core::{contract::decode_base64, flow::Screen};
 use serde_json::{json, Value};
@@ -11,6 +11,8 @@ pub mod device_info;
 pub mod form;
 pub mod frame;
 pub mod notifications;
+#[cfg(test)]
+mod previews;
 mod screens;
 mod status_icons;
 pub use dashboard::{dashboard_screen, state_screen};
@@ -25,23 +27,30 @@ pub fn set_theme(theme: Theme) {
             Theme::Flipper => 0,
             Theme::Macos => 1,
             Theme::Dark => 2,
+            Theme::Paper => 3,
         },
         Ordering::Relaxed,
     );
+}
+static LOCALE: Mutex<String> = Mutex::new(String::new());
+/// The office's locale (`fr`, `en`…), for the screens' translations; empty until the first sync.
+pub fn set_locale(locale: &str) {
+    *LOCALE.lock().expect("locale lock") = locale.chars().take(16).collect();
+}
+fn locale() -> String {
+    LOCALE.lock().expect("locale lock").clone()
 }
 fn theme() -> Theme {
     match THEME.load(Ordering::Relaxed) {
         1 => Theme::Macos,
         2 => Theme::Dark,
+        3 => Theme::Paper,
         _ => Theme::Flipper,
     }
 }
 pub use frame::Frame;
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 480;
-pub const SCALE: u32 = 2;
-pub const W: i32 = 400;
-pub const H: i32 = 240;
 pub const KEY_LEFT_X: i32 = 32;
 pub const KEY_RIGHT_X: i32 = 168;
 
@@ -73,17 +82,34 @@ pub(crate) fn render<D: DrawTarget<Color = BinaryColor>>(
             .unwrap_or_else(|error| panic!("invalid compiled {name} screen: {error}"));
         *cached = Some((*name, scene));
     }
-    cached
-        .as_ref()
-        .expect("loaded screen")
-        .1
-        .render_with_theme(
-            d,
-            &json!({"view":data,"$device":device_info::get()}),
-            SCALE,
-            theme(),
-        )?;
+    let mut device = device_info::get();
+    device["locale"] = json!(locale());
+    let data = json!({"view":data,"$device":device});
+    #[cfg(test)]
+    previews::record(name, &data);
+    let scene = &cached.as_ref().expect("loaded screen").1;
+    scene.render_with_theme(d, &data, app_scale(scene), theme())?;
     notifications::render(d, theme())
+}
+
+/// Integer scale that fits an SDK app's viewport on the panel.
+pub fn app_scale(scene: &engine::Scene) -> u32 {
+    (WIDTH / scene.width).min(HEIGHT / scene.height).max(1)
+}
+
+/// Draw an SDK app, then the system notification layer unless one of the app's dialogs owns the screen.
+/// Shared by the firmware and the virtual terminal so both composite overlays identically.
+pub fn render_app<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    app: &engine::Runtime,
+    scale: u32,
+) -> Result<(), D::Error> {
+    app.scene().render(d, app.data(), scale)?;
+    if app.data()["$overlay"]["dialog"]["visible"] == true {
+        return Ok(());
+    }
+    let theme = Theme::from_name(app.data()["local"]["theme"].as_str().unwrap_or("flipper"));
+    notifications::render(d, theme)
 }
 
 fn message<D: DrawTarget<Color = BinaryColor>>(
@@ -140,16 +166,6 @@ pub struct PickInfo<'a> {
     pub count: u32,
 }
 
-pub fn test_screen<D: DrawTarget<Color = BinaryColor>>(d: &mut D) -> Result<(), D::Error> {
-    message(
-        d,
-        "test",
-        "matécrew",
-        "Banc d'essai",
-        "Rust · TSX · écran 7,5 pouces",
-        "Rendu entièrement sur le terminal",
-    )
-}
 pub fn setup_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     info: &SetupInfo,
@@ -157,7 +173,7 @@ pub fn setup_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "setup",
-        json!({"title":"Wi-Fi","status":"1/2","heading":"SCANNE LE QR","detail":"Scanne pour ouvrir les réglages.","extra":format!("{} · {}",info.ap_ssid,info.ap_password),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password),"footer":format!("Sans QR : {}",info.portal_url.trim_start_matches("http://"))}),
+        json!({"title":"Mise en service","ssid":info.ap_ssid,"password":info.ap_password,"portal":info.portal_url.trim_start_matches("http://"),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password)}),
     )
 }
 pub fn link_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -167,7 +183,7 @@ pub fn link_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "link",
-        json!({"title":"Liaison","status":"2/2","heading":"CODE À VALIDER","detail":info.code,"extra":"Un admin choisit le bureau.","qr":info.url_with_code,"footer":format!("Sans QR : {}",info.url)}),
+        json!({"title":"Mise en service","code":info.code,"url":info.url,"qr":info.url_with_code}),
     )
 }
 pub fn linked_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -175,40 +191,27 @@ pub fn linked_screen<D: DrawTarget<Color = BinaryColor>>(
     office: &str,
     name: &str,
 ) -> Result<(), D::Error> {
-    message(
+    render(
         d,
         "linked",
-        "Terminal lié",
-        "Tout est prêt",
-        &format!("{office} · {name}"),
-        "Une touche, puis ton badge : c'est parti",
+        json!({"title":"Mise en service","office":office,"name":name}),
     )
 }
 pub fn connecting_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     ssid: &str,
 ) -> Result<(), D::Error> {
-    message(
-        d,
-        "connecting",
-        "Connexion",
-        "Connexion Wi-Fi",
-        ssid,
-        "Quelques secondes pour retrouver le réseau",
-    )
+    render(d, "connecting", json!({"title":"Mise en service","ssid":ssid}))
 }
 pub fn connected_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     ssid: &str,
     ip: &str,
 ) -> Result<(), D::Error> {
-    message(
+    render(
         d,
         "connected",
-        "Wi-Fi connecté",
-        "Réseau trouvé",
-        &format!("{ssid} · {ip}"),
-        "Le terminal contacte ton site matécrew",
+        json!({"title":"Mise en service","ssid":ssid,"ip":ip}),
     )
 }
 pub fn error_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -264,20 +267,55 @@ pub fn taken_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "taken",
-        json!({"title":"C'est pris","status":"OK","heading":format!("Bonne pause {name} !"),"item":item,"image":image.unwrap_or(&[]),"footer":"Retour au stock dans un instant"}),
+        json!({"name":name,"item":item,"image":image.unwrap_or(&[])}),
     )
 }
+/// What a person drank, from their badge as of the last sync: counts, the last days and the
+/// month's cost.
+pub struct SummaryInfo<'a> {
+    pub name: &'a str,
+    pub today: u32,
+    pub week: u32,
+    pub month: u32,
+    /// Oldest first, named by `labels`: a count per `products` entry.
+    pub days: &'a [Vec<u32>],
+    pub products: &'a [String],
+    pub labels: &'a [String],
+    pub cost: Option<&'a str>,
+}
+
 pub fn summary_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
-    name: &str,
-    today: u32,
-    week: u32,
-    month: u32,
+    info: &SummaryInfo,
 ) -> Result<(), D::Error> {
+    // One row per day, `p0`…`p3` per product: the chart's stacked bars.
+    let days: Vec<Value> = info
+        .days
+        .iter()
+        .enumerate()
+        .map(|(i, counts)| {
+            let mut row = json!({"day": info.labels.get(i).map_or("", String::as_str)});
+            for (p, n) in counts.iter().take(4).enumerate() {
+                row[format!("p{p}")] = json!(n);
+            }
+            row
+        })
+        .collect();
+    // Two matés a day should not look like a peak: the scale starts at 4.
+    let max = info.days.iter().map(|d| d.iter().sum::<u32>()).max().unwrap_or(0).max(4);
     render(
         d,
         "summary",
-        json!({"title":"Ma conso","name":name,"today":today,"week":week,"month":month,"footer":"Le détail de ta consommation est sur le site"}),
+        json!({
+            "name": info.name,
+            "today": info.today,
+            "week": info.week,
+            "month": info.month,
+            "days": days,
+            "products": info.products.iter().take(4).collect::<Vec<_>>(),
+            "max": max,
+            "cost": info.cost,
+        }),
     )
 }
 pub fn update_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -288,7 +326,7 @@ pub fn update_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "update",
-        json!({"title":"Mise à jour","heading":format!("Installation · {version}"),"percent":percent.min(100),"detail":format!("{} %",percent.min(100)),"footer":"Garde le terminal alimenté jusqu'au redémarrage"}),
+        json!({"version":version,"percent":percent.min(100)}),
     )
 }
 pub fn unknown_badge_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -300,7 +338,7 @@ pub fn unknown_badge_screen<D: DrawTarget<Color = BinaryColor>>(
         Some(url) => render(
             d,
             "claim",
-            json!({"title":"Nouveau badge","heading":"TON BADGE","detail":"Scanne pour le relier à ton compte.","extra":"Puis repasse ton badge.","qr":url,"footer":format!("Badge {uid}")}),
+            json!({"title":"Nouveau badge","uid":uid,"qr":url}),
         ),
         None => message(
             d,
@@ -347,7 +385,23 @@ where
             today,
             week,
             month,
-        } => summary_screen(d, name, *today, *week, *month),
+            days,
+            products,
+            labels,
+            cost,
+        } => summary_screen(
+            d,
+            &SummaryInfo {
+                name,
+                today: *today,
+                week: *week,
+                month: *month,
+                days,
+                products,
+                labels,
+                cost: cost.as_deref(),
+            },
+        ),
         Screen::UnknownBadge { uid, claim_url } => {
             unknown_badge_screen(d, uid, claim_url.as_deref())
         }
@@ -361,7 +415,23 @@ where
             "Rien à prendre",
             "Aucun article n'est actif sur le site.",
         ),
+        Screen::About => about_screen(d),
+        Screen::Served { name, count } => served_screen(d, name, *count),
     }
+}
+
+/// The preparation was served from the terminal: who, and how many orders the site closed.
+pub fn served_screen<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    name: &str,
+    count: u32,
+) -> Result<(), D::Error> {
+    render(d, "served", json!({"name":name,"count":count}))
+}
+
+/// Both keys: the terminal's own page. Everything it shows is in `$device` (`device_info::set`).
+pub fn about_screen<D: DrawTarget<Color = BinaryColor>>(d: &mut D) -> Result<(), D::Error> {
+    render(d, "about", json!({}))
 }
 
 /// Joining payload understood by iOS and Android cameras.

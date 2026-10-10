@@ -1,4 +1,5 @@
 use super::*;
+use super::layout;
 #[derive(Clone, Copy)]
 enum InputQuery<'a> {
     Pointer(Point),
@@ -17,37 +18,32 @@ impl Scene {
         self.find_action(InputQuery::Hardware(input), data)
     }
     fn find_action(&self, query: InputQuery<'_>, data: &Value) -> Option<String> {
+        /// `area` is the node's own rectangle from layout; `clip` what its parents leave visible.
+        #[allow(clippy::too_many_arguments)]
         fn find(
             node: &Node,
-            origin: Point,
+            area: Rectangle,
             query: InputQuery<'_>,
             clip: Rectangle,
             data: &Value,
             item: Option<&Value>,
+            env: layout::Env,
             remaining: &mut usize,
         ) -> Option<String> {
             if *remaining == 0 {
                 return None;
             }
             *remaining -= 1;
-            let area = node.rect().area(origin).intersection(&clip);
-            if area.size.width == 0
-                || area.size.height == 0
-                || matches!(query, InputQuery::Pointer(point) if !area.contains(point))
+            let visible = area.intersection(&clip);
+            if visible.size.width == 0
+                || visible.size.height == 0
+                || matches!(query, InputQuery::Pointer(point) if !visible.contains(point))
             {
                 return None;
             }
             match node {
                 Node::Router { .. } => node.active_route(data).and_then(|route| {
-                    find(
-                        route,
-                        node.rect().area(origin).top_left,
-                        query,
-                        area,
-                        data,
-                        item,
-                        remaining,
-                    )
+                    find(route, layout::absolute(route, area, env, item), query, visible, data, item, env, remaining)
                 }),
                 Node::Button { action, input, .. } => match query {
                     InputQuery::Pointer(_) => Some(action.clone()),
@@ -59,37 +55,19 @@ impl Scene {
                 | Node::Panel { children, .. }
                 | Node::Row { children, .. }
                 | Node::Column { children, .. } => {
-                    let mut offset = node.rect().area(origin).top_left;
+                    // The last match wins: later siblings draw on top.
                     let mut found = None;
-                    for child in children {
-                        if let Some(action) =
-                            find(child, offset, query, area, data, item, remaining)
-                        {
+                    for (child, placed) in children.iter().zip(layout::place(node, area, env, item)) {
+                        if let Some(action) = find(child, placed, query, visible, data, item, env, remaining) {
                             found = Some(action);
-                        }
-                        match node {
-                            Node::Row { gap, .. } => {
-                                offset.x += child.rect().width as i32 + (*gap).min(4096) as i32
-                            }
-                            Node::Column { gap, .. } => {
-                                offset.y += child.rect().height as i32 + (*gap).min(4096) as i32
-                            }
-                            _ => {}
                         }
                     }
                     found
                 }
                 Node::When { value, child, .. } | Node::Modal { value, child, .. } => {
-                    if value.resolve(data, item).as_bool().unwrap_or(false) {
-                        let action = find(
-                            child,
-                            node.rect().area(origin).top_left,
-                            query,
-                            area,
-                            data,
-                            item,
-                            remaining,
-                        );
+                    if super::expr::truthy(&value.resolve(data, item)) {
+                        let placed = layout::absolute(child, area, env, item);
+                        let action = find(child, placed, query, visible, data, item, env, remaining);
                         if matches!(node, Node::Modal { .. }) {
                             Some(action.unwrap_or_default())
                         } else {
@@ -99,24 +77,23 @@ impl Scene {
                         None
                     }
                 }
-                Node::Repeat {
-                    value, child, gap, ..
-                } => {
-                    let origin = node.rect().area(origin).top_left;
-                    let stride = child.rect().height as i32 + (*gap).min(4096) as i32;
-                    value.resolve(data, item).as_array().and_then(|items| {
-                        items.iter().take(32).enumerate().find_map(|(i, entry)| {
-                            find(
-                                child,
-                                origin + Point::new(0, i as i32 * stride),
-                                query,
-                                area,
-                                data,
-                                Some(entry),
-                                remaining,
-                            )
-                        })
-                    })
+                Node::Repeat { value, child, gap, .. } => {
+                    let list = value.resolve(data, item);
+                    let items = list.as_array()?;
+                    let mut y = 0i32;
+                    let mut found = None;
+                    for entry in items.iter().take(32) {
+                        let bounds = Rectangle::new(
+                            area.top_left + Point::new(0, y),
+                            Size::new(area.size.width, area.size.height.saturating_sub(y.max(0) as u32)),
+                        );
+                        let placed = layout::absolute(child, bounds, env, Some(entry));
+                        if found.is_none() {
+                            found = find(child, placed, query, visible, data, Some(entry), env, remaining);
+                        }
+                        y = y.saturating_add(placed.size.height as i32 + (*gap).min(4096) as i32);
+                    }
+                    found
                 }
                 _ => None,
             }
@@ -124,15 +101,10 @@ impl Scene {
         if self.validate().is_err() {
             return None;
         }
-        find(
-            &self.root,
-            Point::zero(),
-            query,
-            Rectangle::new(Point::zero(), Size::new(self.width, self.height)),
-            data,
-            None,
-            &mut 2048,
-        )
+        let env = layout::Env { data, theme: self.theme_for(data) };
+        let screen = Rectangle::new(Point::zero(), Size::new(self.width, self.height));
+        let area = layout::absolute(&self.root, screen, env, None);
+        find(&self.root, area, query, screen, data, None, env, &mut 2048)
     }
 }
 

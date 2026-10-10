@@ -52,6 +52,7 @@ name = "device-engine"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics",
+ "miniz_oxide 0.9.1",
  "png",
  "qrcodegen",
  "serde",

@@ -1142,6 +1142,8 @@
       "batteryLow": "Battery low",
       "lowStock": "low stock",
       "preparation": "Preparation",
+      "serve": "Served",
+      "others": "Others",
       "preparationOf": "Preparation · {label}",
       "toPrepare": "{count, plural, one {# mate} other {# mates}}",
       "chartTotal": "Total stock · {days} days",
@@ -1268,12 +1270,14 @@
       "sensors": "Sensors",
       "battery": "Battery",
       "signal": "Wi-Fi",
-      "sensorsHint": "Sent to the site with the next sync.",
+      "usb": "On USB (charging)",
+      "sensorsHint": "Shown at once, sent to the site with the next sync.",
       "queue": "{count, plural, =0 {Queue} one {# take waiting} other {# takes waiting}}",
       "queueEmpty": "Everything is sent. Cut the Wi-Fi to watch takes pile up.",
       "monitor": "Monitor",
       "theme": {
         "label": "Device theme",
+        "paper": "Paper",
         "dark": "Dark"
       },
       "buzzer": {

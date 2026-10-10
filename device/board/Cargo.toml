@@ -1,0 +1,8 @@
+[package]
+name = "device-board"
+version = "0.1.0"
+edition = "2021"
+description = "Board support for the XIAO ESP32-S3 terminal: pin map, touch-key edge detector, piezo tone programs."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

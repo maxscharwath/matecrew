@@ -11,6 +11,7 @@ mod keys;
 mod nfc;
 mod ota;
 mod portal;
+mod power;
 mod remote;
 mod store;
 mod wifi;
@@ -26,7 +27,7 @@ use esp_idf_svc::{
 };
 use matecrew_core::{
     claim::{self, Claim},
-    contract::{DeviceState, StatusReport},
+    contract::{DeviceState, ServeRequest, StatusReport},
     flow::{Context, Effect, Event, Flow, Screen},
     queue::Queue,
     time,
@@ -46,6 +47,9 @@ use store::Store;
 use wifi::Wifi;
 
 const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// When (UTC) and from which commit this firmware was built (build.rs), for the about page.
+const FIRMWARE_BUILD: &str = env!("MATECREW_BUILD");
+const FIRMWARE_COMMIT: &str = env!("MATECREW_COMMIT");
 /// Failed connections in a row before the device forgets the network and opens setup again.
 const MAX_WIFI_FAILURES: u8 = 3;
 /// Until deep sleep is wired, the device stays awake and syncs on a timer.
@@ -66,6 +70,8 @@ pub enum Input {
     Sync,
     Restart,
     ForgetWifi,
+    /// The serial console's `site <url>`: the same site at a new address.
+    MoveSite(String),
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -110,6 +116,29 @@ fn app() -> Result<()> {
         log::warn!("no serial console commands: {e:#}");
     }
     keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone())?;
+    // D5 (GPIO 6): half the battery voltage. Without the ADC the status bar says "--".
+    let battery = (|| -> Result<_> {
+        use esp_idf_svc::hal::adc::{
+            attenuation::DB_12,
+            oneshot::{
+                config::{AdcChannelConfig, Calibration},
+                AdcChannelDriver, AdcDriver,
+            },
+        };
+        let config = AdcChannelConfig {
+            attenuation: DB_12,
+            calibration: Calibration::Curve,
+            ..Default::default()
+        };
+        Ok(AdcChannelDriver::new(AdcDriver::new(p.adc1)?, p.pins.gpio6, &config)?)
+    })();
+    let supply = power::Supply::new(match battery {
+        Ok(mut channel) => Box::new(move || channel.read().ok()),
+        Err(e) => {
+            log::warn!("no battery reading ({e:#})");
+            Box::new(|| None)
+        }
+    });
     let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, p.pins.gpio44)?;
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio41, p.pins.gpio42) {
         Ok(nfc) => Some(nfc),
@@ -223,6 +252,10 @@ fn app() -> Result<()> {
         last_flow_screen: None,
         started: Instant::now(),
         wifi,
+        ssid: creds.ssid.clone(),
+        rssi: None,
+        supply,
+        slot: ota::running_slot(),
         screen,
         store,
         buzzer,
@@ -233,6 +266,14 @@ fn app() -> Result<()> {
         offline: false,
     }
     .run()
+}
+
+/// The factory base MAC burnt in eFuse, in hex: Espressif's unique id for the chip.
+fn chip_id() -> Option<String> {
+    let mut mac = [0u8; 6];
+    // SAFETY: writes the six bytes of the base MAC into `mac`.
+    let ok = unsafe { esp_idf_svc::sys::esp_efuse_mac_get_default(mac.as_mut_ptr()) } == 0;
+    ok.then(|| mac.iter().map(|b| format!("{b:02X}")).collect())
 }
 
 /// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
@@ -351,6 +392,13 @@ struct Terminal {
     claim_key: [u8; 32],
     mirror: remote::Mirror,
     wifi: Wifi,
+    /// The office network, for the about page.
+    ssid: String,
+    /// The last signal read while connected: the status bar keeps it between reads.
+    rssi: Option<i8>,
+    supply: power::Supply,
+    /// The OTA slot this firmware runs from, read once.
+    slot: Option<String>,
     screen: Panel,
     store: Store,
     buzzer: Buzzer,
@@ -443,6 +491,11 @@ impl Terminal {
                 Next::Input(Input::ForgetWifi) => {
                     log::info!("the site asked to forget the Wi-Fi");
                     self.store.clear_wifi()?;
+                    reset::restart();
+                }
+                Next::Input(Input::MoveSite(url)) => {
+                    log::info!("site moved to {url}, restarting");
+                    self.store.move_site(&url)?;
                     reset::restart();
                 }
             }
@@ -559,7 +612,8 @@ impl Terminal {
     }
 
     fn step(&mut self, event: Event) -> Result<()> {
-        if self.flow.is_idle() {
+        // Both keys belong to the terminal (its about page), whatever app runs.
+        if self.flow.is_idle() && event != Event::BothKeys {
             if let Event::Key { side } = &event {
                 if let Some(app) = &mut self.app {
                     app.tick(self.started.elapsed().as_millis() as u64);
@@ -601,6 +655,7 @@ impl Terminal {
                     ui::engine::scene::BeepTone::Notification => {
                         matecrew_core::flow::Beep::Notification
                     }
+                    ui::engine::scene::BeepTone::Badge => matecrew_core::flow::Beep::Badge,
                 }),
                 ui::engine::Effect::Fetch { id, path } => {
                     if let (Some(app), Ok(value)) = (&mut self.app, self.api.app_data(&path)) {
@@ -649,13 +704,56 @@ impl Terminal {
                     self.queue.note_unknown_badge(&uid);
                     self.save_queue();
                 }
+                Effect::Serve {
+                    uid,
+                    name,
+                    session_id,
+                } => self.serve(&uid, name, session_id.as_deref())?,
                 Effect::Show {
                     screen: Screen::Main,
                 } => self.show_main()?,
                 Effect::Show { screen } => {
+                    if screen == Screen::About {
+                        // The about page shows the readings as they are now.
+                        self.device_info();
+                    }
                     self.last_flow_screen = Some(screen.clone());
                     self.show(|d| ui::flow_screen(d, &screen))?;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// "Servi" and a runner's badge: the site serves the session now, then the main screen
+    /// comes back without the preparation (the flow's message stage).
+    fn serve(&mut self, uid: &str, name: String, session_id: Option<&str>) -> Result<()> {
+        let request = ServeRequest {
+            session_id,
+            badge_uid: uid,
+        };
+        match self.api.serve(&request) {
+            Ok(reply) if reply.reason.is_none() => {
+                log::info!("{name} served {} orders", reply.served);
+                self.buzzer.beep(matecrew_core::flow::Beep::Accepted);
+                let screen = Screen::Served {
+                    name,
+                    count: reply.served,
+                };
+                self.last_flow_screen = Some(screen.clone());
+                self.show(|d| ui::flow_screen(d, &screen))?;
+                // The next main screen shows the stock without the served preparation.
+                self.sync(false);
+            }
+            Ok(reply) => {
+                log::warn!("serve refused: {:?}", reply.reason);
+                self.buzzer.beep(matecrew_core::flow::Beep::Error);
+                self.show(|d| ui::error_screen(d, "Pas servi", "Ce badge n'est relié à aucun compte."))?;
+            }
+            Err(e) => {
+                log::error!("serve failed: {e:#}");
+                self.buzzer.beep(matecrew_core::flow::Beep::Error);
+                self.show(|d| ui::error_screen(d, "Pas servi", "Le site ne répond pas : réessaie dans un instant."))?;
             }
         }
         Ok(())
@@ -669,14 +767,51 @@ impl Terminal {
         self.draw_main()
     }
 
-    fn draw_main(&mut self) -> Result<()> {
-        let info = ui::device_info::set(serde_json::json!({
+    /// `$device` for the screens: board, firmware, network, battery and clock, read now.
+    fn device_info(&mut self) -> serde_json::Value {
+        log_heap();
+        if !self.offline {
+            self.rssi = wifi::rssi().or(self.rssi);
+        }
+        let ip = self
+            .wifi
+            .wifi()
+            .sta_netif()
+            .get_ip_info()
+            .ok()
+            .map(|info| info.ip.to_string())
+            .filter(|ip| ip != "0.0.0.0");
+        let site = self
+            .site
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/');
+        ui::device_info::set(serde_json::json!({
             "board":{"name":"XIAO ESP32-S3","simulated":false},
             "pins":{"left":5,"right":8,"buzzer":44,"nfcSda":41,"nfcScl":42,"battery":6},
-            "wifi":{"rssi":if self.offline { None } else { wifi::rssi() }},
-            "battery":{"millivolts":null,"percent":null},
+            "firmware":{
+                "version":FIRMWARE_VERSION,
+                "build":FIRMWARE_BUILD,
+                "commit":Some(FIRMWARE_COMMIT).filter(|c| !c.is_empty()),
+                "slot":self.slot
+            },
+            "site":site,
+            "device":self.state.as_ref().map(|state| serde_json::json!({"id":state.device.id,"name":state.device.name})),
+            "chip":{"model":"ESP32-S3","id":chip_id()},
+            "wifi":{
+                "rssi":if self.offline { None } else { self.rssi },
+                "ssid":self.ssid,
+                "ip":ip,
+                "mac":wifi::hardware_id(&self.wifi).ok()
+            },
+            "battery":self.supply.read().json(),
+            "uptimeMinutes":self.started.elapsed().as_secs() / 60,
             "clock":ui::device_info::clock(self.state.as_ref(), now())
-        }));
+        }))
+    }
+
+    fn draw_main(&mut self) -> Result<()> {
+        let info = self.device_info();
         if let Some(app) = &mut self.app {
             app.update_device(info);
         }
@@ -784,7 +919,7 @@ impl Terminal {
 
         self.api.status(&StatusReport {
             firmware_version: FIRMWARE_VERSION,
-            battery_mv: None,
+            battery_mv: self.supply.read().millivolts,
             wifi_rssi: wifi::rssi(),
             unknown_badges: self.queue.unknown_badges(),
         })?;

@@ -1,47 +1,28 @@
-/** @jsxImportSource ../../authoring */
-import {
-  Screen,
-  Router,
-  Route,
-  OverlayHost,
-  useDeviceTheme,
-} from "../../authoring";
-import { Home, Components } from "./overview";
-import { Charts, Areas } from "./charts";
+/** @jsxImportSource @matecrew/device-ui */
+import { Screen, Router, Route, OverlayHost, useDeviceTheme } from "@matecrew/device-ui";
+import { Home, TypeScale, Components } from "./overview";
+import { LayoutPage, Charts } from "./charts";
 import { Icons, Media } from "./media";
-import { Themes, State, Hardware } from "./interactive";
+import { Logic, Themes, Hardware } from "./interactive";
+import { TitleBar } from "./shared";
+
+/** The kit, page by page: the keys walk through, taps open a page from the home menu. */
 export default function ShowcaseApp() {
-  const [, setTheme] = useDeviceTheme("flipper");
+  const [, setTheme] = useDeviceTheme("paper");
   return (
-    <Screen width={400} height={240}>
-      <Router width={400} height={240} initial="home">
-        <Route name="home">
-          <Home />
-        </Route>
-        <Route name="components">
-          <Components />
-        </Route>
-        <Route name="charts">
-          <Charts />
-        </Route>
-        <Route name="area">
-          <Areas />
-        </Route>
-        <Route name="icons">
-          <Icons />
-        </Route>
-        <Route name="media">
-          <Media />
-        </Route>
-        <Route name="themes">
-          <Themes change={setTheme} />
-        </Route>
-        <Route name="state">
-          <State />
-        </Route>
-        <Route name="hardware">
-          <Hardware />
-        </Route>
+    <Screen>
+      <TitleBar />
+      <Router initial="home">
+        <Route name="home"><Home /></Route>
+        <Route name="type"><TypeScale /></Route>
+        <Route name="components"><Components /></Route>
+        <Route name="layout"><LayoutPage /></Route>
+        <Route name="charts"><Charts /></Route>
+        <Route name="icons"><Icons /></Route>
+        <Route name="media"><Media /></Route>
+        <Route name="logic"><Logic /></Route>
+        <Route name="themes"><Themes change={setTheme} /></Route>
+        <Route name="hardware"><Hardware /></Route>
       </Router>
       <OverlayHost />
     </Screen>

@@ -1,5 +1,5 @@
 //! Device themes change typography, geometry and ink polarity, never network or app logic.
-use crate::{scene::Font, style};
+use crate::{scene::{typography, Font}, style};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*, primitives::Rectangle};
 use serde::{Deserialize, Serialize};
 use u8g2_fonts::{fonts, FontRenderer};
@@ -10,6 +10,9 @@ pub enum Theme {
     #[default]
     Flipper,
     Macos,
+    /// Native resolution: the grotesque, hairlines and soft radii.
+    Paper,
+    /// `paper` with ink and paper swapped.
     Dark,
 }
 const PIXEL_BODY: FontRenderer = FontRenderer::new::<fonts::u8g2_font_6x12_tf>();
@@ -21,12 +24,14 @@ impl Theme {
         match self {
             Self::Flipper => "flipper",
             Self::Macos => "macos",
+            Self::Paper => "paper",
             Self::Dark => "dark",
         }
     }
     pub fn from_name(name: &str) -> Self {
         match name {
             "macos" => Self::Macos,
+            "paper" => Self::Paper,
             "dark" => Self::Dark,
             _ => Self::Flipper,
         }
@@ -37,6 +42,10 @@ impl Theme {
             (Self::Flipper, Font::Title) => &PIXEL_TITLE,
             (Self::Flipper, Font::Caption) => &PIXEL_CAPTION,
             (Self::Flipper, Font::Display) => &PIXEL_DISPLAY,
+            (Self::Paper | Self::Dark, Font::Caption) => typography::PAPER_CAPTION,
+            (Self::Paper | Self::Dark, Font::Body) => typography::PAPER_BODY,
+            (Self::Paper | Self::Dark, Font::Title) => typography::PAPER_TITLE,
+            (Self::Paper | Self::Dark, Font::Display) => typography::PAPER_DISPLAY,
             (_, Font::Body) => &style::BODY,
             (_, Font::Title) => &style::TITLE,
             (_, Font::Caption) => &style::CAPTION,
@@ -46,19 +55,26 @@ impl Theme {
     pub fn radius(self, button: bool) -> u32 {
         match self {
             Self::Flipper => 2,
+            Self::Paper | Self::Dark if button => 10,
+            Self::Paper | Self::Dark => 12,
             _ if button => 8,
             _ => 6,
         }
     }
 }
-/// Keep drawing semantics identical for all components, including packed images.
+/// Keep drawing semantics identical for all components, including packed images. `flip` is
+/// set while drawing the content of an ink surface, so it reads in paper (CSS color inheritance).
 pub(crate) struct Themed<'a, D> {
     pub target: &'a mut D,
     pub theme: Theme,
+    pub flip: &'a std::cell::Cell<bool>,
 }
 impl<D> Themed<'_, D> {
+    fn inverted(&self) -> bool {
+        (self.theme == Theme::Dark) != self.flip.get()
+    }
     fn color(&self, color: BinaryColor) -> BinaryColor {
-        if self.theme == Theme::Dark {
+        if self.inverted() {
             if color.is_on() {
                 BinaryColor::Off
             } else {
@@ -81,7 +97,7 @@ impl<D: DrawTarget<Color = BinaryColor>> DrawTarget for Themed<'_, D> {
         &mut self,
         pixels: I,
     ) -> Result<(), Self::Error> {
-        let invert = self.theme == Theme::Dark;
+        let invert = self.inverted();
         self.target
             .draw_iter(pixels.into_iter().map(|Pixel(point, color)| {
                 Pixel(
@@ -122,19 +138,33 @@ mod tests {
             json!({"office":{"name":"Inventory"},"items":[{"name":"Classic","stock":36}]}),
         );
         let mut frame = Frame::new(800, 480).unwrap();
-        app.scene().render(&mut frame, app.data(), 4).unwrap();
-        let flipper = frame.bits.clone();
+        app.set_theme(Theme::Paper);
+        app.scene().render(&mut frame, app.data(), 1).unwrap();
+        let paper = frame.bits.clone();
+        // Kit screens pin their type and radii: light themes agree, dark swaps ink and paper.
         app.set_theme(Theme::Macos);
-        app.scene().render(&mut frame, app.data(), 4).unwrap();
-        let macos = frame.bits.clone();
-        assert_ne!(flipper, macos);
+        app.scene().render(&mut frame, app.data(), 1).unwrap();
+        assert_eq!(frame.bits, paper);
         app.set_theme(Theme::Dark);
-        app.scene().render(&mut frame, app.data(), 4).unwrap();
+        app.scene().render(&mut frame, app.data(), 1).unwrap();
         assert_eq!(
             frame.bits,
-            macos.into_iter().map(|byte| !byte).collect::<Vec<_>>()
+            paper.into_iter().map(|byte| !byte).collect::<Vec<_>>()
         );
         assert_eq!(app.data()["stock"]["items"][0]["stock"], 36);
+    }
+    #[test]
+    fn role_text_follows_the_theme_font() {
+        let scene: Scene = serde_json::from_value(json!({"version":1,"width":400,"height":80,"state":{},"root":{"kind":"text","rect":{"x":8,"y":8,"width":384,"height":64},"value":{"literal":"Maté Classic 36"},"font":"title","align":"left","inverted":false,"maxLines":1}})).unwrap();
+        let draw = |theme| {
+            let mut frame = Frame::new(400, 80).unwrap();
+            scene.render_with_theme(&mut frame, &json!({}), 1, theme).unwrap();
+            frame.bits
+        };
+        let (flipper, macos, paper) = (draw(Theme::Flipper), draw(Theme::Macos), draw(Theme::Paper));
+        assert_ne!(flipper, macos);
+        assert_ne!(macos, paper);
+        assert_ne!(flipper, paper);
     }
     #[test]
     fn dark_theme_keeps_qr_modules_black_on_white() {

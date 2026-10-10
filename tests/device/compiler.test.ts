@@ -1,49 +1,50 @@
-import { FoodDrinkCoffeeIcon } from "@matecrew/device-ui/icons/streamline-pixel";
-import * as sdk from "../../device/authoring";
+import { CupSodaIcon } from "@matecrew/device-ui/icons/lucide";
+import * as sdk from "@matecrew/device-ui";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { compileScreen } from "../../device/authoring/jsx-runtime";
-import { encodeScene } from "../../device/authoring/binary";
-import * as screens from "../../device/screens/terminal";
-import { rustScreenManifest } from "../../device/authoring/build";
-import example from "../../device/screens/example";
+import { inflateRawSync } from "node:zlib";
+import { compileScreen, encodeScene, deflate, pack } from "@matecrew/device-ui/compiler";
+import { compileApp, loadProject } from "../../device/sdk/cli/project";
+import example from "../../device/apps/hello";
 
-test("every shipped screen is deterministic binary compiled from TSX", async () => {
-  assert.ok(Object.keys(screens).length > 0);
-  assert.equal(
-    await readFile(
-      new URL("../../device/ui/src/screens.rs", import.meta.url),
-      "utf8",
-    ),
-    rustScreenManifest(Object.keys(screens)),
+test("every committed .dui and generated registry matches its TSX source", async () => {
+  const project = await loadProject(
+    new URL("../../device", import.meta.url).pathname,
   );
-  let total = 0;
-  for (const [name, component] of Object.entries(screens)) {
-    const bytes = encodeScene(compileScreen(component));
-    const shipped = await readFile(
-      new URL(`../../device/screens/compiled/${name}.dui`, import.meta.url),
-    );
-    assert.deepEqual(
-      bytes,
-      new Uint8Array(shipped),
-      `${name}: rebuild terminal screens`,
-    );
-    assert.equal(new TextDecoder().decode(bytes.slice(0, 4)), "DUI1");
-    total += bytes.length;
+  let mate = 0;
+  for (const name of Object.keys(project.config.apps)) {
+    const { artifacts, outputs } = await compileApp(project, name);
+    assert.ok(artifacts.length > 0, name);
+    for (const output of outputs) {
+      const expected =
+        typeof output.data === "string"
+          ? new TextEncoder().encode(output.data)
+          : output.data;
+      assert.deepEqual(
+        new Uint8Array(await readFile(output.path)),
+        expected,
+        `${output.path}: run \`bun dui build\``,
+      );
+    }
+    for (const { bytes, raw } of artifacts) {
+      const magic = new TextDecoder().decode(bytes.slice(0, 4));
+      if (magic === "DUIZ") {
+        // DEFLATE-packed DUI1: the announced size, and any inflater gets the bytecode back.
+        const dui1 = new Uint8Array(inflateRawSync(bytes.slice(8)));
+        assert.equal(new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true), raw);
+        assert.equal(dui1.length, raw);
+        assert.equal(new TextDecoder().decode(dui1.slice(0, 4)), "DUI1");
+      } else assert.equal(magic, "DUI1");
+    }
+    if (name === "mate")
+      mate = artifacts.reduce((sum, { bytes }) => sum + bytes.length, 0);
   }
-  assert.ok(total < 16_000, `screen suite exceeds 16 KB: ${total}`);
+  // Native 800 × 480 screens carry packed art; compressed, 21 screens (about and served
+  // included) stay under 1 KB each on average.
+  assert.ok(mate > 0 && mate < 20_000, `maté screens exceed 20 KB: ${mate}`);
   const scene = compileScreen(example);
-  const bytes = encodeScene(scene);
-  assert.ok(bytes.length < JSON.stringify(scene).length / 2);
-  assert.deepEqual(
-    bytes,
-    new Uint8Array(
-      await readFile(
-        new URL("../../device/screens/example.dui", import.meta.url),
-      ),
-    ),
-  );
+  assert.ok(encodeScene(scene).length < JSON.stringify(scene).length / 2);
 });
 
 test("compiler rejects executable values and oversized layouts", () => {
@@ -120,12 +121,14 @@ test("SDK components compile independently from the terminal and theme hooks rem
       width: 200,
       height: 120,
       children: [
-        sdk.FeedbackCard({
-          icon: FoodDrinkCoffeeIcon,
-          title: "Ready",
-          detail: theme,
+        sdk.Empty({
+          children: [
+            sdk.EmptyMedia({ children: CupSodaIcon({ size: 48 }) }),
+            sdk.EmptyTitle({ children: "Ready" }),
+            sdk.EmptyDescription({ children: theme }),
+          ],
         }),
-        sdk.Button({
+        sdk.Pressable({
           x: 116,
           y: 104,
           width: 84,
@@ -144,4 +147,26 @@ test("SDK components compile independently from the terminal and theme hooks rem
     value: "dark",
   });
   assert.ok(encodeScene(scene).length < 1024);
+});
+
+test("the DEFLATE encoder is deterministic and any inflater reads it", () => {
+  let seed = 7;
+  const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) & 255;
+  const inputs = [
+    new Uint8Array(0),
+    new Uint8Array([42]),
+    new Uint8Array(1000),
+    Uint8Array.from({ length: 70_000 }, random), // beyond the 32 KiB window, incompressible
+    Uint8Array.from({ length: 5000 }, (_, i) => i % 7),
+    encodeScene(compileScreen(example)),
+  ];
+  for (const input of inputs) {
+    const stream = deflate(input);
+    assert.deepEqual(new Uint8Array(inflateRawSync(stream)), input);
+    assert.deepEqual(deflate(input), stream);
+  }
+  // Packing only pays on real bytecode; a tiny or random payload stays DUI1 as is.
+  const scene = encodeScene(compileScreen(example));
+  assert.ok(pack(scene).length < scene.length * 0.7);
+  assert.deepEqual(pack(new Uint8Array([1, 2, 3])), new Uint8Array([1, 2, 3]));
 });

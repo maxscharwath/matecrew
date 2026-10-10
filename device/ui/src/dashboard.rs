@@ -7,8 +7,9 @@ pub fn state_screen<D: DrawTarget<Color = BinaryColor>>(
     offline: bool,
 ) -> Result<(), D::Error> {
     set_theme(Theme::from_name(
-        state.theme.as_deref().unwrap_or("flipper"),
+        state.theme.as_deref().unwrap_or("paper"),
     ));
+    set_locale(&state.office.locale);
     let fallback;
     let data = if let Some(data) = state.screen.as_ref().filter(|s| s.supported()) {
         data
@@ -77,6 +78,7 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
     } else {
         String::new()
     });
+    value["moreCount"] = json!(data.items.len().saturating_sub(6));
     for item in value["items"].as_array_mut().unwrap() {
         item["visible"] = json!(true);
         item["bits"] =
@@ -87,8 +89,19 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
             .items
             .iter()
             .take(4)
-            .map(|i| json!({"title":format!("{} {}",i.count,i.name),"names":i.names}))
+            .map(|i| json!({
+                "title":format!("{} {}",i.count,i.name),
+                "count":i.count,
+                "name":i.name,
+                "names":i.names,
+                "bits":decode_base64(&i.image).unwrap_or_default(),
+                "visible":true
+            }))
             .collect::<Vec<_>>());
+        // The right key serves the session on this screen (core::flow).
+        if !prep.serve_label.is_empty() {
+            value["right"] = json!(prep.serve_label);
+        }
     }
     let name = if data.preparation.is_some() {
         "preparation"
@@ -138,12 +151,9 @@ mod tests {
             })
             .collect();
         let after = draw(&data, false);
-        assert!(
-            &before.bits[..28 * SCALE as usize * 100] == &after.bits[..28 * SCALE as usize * 100]
-        );
-        assert!(
-            &before.bits[208 * SCALE as usize * 100..] == &after.bits[208 * SCALE as usize * 100..]
-        );
+        // Status bar above row 56, key tabs from row 424 (sdk/kit/tokens.ts); 100 bytes a row.
+        assert!(&before.bits[..56 * 100] == &after.bits[..56 * 100]);
+        assert!(&before.bits[424 * 100..] == &after.bits[424 * 100..]);
     }
     #[test]
     fn renderer_clears_previous_screen_and_handles_empty_and_extreme_history() {

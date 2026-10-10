@@ -1,0 +1,6 @@
+# Cargo builds (each crate keeps its own target/ unless a shared target-dir is configured)
+target/
+out/
+node_modules/
+# Built by `just engine` (or `bun dui dev`) for the studio, `dui render` and `dui test`.
+sdk/engine.wasm

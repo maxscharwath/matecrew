@@ -6,10 +6,10 @@ import { WifiIcon } from "@matecrew/device-ui/icons/pixelarticons";
 import { FoodDrinkCoffeeIcon } from "@matecrew/device-ui/icons/streamline-pixel";
 import * as pixel from "@matecrew/device-ui/icons/pixelarticons";
 import * as streamline from "@matecrew/device-ui/icons/streamline-pixel";
-import { compileScreen } from "../../device/authoring/jsx-runtime";
-import { encodeScene } from "../../device/authoring/binary";
-import type { IconComponent } from "../../device/authoring";
-import { pixelGrid } from "../../scripts/device-icons/pixel-grid.mjs";
+import { compileScreen } from "@matecrew/device-ui/compiler";
+import { encodeScene } from "@matecrew/device-ui/compiler";
+import type { IconComponent } from "@matecrew/device-ui";
+import { pixelGrid } from "../../device/sdk/tools/icons/pixel-grid.mjs";
 import sharp from "sharp";
 const require = createRequire(import.meta.url);
 

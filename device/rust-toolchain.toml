@@ -1,0 +1,4 @@
+# Host crates (engine, board, core, ui, web, engine-wasm). The firmware pins its own `esp` toolchain.
+[toolchain]
+channel = "1.98.0"
+targets = ["wasm32-unknown-unknown"]

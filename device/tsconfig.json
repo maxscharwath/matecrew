@@ -1,0 +1,20 @@
+{
+  // The device SDK, its apps and the studio. The site's tsconfig excludes device/; run `bunx tsc -p device`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@matecrew/device-ui",
+    "typeRoots": ["./sdk/node_modules/@types", "../node_modules/@types"],
+    "types": ["bun"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/target", "out", "dist"]
+}

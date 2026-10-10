@@ -10,6 +10,8 @@ struct Reader<'a> {
     strings: Vec<&'a str>,
     values: usize,
     nodes: usize,
+    /// Locales (default first) and, per key, one message per locale.
+    messages: Option<(Vec<String>, BTreeMap<String, Vec<String>>)>,
 }
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], &'static str> {
@@ -94,6 +96,9 @@ impl<'a> Reader<'a> {
         })
     }
     fn binding(&mut self) -> Result<Binding, &'static str> {
+        self.binding_at(0)
+    }
+    fn binding_at(&mut self, depth: usize) -> Result<Binding, &'static str> {
         match self.u8()? {
             0 => Ok(Binding::Literal {
                 literal: self.value(0)?,
@@ -102,6 +107,20 @@ impl<'a> Reader<'a> {
                 bind: self.string()?,
                 fallback: self.value(0)?,
             }),
+            2 => {
+                let expr = self.u8()?;
+                let count = self.u8()? as usize;
+                let (min, max) = crate::scene::expr::arity(expr).ok_or("unknown expression")?;
+                self.values += 1;
+                if depth >= crate::scene::expr::MAX_DEPTH || !(min..=max).contains(&count) || self.values > MAX_VALUES {
+                    return Err("invalid expression");
+                }
+                let args: Vec<Binding> = (0..count).map(|_| self.binding_at(depth + 1)).collect::<Result<_, _>>()?;
+                if expr == crate::scene::expr::op::T {
+                    return self.message(args);
+                }
+                Ok(Binding::Expr { expr, args })
+            }
             _ => Err("bad binding"),
         }
     }
@@ -115,6 +134,89 @@ impl<'a> Reader<'a> {
             a.push(self.node(depth + 1)?);
         }
         Ok(a)
+    }
+    /// `t(key, name, value, ...)` with its messages from the table, decoded once.
+    fn message(&self, args: Vec<Binding>) -> Result<Binding, &'static str> {
+        let mut args = args.into_iter();
+        let Some(Binding::Literal { literal: Value::String(key) }) = args.next() else {
+            return Err("message key must be literal text");
+        };
+        let rest: Vec<Binding> = args.collect();
+        if rest.len() % 2 != 0 {
+            return Err("message arguments come in name/value pairs");
+        }
+        let mut params = Vec::new();
+        for pair in rest.chunks(2) {
+            let Binding::Literal { literal: Value::String(name) } = &pair[0] else {
+                return Err("message argument names must be literal text");
+            };
+            params.push((name.clone(), pair[1].clone()));
+        }
+        let messages = match &self.messages {
+            Some((locales, table)) => match table.get(key.as_str()) {
+                Some(row) => locales.iter().cloned().zip(row.iter().cloned()).collect(),
+                None => vec![(String::new(), key)],
+            },
+            None => vec![(String::new(), key)],
+        };
+        Ok(Binding::Message { messages, params })
+    }
+    /// Optional message table before the root: 0xFF, locales, then each key's messages.
+    fn messages(&mut self) -> Result<(), &'static str> {
+        if self.bytes.get(self.at) != Some(&0xFF) {
+            return Ok(());
+        }
+        self.at += 1;
+        let count = self.u8()? as usize;
+        if !(1..=8).contains(&count) {
+            return Err("locale limit");
+        }
+        let locales = (0..count).map(|_| self.string()).collect::<Result<Vec<_>, _>>()?;
+        let keys = self.u16()? as usize;
+        let mut table = BTreeMap::new();
+        for _ in 0..keys {
+            let key = self.string()?;
+            let row = (0..count).map(|_| self.string()).collect::<Result<Vec<_>, _>>()?;
+            self.values += count;
+            if self.values > MAX_VALUES || table.insert(key, row).is_some() {
+                return Err("invalid message table");
+            }
+        }
+        self.messages = Some((locales, table));
+        Ok(())
+    }
+    fn surface(&mut self) -> Result<SurfaceStyle, &'static str> {
+        Ok(SurfaceStyle {
+            radius: self.u8()?, border_width: self.u8()?, border_style: self.u8()?,
+            background: self.u8()?, opacity: self.u8()?,
+            shadow: if self.flag()? { Some(Shadow { x: self.i16()?, y: self.i16()?, opacity: self.u8()? }) } else { None },
+        })
+    }
+    fn layout(&mut self) -> Result<Layout, &'static str> {
+        let layout = Layout {
+            direction: self.u8()?,
+            align: self.u8()?,
+            justify: self.u8()?,
+            gap: self.u16()?,
+            padding: [self.u16()?, self.u16()?, self.u16()?, self.u16()?],
+        };
+        if layout.valid() { Ok(layout) } else { Err("invalid layout") }
+    }
+    /// Optional packed sprite: width, height (0 = none), then its rows.
+    fn sprite(&mut self, max: u32) -> Result<Option<ButtonIcon>, &'static str> {
+        let width = self.u8()? as u32;
+        let height = self.u8()? as u32;
+        if width == 0 && height == 0 {
+            return Ok(None);
+        }
+        if width == 0 || height == 0 || width > max || height > max {
+            return Err("invalid sprite");
+        }
+        Ok(Some(ButtonIcon {
+            width,
+            height,
+            bits: self.take((width * height).div_ceil(8) as usize)?.to_vec(),
+        }))
     }
     fn node(&mut self, depth: usize) -> Result<Node, &'static str> {
         self.nodes += 1;
@@ -137,7 +239,24 @@ impl<'a> Reader<'a> {
             0 => Node::Group {
                 rect,
                 children: self.children(depth)?,
+                layout: None,
             },
+            28 => Node::Group {
+                rect,
+                layout: Some(self.layout()?),
+                children: self.children(depth)?,
+            },
+            29 => {
+                let inverted = self.flag()?;
+                let style = if self.flag()? { Some(self.surface()?) } else { None };
+                Node::Panel {
+                    rect,
+                    inverted,
+                    style,
+                    layout: Some(self.layout()?),
+                    children: self.children(depth)?,
+                }
+            }
             1 | 2 => {
                 let gap = self.u16()? as u32;
                 let children = self.children(depth)?;
@@ -158,16 +277,11 @@ impl<'a> Reader<'a> {
             3 | 20 => Node::Panel {
                 rect,
                 inverted: self.flag()?,
-                style: if kind == 20 {
-                    Some(SurfaceStyle {
-                        radius: self.u8()?, border_width: self.u8()?, border_style: self.u8()?,
-                        background: self.u8()?, opacity: self.u8()?,
-                        shadow: if self.flag()? { Some(Shadow { x: self.i16()?, y: self.i16()?, opacity: self.u8()? }) } else { None },
-                    })
-                } else { None },
+                style: if kind == 20 { Some(self.surface()?) } else { None },
                 children: self.children(depth)?,
+                layout: None,
             },
-            4 | 21 => {
+            4 | 21 | 22 => {
                 let font = match self.u8()? {
                     0 => Font::Caption,
                     1 => Font::Body,
@@ -189,7 +303,24 @@ impl<'a> Reader<'a> {
                     align,
                     inverted,
                     max_lines,
-                    typography: if kind == 21 { Some(Typography { family: self.u8()?, size: self.u8()?, weight: self.u8()?, italic: self.flag()? }) } else { None },
+                    typography: if kind >= 21 {
+                        let (family, size, weight) = (self.u8()?, self.u8()?, self.u8()?);
+                        // Bit 0: italic; bit 1: shrink to fit.
+                        let style = self.u8()?;
+                        if style > 3 {
+                            return Err("invalid text style");
+                        }
+                        Some(Typography {
+                            family,
+                            size,
+                            weight,
+                            italic: style & 1 != 0,
+                            tracking: if kind == 22 { self.u8()? } else { 0 },
+                            fit: style & 2 != 0,
+                        })
+                    } else {
+                        None
+                    },
                     value: self.binding()?,
                 }
             }
@@ -217,6 +348,7 @@ impl<'a> Reader<'a> {
                     None
                 },
                 dock: if kind == 18 { self.flag()? } else { kind == 17 },
+                ghost: false,
                 icon: if kind == 18 {
                     let width = self.u8()? as u32;
                     let height = self.u8()? as u32;
@@ -238,12 +370,31 @@ impl<'a> Reader<'a> {
                 gap: self.u16()? as u32,
                 child: Box::new(self.node(depth + 1)?),
             },
-            9 => Node::Image {
+            9 | 26 => Node::Image {
                 rect,
                 value: self.binding()?,
                 source_width: self.u16()? as u32,
                 source_height: self.u16()? as u32,
+                inverted: kind == 26 && self.flag()?,
+                packed: None,
             },
+            27 => {
+                let source_width = self.u16()? as u32;
+                let source_height = self.u16()? as u32;
+                if source_width == 0 || source_height == 0 || source_width > MAX_VIEWPORT || source_height > MAX_VIEWPORT {
+                    return Err("invalid sprite size");
+                }
+                let inverted = self.flag()?;
+                let packed = self.take((source_width * source_height).div_ceil(8) as usize)?.to_vec();
+                Node::Image {
+                    rect,
+                    value: Binding::Literal { literal: Value::Null },
+                    source_width,
+                    source_height,
+                    inverted,
+                    packed: Some(packed),
+                }
+            }
             16 => {
                 let initial = self.string()?;
                 let count = self.u8()?;
@@ -269,7 +420,12 @@ impl<'a> Reader<'a> {
                 let x_key = self.string()?;
                 let axes = self.flag()?;
                 let grid = self.flag()?;
-                let legend = self.flag()?;
+                // Bit 0: legend; bit 1: stacked bars.
+                let options = self.u8()?;
+                if options > 3 {
+                    return Err("invalid chart options");
+                }
+                let (legend, stacked) = (options & 1 != 0, options & 2 != 0);
                 let count = self.u8()?;
                 if !(1..=4).contains(&count) {
                     return Err("chart series limit");
@@ -292,6 +448,7 @@ impl<'a> Reader<'a> {
                     axes,
                     grid,
                     legend,
+                    stacked,
                 }
             }
             13 => Node::WebImage {
@@ -299,28 +456,100 @@ impl<'a> Reader<'a> {
                 src: self.binding()?,
                 cover: self.flag()?,
             },
-            12 => Node::Plot {
+            12 | 25 => Node::Plot {
                 rect,
                 value: self.binding()?,
                 max: self.binding()?,
                 stroke: self.u8()?,
                 axes: self.flag()?,
+                weight: if kind == 25 { self.u8()? } else { 1 },
+                fill: if kind == 25 { self.u8()? } else { 0 },
             },
             11 => Node::When {
                 rect,
                 value: self.binding()?,
                 child: Box::new(self.node(depth + 1)?),
             },
+            23 => {
+                let label = self.binding()?;
+                let action = self.string()?;
+                let input = Some(self.string()?).filter(|name| !name.is_empty());
+                let variant = self.u8()?;
+                if variant > 2 {
+                    return Err("bad button variant");
+                }
+                Node::Button {
+                    rect,
+                    label,
+                    action,
+                    input,
+                    dock: variant == 1,
+                    ghost: variant == 2,
+                    icon: self.sprite(64)?,
+                }
+            }
             10 => Node::Qr {
                 rect,
                 value: self.binding()?,
+                style: 0,
+                ecc: 0,
+                quiet: 4,
+                logo: None,
             },
+            24 => {
+                let value = self.binding()?;
+                let style = self.u8()?;
+                let ecc = self.u8()?;
+                let quiet = self.u8()?;
+                if style > 2 || ecc > 3 || quiet > 8 {
+                    return Err("bad QR style");
+                }
+                Node::Qr {
+                    rect,
+                    value,
+                    style,
+                    ecc,
+                    quiet,
+                    logo: self.sprite(128)?,
+                }
+            }
             _ => return Err("unknown node opcode"),
         })
     }
 }
+/// The DUI1 bytes inside a DUIZ container: exactly the announced size, the whole stream used.
+fn inflate(packed: &[u8]) -> Result<Vec<u8>, &'static str> {
+    use miniz_oxide::inflate::core::{decompress, inflate_flags, DecompressorOxide};
+    use miniz_oxide::inflate::TINFLStatus;
+    let (size, stream) = packed.split_first_chunk::<4>().ok_or("truncated bytecode")?;
+    let size = u32::from_le_bytes(*size) as usize;
+    if size > MAX_BYTES || stream.len() > MAX_BYTES {
+        return Err("bytecode size limit");
+    }
+    let mut out = vec![0; size];
+    let mut state = DecompressorOxide::new();
+    let (status, read, written) = decompress(
+        &mut state,
+        stream,
+        &mut out,
+        0,
+        inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
+    );
+    if status != TINFLStatus::Done || read != stream.len() || written != size || out.starts_with(b"DUIZ") {
+        return Err("corrupt compressed bytecode");
+    }
+    Ok(out)
+}
+
 impl Scene {
+    /// DUI1 bytecode, or DUIZ: the same, DEFLATE-compressed (`DUIZ`, u32 size, raw stream).
     pub fn from_bytecode(bytes: &[u8]) -> Result<Self, &'static str> {
+        match bytes.strip_prefix(b"DUIZ") {
+            Some(packed) => Self::from_dui1(&inflate(packed)?),
+            None => Self::from_dui1(bytes),
+        }
+    }
+    fn from_dui1(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() > MAX_BYTES {
             return Err("bytecode size limit");
         }
@@ -330,6 +559,7 @@ impl Scene {
             strings: Vec::new(),
             values: 0,
             nodes: 0,
+            messages: None,
         };
         if r.take(4)? != b"DUI1" {
             return Err("unknown bytecode version");
@@ -381,6 +611,7 @@ impl Scene {
                         1 => BeepTone::Success,
                         2 => BeepTone::Error,
                         3 => BeepTone::Notification,
+                        4 => BeepTone::Badge,
                         _ => return Err("invalid beep tone"),
                     },
                 },
@@ -406,12 +637,26 @@ impl Scene {
                     on_confirm: r.string()?,
                 },
                 7 => Action::DialogChoice { confirm: r.flag()? },
+                8 => {
+                    let count = r.u8()? as usize;
+                    if !(1..=8).contains(&count) {
+                        return Err("bad action sequence");
+                    }
+                    Action::Sequence {
+                        actions: (0..count).map(|_| r.string()).collect::<Result<_, _>>()?,
+                    }
+                }
+                9 => Action::SetStateBound {
+                    key: r.string()?,
+                    value: r.binding()?,
+                },
                 _ => return Err("bad action"),
             };
             if actions.insert(id, action).is_some() {
                 return Err("duplicate action identifier");
             }
         }
+        r.messages()?;
         let root = r.node(0)?;
         if r.at != bytes.len() {
             return Err("trailing bytecode");
@@ -450,15 +695,16 @@ mod tests {
         assert!(runtime.advance(100, false).is_empty());
         assert!(runtime.update("stock",json!({"office":{"name":"Lausanne"},"items":[{"name":"Maté Classic","stock":36}],"screen":{"chart":{"series":[[48,44,36]],"max":50}}})));
         let mut frame = Frame::new(800, 480).unwrap();
-        scene.render(&mut frame, runtime.data(), 2).unwrap();
+        scene.render(&mut frame, runtime.data(), 1).unwrap();
         assert!(frame.bits.iter().any(|&b| b != 0));
         let before = frame.bits.clone();
-        runtime.press(crate::Point::new(336, 226)); // Compiled useDeviceState setter behind the help button.
-        scene.render(&mut frame, runtime.data(), 2).unwrap();
+        runtime.press(crate::Point::new(670, 452)); // Compiled useDeviceState setter behind the help key tab.
+        scene.render(&mut frame, runtime.data(), 1).unwrap();
         assert!(before != frame.bits);
-        let mut small = Frame::new(400, 240).unwrap();
-        scene.render(&mut small, runtime.data(), 1).unwrap();
-        assert!(small.bits.iter().any(|&b| b != 0));
+        // A larger panel draws the same scene at 2×.
+        let mut large = Frame::new(1600, 960).unwrap();
+        scene.render(&mut large, runtime.data(), 2).unwrap();
+        assert!(large.bits.iter().any(|&b| b != 0));
         assert_eq!(runtime.advance(120_000, false).len(), 1);
     }
     #[test]

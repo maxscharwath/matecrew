@@ -12,10 +12,14 @@ pub enum Command {
     App(crate::contract::BuiltinApp),
     Tap(i32, i32),
     Notify(String),
+    /// Both keys together: the about page.
+    BothKeys,
+    /// The same site at a new address (a dev Mac whose IP changed); the token stays.
+    Site(String),
     Help,
 }
 
-pub const HELP: &str = "l: touche gauche, r: touche droite, b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>";
+pub const HELP: &str = "l: touche gauche, r: touche droite, both: les deux (a propos), b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>, site <url>";
 
 pub fn parse(line: &str) -> Option<Command> {
     if let Some(message) = line.trim().strip_prefix("notify ") {
@@ -29,6 +33,15 @@ pub fn parse(line: &str) -> Option<Command> {
         "r" | "right" => Command::Key(Side::Right),
         "b" | "badge" => Command::Badge(normalize_uid(words.next()?)?),
         "s" | "sync" => Command::Sync,
+        "both" | "lr" => Command::BothKeys,
+        "site" => {
+            let url = words.next()?.trim_end_matches('/');
+            let scheme = url.starts_with("http://") || url.starts_with("https://");
+            if !scheme || url.len() > 128 || words.next().is_some() {
+                return None;
+            }
+            Command::Site(url.to_owned())
+        }
         "app" => Command::App(match words.next()? {
             "mate" => crate::contract::BuiltinApp::Mate,
             "showcase" => crate::contract::BuiltinApp::Showcase,
@@ -61,6 +74,14 @@ mod tests {
             Some(Command::Badge("04A1B2C3".into()))
         );
         assert_eq!(parse("s"), Some(Command::Sync));
+    }
+
+    #[test]
+    fn reads_both_keys_and_a_new_site_address() {
+        assert_eq!(parse("both"), Some(Command::BothKeys));
+        assert_eq!(parse("site http://192.168.1.110:3000/"), Some(Command::Site("http://192.168.1.110:3000".into())));
+        assert_eq!(parse("site ftp://x"), None);
+        assert_eq!(parse("site"), None);
     }
 
     #[test]

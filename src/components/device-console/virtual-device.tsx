@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { approveDeviceLink } from "@/app/link/actions";
 import {
@@ -221,9 +222,10 @@ function Running({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="paper">{t("theme.paper")}</SelectItem>
+              <SelectItem value="dark">{t("theme.dark")}</SelectItem>
               <SelectItem value="flipper">Flipper</SelectItem>
               <SelectItem value="macos">macOS</SelectItem>
-              <SelectItem value="dark">{t("theme.dark")}</SelectItem>
             </SelectContent>
           </Select>
           {snapshot.linked && (
@@ -464,6 +466,9 @@ function SensorsCard({ device }: { device: VirtualDevice }) {
           format={(dbm) => `${dbm} dBm`}
           onChange={(wifiRssi) => change({ wifiRssi })}
         />
+        <label className="flex items-center gap-2 text-xs">
+          <Switch checked={sensors.usb} onCheckedChange={(usb) => change({ usb })} /> {t("usb")}
+        </label>
         <p className="text-xs text-muted-foreground">{t("sensorsHint")}</p>
       </CardContent>
     </Card>

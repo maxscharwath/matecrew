@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { VirtualBuzzer } from "@/lib/device/virtual/buzzer";
+import { VirtualBuzzer } from "@matecrew/device-ui/emulator";
 import type { VirtualDevice } from "@/lib/device/virtual/runtime";
 import type { Beep } from "@/lib/device/virtual/wasm";
 

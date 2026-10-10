@@ -20,19 +20,16 @@ use matecrew_ui::frame::{Frame, BYTES};
 use serde::Deserialize;
 use std::cell::RefCell;
 thread_local! { static KEYS: RefCell<matecrew_core::hardware::TouchKeys> = RefCell::default(); }
+/// Sample GPIO 5 and 8 at `now_ms`: 1 the left key, 2 the right key, 4 both together, 0 nothing.
+/// Call it every `KEY_POLL_MS`: a lone key comes out once the other could no longer join it.
 #[no_mangle]
-pub extern "C" fn gpio_sample(left: u32, right: u32) -> u32 {
-    KEYS.with_borrow_mut(|keys| {
-        keys.sample(left != 0, right != 0)
-            .into_iter()
-            .flatten()
-            .fold(0, |mask, side| {
-                mask | if side == matecrew_core::contract::Side::Left {
-                    1
-                } else {
-                    2
-                }
-            })
+pub extern "C" fn gpio_sample(left: u32, right: u32, now_ms: f64) -> u32 {
+    use matecrew_core::{contract::Side, flow::Event};
+    KEYS.with_borrow_mut(|keys| match keys.sample(left != 0, right != 0, now_ms.max(0.0) as u64) {
+        Some(Event::Key { side: Side::Left }) => 1,
+        Some(Event::Key { side: Side::Right }) => 2,
+        Some(Event::BothKeys) => 4,
+        _ => 0,
     })
 }
 #[no_mangle]
@@ -41,6 +38,7 @@ pub extern "C" fn buzzer_pattern(tone: u32) -> i32 {
         1 => matecrew_core::flow::Beep::Accepted,
         2 => matecrew_core::flow::Beep::Error,
         3 => matecrew_core::flow::Beep::Notification,
+        4 => matecrew_core::flow::Beep::Badge,
         _ => matecrew_core::flow::Beep::Key,
     };
     let bytes = serde_json::to_vec(beep.tones()).unwrap();
@@ -54,7 +52,6 @@ pub extern "C" fn buzzer_pattern(tone: u32) -> i32 {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum View {
     Boot { stage: u8 },
-    Test,
     Main {
         state: DeviceState,
         offline: bool,
@@ -122,7 +119,6 @@ pub fn draw(frame: &mut Frame, view: &View) {
         View::Boot { stage } => ui::boot::render(frame, *stage),
         View::Main { state, offline } => ui::state_screen(frame, state, *offline),
         View::Dashboard { data, offline } => ui::dashboard_screen(frame, data, *offline),
-        View::Test => ui::test_screen(frame),
         View::Connecting { ssid } => ui::connecting_screen(frame, ssid),
         View::Link {
             code,
@@ -334,23 +330,8 @@ pub extern "C" fn app_render(scale: u32) -> i32 {
     APP.with_borrow(|app| match app {
         Some(app) => {
             FRAME.with_borrow_mut(|frame| {
-                let _ = app.scene().render(
-                    frame,
-                    app.data(),
-                    if scale == 0 {
-                        (ui::WIDTH / app.scene().width)
-                            .min(ui::HEIGHT / app.scene().height)
-                            .max(1)
-                    } else {
-                        scale
-                    },
-                );
-                let theme = ui::Theme::from_name(
-                    app.data()["local"]["theme"].as_str().unwrap_or("flipper"),
-                );
-                if app.data()["$overlay"]["dialog"]["visible"] != true {
-                    let _ = ui::notifications::render(frame, theme);
-                }
+                let scale = if scale == 0 { ui::app_scale(app.scene()) } else { scale };
+                let _ = ui::render_app(frame, app, scale);
             });
             0
         }
@@ -477,6 +458,7 @@ pub extern "C" fn set_theme(theme: u32) {
     let theme = match theme {
         1 => ui::Theme::Macos,
         2 => ui::Theme::Dark,
+        3 => ui::Theme::Paper,
         _ => ui::Theme::Flipper,
     };
     ui::set_theme(theme);

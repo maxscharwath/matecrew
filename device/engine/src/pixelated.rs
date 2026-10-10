@@ -41,6 +41,10 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
+        // Native apps draw at 1×: a pixel is a pixel, not a one-pixel block to clip and mask.
+        if self.scale == 1 {
+            return self.target.draw_iter(pixels);
+        }
         for Pixel(point, color) in pixels {
             let block = self.up(&Rectangle::new(point, Size::new(1, 1)));
             self.target.fill_solid(&block, color)?;
@@ -49,6 +53,9 @@ where
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        if self.scale == 1 {
+            return self.target.fill_solid(area, color);
+        }
         let block = self.up(area);
         self.target.fill_solid(&block, color)
     }

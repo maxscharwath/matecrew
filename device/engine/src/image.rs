@@ -65,11 +65,15 @@ pub fn valid_source(src: &str) -> bool {
             .is_none_or(|p| !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Resolve image URLs from the same data/list scopes as the renderer, with bounded traversal.
-pub(crate) fn requests(root: &Node, data: &Value) -> Vec<ImageRequest> {
+/// Resolve image URLs and sizes from the same data, list scopes and layout as the renderer.
+pub(crate) fn requests(scene: &crate::Scene, data: &Value) -> Vec<ImageRequest> {
+    use crate::scene::layout::{self, Env};
+    use embedded_graphics::{prelude::*, primitives::Rectangle};
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         node: &Node,
-        data: &Value,
+        area: Rectangle,
+        env: Env,
         item: Option<&Value>,
         out: &mut Vec<ImageRequest>,
         remaining: &mut usize,
@@ -80,16 +84,16 @@ pub(crate) fn requests(root: &Node, data: &Value) -> Vec<ImageRequest> {
         *remaining -= 1;
         match node {
             Node::Router { .. } => {
-                if let Some(route) = node.active_route(data) {
-                    visit(route, data, item, out, remaining);
+                if let Some(route) = node.active_route(env.data) {
+                    visit(route, layout::absolute(route, area, env, item), env, item, out, remaining);
                 }
             }
-            Node::WebImage { rect, src, cover } => {
-                if let Some(src) = src.resolve(data, item).as_str() {
+            Node::WebImage { src, cover, .. } => {
+                if let Some(src) = src.resolve(env.data, item).as_str() {
                     let request = ImageRequest {
                         src: src.into(),
-                        width: rect.width,
-                        height: rect.height,
+                        width: area.size.width,
+                        height: area.size.height,
                         cover: *cover,
                     };
                     if request.valid()
@@ -106,27 +110,37 @@ pub(crate) fn requests(root: &Node, data: &Value) -> Vec<ImageRequest> {
             | Node::Panel { children, .. }
             | Node::Row { children, .. }
             | Node::Column { children, .. } => {
-                for child in children {
-                    visit(child, data, item, out, remaining);
+                for (child, placed) in children.iter().zip(layout::place(node, area, env, item)) {
+                    visit(child, placed, env, item, out, remaining);
                 }
             }
             Node::When { value, child, .. } | Node::Modal { value, child, .. } => {
-                if value.resolve(data, item).as_bool().unwrap_or(false) {
-                    visit(child, data, item, out, remaining);
+                if crate::scene::expr::truthy(&value.resolve(env.data, item)) {
+                    visit(child, layout::absolute(child, area, env, item), env, item, out, remaining);
                 }
             }
-            Node::Repeat { value, child, .. } => {
-                if let Some(items) = value.resolve(data, item).as_array() {
+            Node::Repeat { value, child, gap, .. } => {
+                let list = value.resolve(env.data, item);
+                if let Some(items) = list.as_array() {
+                    let mut y = 0i32;
                     for entry in items.iter().take(32) {
-                        visit(child, data, Some(entry), out, remaining);
+                        let bounds = Rectangle::new(
+                            area.top_left + Point::new(0, y),
+                            Size::new(area.size.width, area.size.height.saturating_sub(y.max(0) as u32)),
+                        );
+                        let placed = layout::absolute(child, bounds, env, Some(entry));
+                        visit(child, placed, env, Some(entry), out, remaining);
+                        y = y.saturating_add(placed.size.height as i32 + (*gap).min(4096) as i32);
                     }
                 }
             }
             _ => {}
         }
     }
+    let env = Env { data, theme: scene.theme_for(data) };
+    let screen = Rectangle::new(Point::zero(), Size::new(scene.width, scene.height));
     let mut out = Vec::new();
-    visit(root, data, None, &mut out, &mut 2048);
+    visit(&scene.root, layout::absolute(&scene.root, screen, env, None), env, None, &mut out, &mut 2048);
     out
 }
 

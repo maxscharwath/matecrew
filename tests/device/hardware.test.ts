@@ -1,15 +1,14 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { VirtualGpio } from "../../src/lib/device/virtual/gpio";
-import { VirtualBuzzer } from "../../src/lib/device/virtual/buzzer";
+import { VirtualBuzzer, VirtualGpio } from "@matecrew/device-ui/emulator";
 import { DeviceWasm } from "../../src/lib/device/virtual/wasm";
 const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test("virtual GPIO levels pass through the firmware's Rust edge detector", async () => {
+test("virtual GPIO levels pass through the firmware's Rust key detector", async () => {
   const bytes = await readFile(
     new URL("../../public/device/matecrew.wasm", import.meta.url),
   );
@@ -19,31 +18,69 @@ test("virtual GPIO levels pass through the firmware's Rust edge detector", async
     })) as typeof fetch;
   const wasm = await DeviceWasm.load();
   const gpio = new VirtualGpio();
-  const sample = () => wasm.sampleGpio(gpio.read(5), gpio.read(8));
+  // The runtime polls every 20 ms: 1 left, 2 right, 4 both keys, 0 nothing (yet).
+  let now = 0;
+  const sample = () => wasm.sampleGpio(gpio.read(5), gpio.read(8), (now += 20));
+  /** What the next polls report, within the 120 ms the other key has to join. */
+  const settle = (poll = sample) => {
+    for (let i = 0; i < 8; i++) {
+      const mask = poll();
+      if (mask) return mask;
+    }
+    return 0;
+  };
   assert.equal(sample(), 0);
   gpio.drive(5, true, "pointer:1");
-  assert.equal(sample(), 1);
+  assert.equal(sample(), 0); // the right key may still join
+  assert.equal(settle(), 1);
   gpio.drive(5, true, "keyboard");
   gpio.drive(5, false, "pointer:1");
-  assert.equal(sample(), 0); // keyboard still holds GPIO high
+  assert.equal(settle(), 0); // keyboard still holds GPIO high
   for (let i = 0; i < 100; i++) assert.equal(sample(), 0);
   gpio.release();
   assert.equal(sample(), 0);
   gpio.drive(5, true, "pointer:1");
   gpio.drive(8, true, "pointer:2");
-  assert.equal(sample(), 3);
-  assert.deepEqual(wasm.buzzerPattern("key"), [[3136, 22]]);
+  assert.equal(sample(), 4); // both keys together: the about page
+  gpio.release();
+  assert.equal(settle(), 0);
+  gpio.drive(8, true, "pointer:2");
+  assert.equal(sample(), 0);
+  assert.equal(sample(), 0);
+  gpio.drive(5, true, "pointer:1");
+  assert.equal(sample(), 4); // 40 ms apart is still together
+  gpio.release();
+  assert.equal(settle(), 0);
+  // A tap shorter than the 20 ms poll still reaches the detector once.
+  const poll = () => wasm.sampleGpio(gpio.sample(5), gpio.sample(8), (now += 20));
+  gpio.drive(8, true, "keyboard");
+  gpio.drive(8, false, "keyboard");
+  assert.equal(gpio.read(8), false);
+  assert.equal(settle(poll), 2);
+  assert.equal(settle(poll), 0);
+  assert.deepEqual(wasm.buzzerPattern("key"), [
+    [1319, 18],
+    [1568, 12],
+  ]);
   assert.deepEqual(wasm.buzzerPattern("accepted"), [
-    [2093, 45],
-    [0, 25],
-    [2637, 45],
-    [0, 25],
-    [3136, 75],
+    [1047, 40],
+    [0, 18],
+    [1319, 40],
+    [0, 18],
+    [1568, 45],
+    [0, 22],
+    [2093, 65],
+  ]);
+  assert.deepEqual(wasm.buzzerPattern("badge"), [
+    [2093, 26],
+    [2637, 26],
+    [3136, 26],
+    [4186, 90],
   ]);
   assert.deepEqual(wasm.buzzerPattern("error"), [
-    [1760, 55],
-    [0, 25],
-    [1568, 80],
+    [659, 65],
+    [0, 35],
+    [523, 90],
   ]);
 });
 

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dui studio</title>
+    <link rel="stylesheet" href="./studio.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">dui <span>studio</span></div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-view="device" aria-selected="true">Appareil</button>
+        <button role="tab" data-view="previews" aria-selected="false">Previews</button>
+      </nav>
+      <label class="field">App <select id="app"></select></label>
+      <label class="field">État <select id="preview"></select></label>
+      <label class="field">Langue
+        <select id="locale" title="$device.locale : la langue du bureau, comme l'hôte la donne">
+          <option value="">de la preview</option>
+          <option value="fr">français</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <button id="invert" class="toggle" aria-pressed="false" title="Polarité inversée (thème sombre)">Inversé</button>
+      <button id="reset" title="Recharger l'état de départ de la preview">Redémarrer</button>
+      <output id="status" class="status"></output>
+    </header>
+
+    <main>
+      <section id="device-view" class="device-view">
+        <div class="stage">
+          <div class="terminal">
+            <div class="screen">
+              <canvas id="panel" width="800" height="480" aria-label="Écran e-paper 800 × 480"></canvas>
+              <div id="busy" class="busy" hidden>BUSY</div>
+              <pre id="error" class="error" hidden></pre>
+            </div>
+            <div class="deck">
+              <button class="pad" data-side="left" aria-label="Touche gauche">
+                <span class="ring"></span>
+                <span class="label">Touche gauche</span>
+                <span class="meta">TTP223 · GPIO 5 · ←</span>
+              </button>
+              <button id="badge" class="nfc" title="Poser le badge de test (B)">
+                <span class="coil"></span>
+                <span class="label">Badge</span>
+                <span class="meta">PN532 · I2C 0x24 · B</span>
+              </button>
+              <button class="pad" data-side="right" aria-label="Touche droite">
+                <span class="ring"></span>
+                <span class="label">Touche droite</span>
+                <span class="meta">TTP223 · GPIO 8 · →</span>
+              </button>
+            </div>
+          </div>
+          <p class="hint">Touches : ← → ou clic maintenu · B : badge · clic sur l'écran : tap · le son démarre au premier clic</p>
+        </div>
+
+        <aside class="board">
+          <h2>XIAO ESP32-S3 <small>câblage du terminal</small></h2>
+          <table class="pins">
+            <thead><tr><th></th><th>Pad</th><th>GPIO</th><th>Fonction</th><th>Niveau</th></tr></thead>
+            <tbody id="pins"></tbody>
+          </table>
+          <h3>Capteurs</h3>
+          <label class="slider">Batterie <input id="battery" type="range" min="3300" max="4200" step="10" value="3950" /><output id="battery-out"></output></label>
+          <label class="check"><input id="usb" type="checkbox" /> Sur USB (en charge)</label>
+          <label class="slider">Wi-Fi <input id="rssi" type="range" min="-100" max="-30" step="1" value="-55" /><output id="rssi-out"></output></label>
+          <label class="check"><input id="offline" type="checkbox" /> Wi-Fi coupé</label>
+          <h3>Lecteur NFC</h3>
+          <label class="slider">UID <input id="uid" type="text" value="04A1B2C3D4E5F6" spellcheck="false" maxlength="20" pattern="[0-9A-Fa-f]{8,20}" /></label>
+          <h3>Buzzer piézo</h3>
+          <label class="slider">Volume <input id="volume" type="range" min="0" max="1" step="0.05" value="0.3" /><output id="volume-out"></output></label>
+          <label class="check"><input id="mute" type="checkbox" /> Muet</label>
+        </aside>
+
+        <section class="monitor">
+          <h3>Moniteur série <button id="clear" class="link">effacer</button></h3>
+          <ol id="log"></ol>
+        </section>
+      </section>
+
+      <section id="previews-view" class="previews-view" hidden>
+        <div id="grid"></div>
+      </section>
+    </main>
+    <script type="module" src="./studio.ts"></script>
+  </body>
+</html>

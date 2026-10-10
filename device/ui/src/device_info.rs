@@ -1,6 +1,10 @@
 //! Host metadata shared by built-in screens and SDK apps; no server-rendered pixels.
 use crate::status_icons;
-use matecrew_core::{contract::DeviceState, time};
+use matecrew_core::{
+    contract::DeviceState,
+    power::{Power, LOW_PERCENT},
+    time,
+};
 use serde_json::{json, Value};
 use std::sync::{OnceLock, RwLock};
 fn storage() -> &'static RwLock<Value> {
@@ -11,7 +15,9 @@ pub fn get() -> Value {
     storage().read().expect("device info lock").clone()
 }
 /// Decorate host readings with compiled icon assets. Missing battery data stays unknown.
-fn decorate(mut info: Value) -> Value {
+/// Hosts send `battery.millivolts` and `battery.usb`; a host that only knows a percent may
+/// send it instead (previews, the site's virtual terminal).
+pub(crate) fn decorate(mut info: Value) -> Value {
     if !info.is_object() {
         return json!({});
     }
@@ -22,14 +28,47 @@ fn decorate(mut info: Value) -> Value {
         Some(rssi) if rssi >= -85 => status_icons::WIFI_1,
         _ => status_icons::WIFI_0,
     };
-    let percent = info["battery"]["percent"].as_u64().filter(|p| *p <= 100);
+    let reading = &info["battery"];
+    let power = Power {
+        millivolts: reading["millivolts"].as_u64().and_then(|mv| u16::try_from(mv).ok()),
+        usb: reading["usb"].as_bool().unwrap_or(false) || reading["charging"] == true,
+    };
+    let percent = reading["percent"]
+        .as_u64()
+        .filter(|p| *p <= 100)
+        .map(|p| p as u8)
+        .or_else(|| power.percent());
+    let charging = power.usb && percent.is_none_or(|p| p < 100);
+    let low = !power.usb && percent.is_some_and(|p| p <= LOW_PERCENT);
     let battery = match percent {
+        _ if charging => status_icons::BATTERY_CHARGING,
+        _ if power.usb => status_icons::PLUGGED,
+        Some(p) if p <= LOW_PERCENT => status_icons::BATTERY_WARNING,
         Some(67..=100) => status_icons::BATTERY_FULL,
         Some(34..=66) => status_icons::BATTERY_MEDIUM,
-        Some(1..=33) => status_icons::BATTERY_LOW,
-        _ => status_icons::BATTERY_EMPTY,
+        Some(_) => status_icons::BATTERY_LOW,
+        None => status_icons::BATTERY_EMPTY,
     };
-    info["status"] = json!({"wifi":wifi,"battery":battery,"batteryUnknown":if percent.is_none() {"?"} else {""},"batteryText":percent.map_or_else(|| "—".to_owned(), |percent| format!("{percent}%"))});
+    let text = match percent {
+        Some(percent) => format!("{percent}%"),
+        None if power.usb => "USB".to_owned(),
+        None => "--".to_owned(),
+    };
+    info["battery"] = json!({
+        "millivolts": power.millivolts,
+        "percent": percent,
+        "usb": power.usb,
+        "charging": charging,
+        "low": low,
+    });
+    info["status"] = json!({
+        "wifi": wifi,
+        "battery": battery,
+        "batteryUnknown": if percent.is_none() { "?" } else { "" },
+        "batteryText": text,
+        "charging": charging,
+        "low": low,
+    });
     info
 }
 pub fn set(info: Value) -> Value {
@@ -76,5 +115,23 @@ mod tests {
         assert_eq!(info["status"]["batteryUnknown"], "");
         assert_eq!(info["status"]["wifi"], json!(status_icons::WIFI_2));
         assert_eq!(info["status"]["battery"], json!(status_icons::BATTERY_FULL));
+    }
+    #[test]
+    fn battery_reads_from_millivolts_and_shows_charging() {
+        let info = decorate(json!({"battery":{"millivolts":3950}}));
+        assert_eq!(info["battery"]["percent"], 70);
+        assert_eq!(info["status"]["batteryText"], "70%");
+        assert_eq!(info["status"]["battery"], json!(status_icons::BATTERY_FULL));
+        let info = decorate(json!({"battery":{"millivolts":4020,"usb":true}}));
+        assert_eq!(info["status"]["charging"], true);
+        assert_eq!(info["status"]["battery"], json!(status_icons::BATTERY_CHARGING));
+        let info = decorate(json!({"battery":{"millivolts":4200,"usb":true}}));
+        assert_eq!(info["status"]["charging"], false);
+        assert_eq!(info["status"]["battery"], json!(status_icons::PLUGGED));
+        let info = decorate(json!({"battery":{"millivolts":3600}}));
+        assert_eq!(info["status"]["low"], true);
+        assert_eq!(info["status"]["battery"], json!(status_icons::BATTERY_WARNING));
+        let info = decorate(json!({"battery":{"usb":true}}));
+        assert_eq!(info["status"]["batteryText"], "USB");
     }
 }

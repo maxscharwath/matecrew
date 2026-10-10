@@ -6,7 +6,19 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   // Build-time device TSX emits binary nodes, with no DOM or React reconciliation.
-  { files: ["device/apps/**/*.tsx", "device/screens/**/*.tsx", "device/authoring/**/*.tsx"], rules: { "react/jsx-key": "off", "jsx-a11y/alt-text": "off" } },
+  // Its JSX text compiles to bytecode, never to HTML: apostrophes need no escaping.
+  // Its `use*` helpers (useI18n, useLocale, useT) are plain functions run once per build, and
+  // screens are lowercase exports named after their .dui file: React's hook rules do not apply.
+  {
+    files: ["device/apps/**/*.tsx", "device/sdk/**/*.tsx", "tests/device/**/*.tsx"],
+    rules: {
+      "react/jsx-key": "off",
+      "jsx-a11y/alt-text": "off",
+      "react/no-unescaped-entities": "off",
+      "react-hooks/rules-of-hooks": "off",
+      "react/display-name": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

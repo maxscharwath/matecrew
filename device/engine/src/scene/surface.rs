@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SurfaceStyle {
-    /// 255 follows the active theme; explicit radii are in logical pixels.
+    /// 255 follows the active theme; explicit radii (up to 254) are in logical pixels, capped at half the side.
     pub radius: u8,
     pub border_width: u8,
     pub border_style: u8,
@@ -17,7 +17,7 @@ pub struct SurfaceStyle {
 pub struct Shadow { pub x: i16, pub y: i16, pub opacity: u8 }
 impl SurfaceStyle {
     pub(super) fn valid(&self) -> bool {
-        (self.radius <= 64 || self.radius == 255) && self.border_width <= 3
+        self.border_width <= 3
             && self.border_style <= 2 && self.background <= 2 && self.opacity <= 100
             && self.shadow.as_ref().is_none_or(|s| s.x.unsigned_abs() <= 16 && s.y.unsigned_abs() <= 16 && s.opacity <= 100)
     }
@@ -37,21 +37,66 @@ impl SurfaceStyle {
         let shape = self.shape(area, radius);
         if self.background != 2 && self.opacity != 0 {
             let color = if self.background == 1 { BinaryColor::On } else { BinaryColor::Off };
-            d.draw_iter(shape.into_styled(PrimitiveStyle::with_fill(color)).pixels().filter(|Pixel(p, _)| coverage(*p, self.opacity)))?;
+            let fill = shape.into_styled(PrimitiveStyle::with_fill(color));
+            if self.opacity >= 100 {
+                // Opaque: whole scanlines through `fill_solid`, bytes at a time, not pixel by pixel.
+                fill.draw(d)?;
+            } else {
+                // Dithered: the shape's own scanlines, then only the columns the Bayer cell lights.
+                let mut spans = Spans { bounds: fill.bounding_box(), rows: Vec::new() };
+                let _ = fill.draw(&mut spans);
+                for (y, from, to) in spans.rows {
+                    let lit = BAYER[y.rem_euclid(4) as usize].map(|cell| lit(cell, self.opacity));
+                    d.draw_iter((from..=to).filter(|x| lit[x.rem_euclid(4) as usize]).map(|x| Pixel(Point::new(x, y), color)))?;
+                }
+            }
         }
         if self.border_width > 0 {
             let style = PrimitiveStyleBuilder::new().stroke_color(BinaryColor::On)
                 .stroke_width(self.border_width as u32).stroke_alignment(StrokeAlignment::Inside).build();
-            d.draw_iter(shape.into_styled(style).pixels().filter(|Pixel(p, _)| match self.border_style {
-                1 => (p.x + p.y).rem_euclid(6) < 3,
-                2 => (p.x + p.y).rem_euclid(2) == 0,
-                _ => true,
-            }))?;
+            let border = shape.into_styled(style);
+            if self.border_style == 0 {
+                border.draw(d)?;
+            } else {
+                d.draw_iter(border.pixels().filter(|Pixel(p, _)| match self.border_style {
+                    1 => (p.x + p.y).rem_euclid(6) < 3,
+                    _ => (p.x + p.y).rem_euclid(2) == 0,
+                }))?;
+            }
         }
         Ok(())
     }
 }
+const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+/// A Bayer cell is lit at this opacity (percent).
+fn lit(cell: u8, opacity: u8) -> bool {
+    (cell as u16 * 100 + 50) < opacity as u16 * 16
+}
 fn coverage(point: Point, opacity: u8) -> bool {
-    const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-    (BAYER[point.y.rem_euclid(4) as usize][point.x.rem_euclid(4) as usize] as u16 * 100 + 50) < opacity as u16 * 16
+    lit(BAYER[point.y.rem_euclid(4) as usize][point.x.rem_euclid(4) as usize], opacity)
+}
+
+/// Records the horizontal runs embedded-graphics fills a shape with: `(y, first x, last x)`.
+struct Spans {
+    bounds: Rectangle,
+    rows: Vec<(i32, i32, i32)>,
+}
+impl Dimensions for Spans {
+    fn bounding_box(&self) -> Rectangle {
+        self.bounds
+    }
+}
+impl DrawTarget for Spans {
+    type Color = BinaryColor;
+    type Error = core::convert::Infallible;
+    fn draw_iter<I: IntoIterator<Item = Pixel<BinaryColor>>>(&mut self, pixels: I) -> Result<(), Self::Error> {
+        self.rows.extend(pixels.into_iter().map(|Pixel(p, _)| (p.y, p.x, p.x)));
+        Ok(())
+    }
+    fn fill_solid(&mut self, area: &Rectangle, _: BinaryColor) -> Result<(), Self::Error> {
+        if let Some(end) = area.bottom_right() {
+            self.rows.extend((area.top_left.y..=end.y).map(|y| (y, area.top_left.x, end.x)));
+        }
+        Ok(())
+    }
 }

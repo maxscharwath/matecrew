@@ -1,8 +1,8 @@
-//! DUI1 limits, mirrored by authoring/limits.ts and enforced before execution.
+//! DUI1 limits, mirrored by sdk/runtime/limits.ts and enforced before execution.
 pub const MAX_BYTES: usize = 64 * 1024;
 pub const MAX_VIEWPORT: u32 = 4096;
 pub const MAX_DEPTH: usize = 16;
-pub const MAX_NODES: usize = 256;
+pub const MAX_NODES: usize = 512;
 pub const MAX_ACTIONS: usize = 256;
 pub const MAX_RESOURCES: usize = 16;
 pub const MAX_STRINGS: usize = 4096;

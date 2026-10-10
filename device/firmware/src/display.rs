@@ -2,10 +2,12 @@
 //!
 //! Screens are drawn into a frame in memory, then only what changed is sent:
 //! nothing when the frame is the same, a partial refresh of the changed
-//! rectangle otherwise, the controller kept awake from one to the next. Back
-//! on the main screen it goes to sleep. A full refresh, flashing, clears the
-//! ghosting partial refreshes leave: at the first screen, then on the main
-//! screen after FULL_EVERY partial ones or FULL_AFTER, with the fast waveform.
+//! rectangle for an update, the controller kept awake from one to the next.
+//! Back on the main screen it goes to sleep. A new screen (`frame::refresh`:
+//! over 6 % of the pixels turn) takes the fast full refresh, a short flash:
+//! partial refreshes over a whole screen leave the old one showing through.
+//! So does the ghosting partial refreshes add up to, and the first screen, and
+//! the main screen after FULL_EVERY partial ones or FULL_AFTER.
 
 use anyhow::Result;
 use core::convert::Infallible;
@@ -31,6 +33,8 @@ pub struct Screen {
     shown: Vec<u8>,
     next: Frame,
     partials: u32,
+    /// Pixels partial refreshes turned since the last full one: their ghosting adds up.
+    ghost: u32,
     last_full: Option<Instant>,
 }
 
@@ -68,6 +72,7 @@ impl Screen {
             shown: vec![0; frame::BYTES],
             next: Frame::new(),
             partials: 0,
+            ghost: 0,
             last_full: None,
         })
     }
@@ -98,21 +103,7 @@ impl Screen {
     /// Portable TSX bytecode apps use the same physical panel and changed-region refresh path.
     pub fn show_app(&mut self, app: &matecrew_ui::engine::Runtime) -> Result<()> {
         self.show_main(|canvas| {
-            app.scene().render(
-                canvas,
-                app.data(),
-                (matecrew_ui::WIDTH / app.scene().width)
-                    .min(matecrew_ui::HEIGHT / app.scene().height)
-                    .max(1),
-            )?;
-            let theme = matecrew_ui::Theme::from_name(
-                app.data()["local"]["theme"].as_str().unwrap_or("flipper"),
-            );
-            if app.data()["$overlay"]["dialog"]["visible"] == true {
-                Ok(())
-            } else {
-                matecrew_ui::notifications::render(canvas, theme)
-            }
+            matecrew_ui::render_app(canvas, app, matecrew_ui::app_scale(app.scene()))
         })
     }
 
@@ -123,21 +114,24 @@ impl Screen {
 
     fn present(&mut self, full: bool) -> Result<()> {
         let started = Instant::now();
-        let changed = frame::changed(&self.shown, &self.next.bits);
-        if self.last_full.is_none() || full {
+        // A new screen (or enough ghosting) takes the fast full refresh; an update stays partial.
+        let refresh = frame::refresh(&self.shown, &self.next.bits, self.ghost);
+        if self.last_full.is_none() || full || refresh == frame::Refresh::Full {
             // The first refresh takes the long waveform: nobody knows what the panel showed before.
             let fast = self.last_full.is_some();
             self.epd.full(&self.next.bits, fast)?;
             self.partials = 0;
+            self.ghost = 0;
             self.last_full = Some(Instant::now());
             log::info!(
                 "display: {} refresh in {} ms",
                 if fast { "fast" } else { "full" },
                 started.elapsed().as_millis()
             );
-        } else if let Some(window) = changed {
+        } else if let frame::Refresh::Partial { window, turned } = refresh {
             self.epd.partial(window, &self.shown, &self.next.bits)?;
             self.partials += 1;
+            self.ghost += turned;
             log::info!(
                 "display: {} x {} at {},{} in {} ms",
                 window.width,

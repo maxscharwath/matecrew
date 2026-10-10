@@ -12,7 +12,10 @@ Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifa
 - **Prise** : on touche une action, on badge, l'écran confirme avec un bip. On a 10 s pour annuler.
 - **Badge inconnu** : l'écran le signale et le badge apparaît sur le site, où un admin l'attribue à un membre. Personne n'a besoin de connaître un UID.
 - **Hors ligne** : les prises restent en mémoire et partent à la synchro suivante.
-- **Batterie** : le contrat et le simulateur exposent la tension ; la mesure ADC réelle et l’alerte matérielle restent à terminer.
+- **Ma conso** : aujourd'hui, la semaine, le mois, le coût du mois (au prix d'achat des canettes) et les 7 derniers jours en barres empilées par produit.
+- **Préparation** : pendant une préparation, l'écran montre chaque article (image, quantité, qui l'a demandé) ; la touche droite devient « Servi » : le badge du runner clôt la session sur le site (servi, consommé, sorti du stock), comme la page runner.
+- **Batterie** : tension lue sur D5 (pont 1 MΩ / 1 MΩ, `DIVIDER_PERMILLE` dans `core/src/power.rs` pour calibrer), charge selon une courbe LiPo, icône d'alerte sous 10 %. Branché à un ordinateur en USB, la barre d'état montre la charge (un chargeur secteur n'est pas vu : il faudrait un pont VBUS sur D6).
+- **À propos** : les deux touches ensemble, depuis n'importe quel écran : version, date et commit du build, slot OTA, Wi-Fi et signal, IP, MAC, site, id de l'appareil, id de la puce, batterie, durée depuis l'allumage.
 - **Sans interrupteur** : gestes à deux touches pour éteindre, rallumer et redémarrer (détail dans `CLAUDE.md`).
 
 ### Mise en service
@@ -76,18 +79,18 @@ Publier une version :
 
 ## Tous les écrans utilisent le moteur TSX
 
-Les 20 variantes d’écran (Wi-Fi, liaison, badge, prise, confirmation, consommation, erreurs, OTA, stock et préparation) sont réparties dans `screens/terminal/`, avec `apps/mate/index.ts` comme point d’entrée. `just ui` compile ces composants en fichiers binaires DUI1, environ 16 Ko pour l’ensemble. Il n’y a plus de mise en page Rust manuscrite ni de renderer serveur. Rust décode les nœuds, résout les bindings, calcule les textes et dessine les pixels sur l’appareil. Le même code fonctionne dans le terminal virtuel en Wasm.
+Les 20 variantes d’écran (Wi-Fi, liaison, badge, prise, confirmation, consommation, erreurs, OTA, stock et préparation) sont réparties dans `apps/mate/screens/`, avec `apps/mate/index.ts` comme point d’entrée. `bun dui build` compile ces composants en fichiers binaires DUI1 dans `dist/mate/`, environ 16 Ko pour l’ensemble. Il n’y a plus de mise en page Rust manuscrite ni de renderer serveur. Rust décode les nœuds, résout les bindings, calcule les textes et dessine les pixels sur l’appareil. Le même code fonctionne dans le terminal virtuel en Wasm.
 
 `ui/` adapte les événements et les données métier aux écrans compilés. `engine/` est indépendant de matécrew, ESP-IDF et du réseau : framebuffer monochrome de dimensions configurables, composants, textes, images, QR, graphiques, état local et effets. Les API fournissent les données : `state.screen` contient stocks, textes et historique numérique, jamais une mise en page ou une trame. Les anciennes copies NVS sans `screen` sont adaptées aux mêmes écrans TSX.
 
 - Les cartes gardent les noms lisibles, les stocks bas sont inversés et le graphe reste visible. Les grands catalogues affichent six articles en aperçu ; le sélecteur contient tous les articles.
 - Les polices sont intégrées au moteur. Les textes sont limités selon leur largeur réelle et chaque composant est découpé à ses limites.
 - La copie NVS permet de redessiner hors ligne. Le pilote ignore les trames identiques, rafraîchit uniquement les zones modifiées et gère la veille et les rafraîchissements complets.
-- Les définitions intégrées sont embarquées dans le firmware : changer leur TSX demande `just ui`, `just web` et une nouvelle version du firmware. Une application téléchargeable peut aussi être fournie via `state.appUrl`, sous forme de `.dui`.
-- `screens/example.tsx` montre `useDeviceData`, `useDeviceState` et les boutons. Les hooks sont compilés en déclarations de ressources et d’actions ; leur état et leurs effets s’exécutent en Rust. Le host fait les requêtes API et stocke le cache. Aucune VM JavaScript n’est nécessaire.
+- Les définitions intégrées sont embarquées dans le firmware : changer leur TSX demande `bun dui build`, `just web` et une nouvelle version du firmware. Une application téléchargeable peut aussi être fournie via `state.appUrl`, sous forme de `.dui`.
+- `apps/hello/index.tsx` montre `useDeviceData`, `useDeviceState` et les boutons. Les hooks sont compilés en déclarations de ressources et d’actions ; leur état et leurs effets s’exécutent en Rust. Le host fait les requêtes API et stocke le cache. Aucune VM JavaScript n’est nécessaire.
 - Ce DSL TSX supporte Screen, Group, Row, Column, Card, Text, Image, Qr, Chart, Progress, Button, List et When. Ce n’est pas un runtime React/DOM/CSS ; les fonctions TSX s’exécutent à la compilation, pas sur le serveur à chaque rendu.
 
-Voir `authoring/README.md` pour le SDK complet et `engine/README.md` pour l’intégration sur un autre appareil.
+Voir `sdk/README.md` pour le SDK complet et `engine/README.md` pour l’intégration sur un autre appareil.
 
 ### Showcase et contrôle sans boutons
 
@@ -97,7 +100,7 @@ La console web et le terminal virtuel proposent un sélecteur **maté / Showcase
 
 Le SDK expose `useRouter`, `useBuzzer` et `useDeviceInfo`, plus `input="left"` sur les boutons. Les callbacks retournent une action compilée. `useDeviceInfo` fournit le profil de broches et les capteurs disponibles ; ce n’est pas une API d’écriture GPIO. La mesure ADC réelle de batterie reste à implémenter.
 
-Les thèmes `flipper`, `macos`, `dark` se choisissent dans le simulateur ou via `useDeviceTheme`. `DEVICE_UI_THEME` configure le thème initial des écrans maté. Les images web sont des PNG non entrelacés (64 KiB / 512 × 512 max), décodés et tramés dans Rust ; aucun serveur ne dessine l’écran.
+Les thèmes `paper` (par défaut), `dark` (papier inversé) et les anciens `flipper`, `macos` se choisissent dans le simulateur ou via `useDeviceTheme`. `DEVICE_UI_THEME` configure le thème initial des écrans maté. Les images web sont des PNG non entrelacés (64 KiB / 512 × 512 max), décodés et tramés dans Rust ; aucun serveur ne dessine l’écran.
 
 ### Migration vers le firmware 0.3.0
 
@@ -115,8 +118,9 @@ Dans Admin > Appareils :
 ```
 device/
   core/      logique sans matériel : contrat de l'API, file de prises, trames PN532
-  authoring/ DSL et compilateur binaire TSX
-  screens/   écrans TSX et définitions DUI1 compilées
+  sdk/       SDK TSX : DSL, compilateur binaire, kit, icônes et commande `dui`
+  apps/      apps TSX : maté, système, Showcase, hello
+  dist/      bytecode DUI1 compilé, versionné (embarqué par le firmware et le Wasm)
   engine/    moteur Rust générique, indépendant du matériel
   ui/        adaptation des données matécrew au moteur
   sim/       rend tous les écrans en PNG sur le Mac, sans carte
@@ -132,7 +136,7 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 | `just setup` | Installe la toolchain Rust de l'ESP32-S3, `espflash`, `ldproxy` et `cargo-watch` |
 | `just sim` | Redessine les écrans dans `sim/out/` à chaque sauvegarde, en une seconde environ |
 | `just test` | Tests Rust des écrans et de la logique sur le Mac |
-| `just ui` | Compile tous les écrans TSX en binaires DUI1 |
+| `just ui` | Compile toutes les apps TSX de `device.config.ts` dans `dist/` (`bun dui build`) |
 | `just web` | Recompile le terminal virtuel (`public/device/matecrew.wasm`) |
 | `just release` | Construit l'image d'une mise à jour par le réseau |
 | `just publish` | La publie sur le site local : les terminaux l'installent à leur synchro suivante |
@@ -153,16 +157,17 @@ La première compilation du firmware prend 10 à 20 minutes : elle compile ESP-I
 
 ### Présentation du kit
 
-Les écrans maté et Showcase utilisent désormais une grille 400 × 240, dessinée à
-2× sur la dalle 800 × 480. Le moteur aligne les textes avec les métriques réelles
-des polices. La barre basse indique les deux touches physiques par des flèches
-vers le bas, des coins inférieurs carrés et un repère RFID central. L’heure est
-celle du dernier rafraîchissement, le Wi-Fi vient de l’hôte, et la batterie reste
-« ? » tant que sa mesure n’est pas disponible.
+Tous les écrans (maté, mise en service, système, Showcase) sont dessinés en
+800 × 480 natif, un pixel par pixel de la dalle, avec le kit de `sdk/kit/` :
+grotesque Free Universal (type Univers) pour les mots, chiffres Logisoso jusqu'à
+92 px, filets d'un pixel, gris tramés et coins arrondis. La barre d'état donne
+le contexte, l'heure, le Wi-Fi et la batterie ; en bas, deux onglets posés sur
+le bord de la dalle nomment les touches physiques, l'action attendue en noir.
+La mise en service tient en trois étapes affichées dans la barre d'état (Wi-Fi,
+site, prêt), avec un QR à modules arrondis et le logo au centre.
 
-Les dessins maison du SDK sont remplacés par Pixelarticons et Streamline Pixel,
-importés comme composants (`WifiIcon`, `FoodDrinkCoffeeIcon`…) et convertis au
-build en sprites monochromes. Le [catalogue local](authoring/catalog.html) permet
-de chercher et copier les imports. Les visuels monochromes des produits fournis
-par l’API restent prioritaires. Les crédits sont dans
-[authoring/art/licenses](authoring/art/licenses/README.md).
+Les icônes sont celles du site (Lucide), dessinées à la compilation à la taille
+voulue avec des traits de 2 px exacts ; les illustrations (badge au-dessus du
+lecteur, logo) suivent le même chemin. Les images des articles fournies par
+l'API restent prioritaires. Les crédits sont dans
+[sdk/icons/licenses](sdk/icons/licenses/README.md).

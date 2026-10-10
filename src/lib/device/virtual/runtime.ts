@@ -14,6 +14,7 @@ import type {
   DeviceTake,
   LinkStartResponse,
   LinkTokenResponse,
+  ServeResponse,
 } from "@/lib/device/contract";
 import type {
   Beep,
@@ -33,6 +34,9 @@ const MAX_LOGS = 200;
 /** As the firmware's display: a full refresh at first, then on the main screen every 40 partial ones or every hour. */
 const FULL_EVERY = 40;
 const FULL_AFTER_MS = 3_600_000;
+
+/** The simulated readings the virtual terminal reports, set from the console. */
+export type Sensors = { batteryMv: number; wifiRssi: number; usb: boolean };
 
 export type Phase = "booting" | "linking" | "online" | "offline";
 
@@ -132,11 +136,13 @@ export class VirtualDevice {
   };
   private logId = 0;
   private partials = 0;
+  /** Pixels partial refreshes turned since the last full one. */
+  private ghost = 0;
   /** SHA-256 of the token in hex, for the badge claim links. */
   private claimKey: string | null = null;
   private lastFull: number | null = null;
 
-  private sensors = { batteryMv: 4000, wifiRssi: -55 };
+  private sensors: Sensors = { batteryMv: 4000, wifiRssi: -55, usb: false };
   private onBeep: (beep: Beep) => void = () => {};
 
   constructor(
@@ -157,7 +163,7 @@ export class VirtualDevice {
       hardwareId: this.stored.hardwareId,
       queue: this.stored.queue,
       network: true,
-      theme: this.stored.theme ?? this.state?.theme ?? "flipper",
+      theme: this.stored.theme ?? this.state?.theme ?? "paper",
       app: this.stored.appMode ?? "mate",
       logs: [],
     };
@@ -195,7 +201,7 @@ export class VirtualDevice {
     clearInterval(this.gpioTimer);
     this.gpio.release();
     this.gpio.clearPwm();
-    this.wasm.sampleGpio(false, false);
+    this.wasm.sampleGpio(false, false, performance.now());
     clearTimeout(this.overlayTimer);
     this.run.abort();
     clearTimeout(this.tickTimer);
@@ -232,13 +238,14 @@ export class VirtualDevice {
       void this.sync().catch((error: unknown) => this.fail(error));
   }
 
-  getSensors(): { batteryMv: number; wifiRssi: number } {
+  getSensors(): Sensors {
     return this.sensors;
   }
 
-  /** Reported to the site with the next sync. */
-  setSensors(sensors: { batteryMv: number; wifiRssi: number }): void {
+  /** Shown in the status bar at once; reported to the site with the next sync. */
+  setSensors(sensors: Sensors): void {
     this.sensors = sensors;
+    if (this.view === "main" && this.wasmIdle()) this.showMain();
   }
 
   setBeep(play: (beep: Beep) => void): void {
@@ -263,9 +270,11 @@ export class VirtualDevice {
   private startGpio(): void {
     clearInterval(this.gpioTimer);
     this.gpioTimer = setInterval(() => {
-      const edges = this.wasm.sampleGpio(this.gpio.read(5), this.gpio.read(8));
+      const edges = this.wasm.sampleGpio(this.gpio.sample(5), this.gpio.sample(8), performance.now());
       if (edges & 1) this.press("left");
       if (edges & 2) this.press("right");
+      // Both keys belong to the terminal, whatever app runs: its about page.
+      if (edges & 4) this.dispatch({ type: "bothKeys" });
     }, 20);
   }
 
@@ -538,7 +547,8 @@ export class VirtualDevice {
     await this.api("POST", "/api/device/status", {
       json: {
         firmwareVersion: FIRMWARE_VERSION,
-        ...this.sensors,
+        batteryMv: this.sensors.batteryMv,
+        wifiRssi: this.sensors.wifiRssi,
         unknownBadges: this.stored.unknownBadges,
       },
     });
@@ -666,8 +676,11 @@ export class VirtualDevice {
   private apply(effect: Effect): void {
     switch (effect.type) {
       case "show":
-        if (effect.screen.type !== "main")
+        if (effect.screen.type !== "main") {
+          // The about page shows the terminal's readings as they are now.
+          this.wasm.setDeviceInfo(this.deviceInfo());
           return this.show({ type: "flow", screen: effect.screen });
+        }
         // After a take, the main screen shows the new stock: fetch it now.
         if (this.stored.queue.length > 0 && this.snapshot.network) {
           void this.sync().catch((error: unknown) => {
@@ -687,6 +700,63 @@ export class VirtualDevice {
         if (!this.stored.unknownBadges.includes(effect.uid))
           this.stored.unknownBadges.push(effect.uid);
         return this.save();
+      case "serve":
+        void this.serve(effect.uid, effect.name, effect.sessionId);
+        return;
+    }
+  }
+
+  /** `$device` as the firmware reports it; the charge comes from the voltage in the wasm. */
+  private deviceInfo(): Record<string, unknown> {
+    const online = this.snapshot.network;
+    return {
+      unix: Math.floor(
+        ((this.clock?.serverMs ?? Date.now()) +
+          (this.clock ? performance.now() - this.clock.at : 0)) /
+          1000,
+      ),
+      board: { name: "Simulateur XIAO", simulated: true },
+      pins: {
+        left: 5,
+        right: 8,
+        buzzer: 44,
+        nfcSda: 41,
+        nfcScl: 42,
+        battery: 6,
+      },
+      firmware: { version: "web", build: "terminal virtuel" },
+      site: globalThis.location?.host ?? null,
+      device: this.state ? { id: this.state.device.id, name: this.state.device.name } : null,
+      chip: { model: "Wasm", id: "navigateur" },
+      wifi: {
+        rssi: online ? this.sensors.wifiRssi : null,
+        ssid: online ? "navigateur" : null,
+      },
+      battery: { millivolts: this.sensors.batteryMv, usb: this.sensors.usb },
+      uptimeMinutes: Math.floor(performance.now() / 60_000),
+    };
+  }
+
+  /** "Servi": the site serves the session for this badge, as the firmware does. */
+  private async serve(uid: string, name: string, sessionId: string | null): Promise<void> {
+    try {
+      const response = await this.api("POST", "/api/device/serve", {
+        json: { sessionId, badgeUid: uid },
+      });
+      const reply = (await response.json()) as ServeResponse;
+      if (reply.reason) {
+        this.beep("error");
+        this.show({ type: "error", title: "Pas servi", detail: "Ce badge n'est relié à aucun compte." });
+        return;
+      }
+      this.beep("accepted");
+      this.show({ type: "flow", screen: { type: "served", name, count: reply.served } });
+      // The next main screen shows the stock without the served preparation.
+      await this.sync();
+    } catch (error) {
+      this.log("flow", `serve: ${error instanceof Error ? error.message : String(error)}`);
+      this.beep("error");
+      this.show({ type: "error", title: "Pas servi", detail: "Le site ne répond pas : réessaie dans un instant." });
     }
   }
 
@@ -768,30 +838,7 @@ export class VirtualDevice {
       this.selectApp(next);
       return;
     }
-    this.wasm.setDeviceInfo({
-      unix: Math.floor(
-        ((this.clock?.serverMs ?? Date.now()) +
-          (this.clock ? performance.now() - this.clock.at : 0)) /
-          1000,
-      ),
-      board: { name: "Simulateur XIAO", simulated: true },
-      pins: {
-        left: 5,
-        right: 8,
-        buzzer: 44,
-        nfcSda: 41,
-        nfcScl: 42,
-        battery: 6,
-      },
-      wifi: { rssi: this.snapshot.network ? this.sensors.wifiRssi : null },
-      battery: {
-        millivolts: this.sensors.batteryMv,
-        percent: Math.max(
-          0,
-          Math.min(100, Math.round((this.sensors.batteryMv - 3300) / 9)),
-        ),
-      },
-    });
+    this.wasm.setDeviceInfo(this.deviceInfo());
     if (this.appLoaded) {
       const theme = (
         this.wasm.cacheApp().local as { theme?: DeviceTheme } | undefined
@@ -814,13 +861,21 @@ export class VirtualDevice {
     const due =
       this.partials >= FULL_EVERY ||
       (this.lastFull !== null && Date.now() - this.lastFull > FULL_AFTER_MS);
-    const full = this.lastFull === null || (view === "main" && due);
+    const before = this.snapshot.bits;
+    const turned = before ? flipped(before, bits) : 0;
+    if (!(this.lastFull === null || (view === "main" && due)) && turned === 0) return;
+    // As on the terminal: a new screen takes the fast full refresh, an update stays partial.
+    const full =
+      this.lastFull === null ||
+      (view === "main" && due) ||
+      refreshKind(turned, this.ghost, 800, 480) === "full";
     if (full) {
       this.partials = 0;
+      this.ghost = 0;
       this.lastFull = Date.now();
     } else {
-      if (this.snapshot.bits?.every((byte, i) => byte === bits[i])) return;
       this.partials += 1;
+      this.ghost += turned;
     }
     this.update({
       bits,
@@ -967,4 +1022,4 @@ export class VirtualDevice {
     }
   }
 }
-import { VirtualGpio } from "./gpio";
+import { VirtualGpio, flipped, refreshKind } from "@matecrew/device-ui/emulator";

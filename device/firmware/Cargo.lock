@@ -405,10 +405,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-board"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "device-engine"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics",
+ "miniz_oxide 0.9.1",
  "png",
  "qrcodegen",
  "serde",
@@ -1038,6 +1046,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "matecrew-core"
 version = "0.1.0"
 dependencies = [
+ "device-board",
  "hmac",
  "serde",
  "serde_json",

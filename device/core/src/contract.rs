@@ -91,6 +91,16 @@ pub struct Badge {
     pub week: u32,
     #[serde(default)]
     pub month: u32,
+    /// The last 7 days, oldest first (`DeviceState::day_labels` names them): per day, a count
+    /// per `products` entry.
+    #[serde(default)]
+    pub days: Vec<Vec<u32>>,
+    /// What `days` counts: the products drunk most, then "Autres" for the rest.
+    #[serde(default)]
+    pub products: Vec<String>,
+    /// This month at the price the cans were bought, formatted by the site: "CHF 12.40".
+    #[serde(default)]
+    pub cost: Option<String>,
 }
 
 /// What the terminal needs to work until the next sync. It keeps a copy in
@@ -106,6 +116,9 @@ pub struct DeviceState {
     pub badges: Vec<Badge>,
     pub sync_times: Vec<String>,
     pub server_time: String,
+    /// Weekday of each `Badge::days` entry, in the office's language ("lun" … "dim").
+    #[serde(default)]
+    pub day_labels: Vec<String>,
     /// Screen content cached with state; old caches fall back to a local stock screen.
     #[serde(default)]
     pub screen: Option<DeviceScreen>,
@@ -172,6 +185,24 @@ pub struct Take {
 #[derive(Serialize)]
 pub struct TakesRequest<'a> {
     pub takes: &'a [Take],
+}
+
+/// `POST /api/device/serve`: a runner's badge after "Servi" on the preparation screen. The site
+/// serves every pending order of the session; serving twice serves 0.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServeRequest<'a> {
+    pub session_id: Option<&'a str>,
+    pub badge_uid: &'a str,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ServeResponse {
+    /// Orders marked served now.
+    pub served: u32,
+    /// Why nothing was served: "unknown_badge", "invalid_badge".
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -415,8 +446,15 @@ pub struct ScreenChart {
     pub series: Vec<Vec<i64>>, pub max: i64, pub days: u32,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Preparation {
     pub title: String, pub total: String, pub items: Vec<PreparationItem>,
+    /// The session the right key serves (`ServeRequest`); None for orders without one.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// The right key's label on this screen, "Servi".
+    #[serde(default)]
+    pub serve_label: String,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PreparationItem {

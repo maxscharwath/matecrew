@@ -6,6 +6,9 @@ import { deviceScreen, deviceState } from "../../src/lib/device/contract";
 import { DeviceWasm } from "../../src/lib/device/virtual/wasm";
 import { VirtualDevice } from "../../src/lib/device/virtual/runtime";
 import definition from "../../device/fixtures/dashboard.json";
+import { compileScreen, encodeScene } from "@matecrew/device-ui/compiler";
+import hello from "../../device/apps/hello";
+import kitDemo from "./fixtures/kit-demo";
 
 const originalFetch = globalThis.fetch;
 const originalStorage = Object.getOwnPropertyDescriptor(
@@ -44,14 +47,7 @@ async function setup(offline = false, compiled: boolean | "kit" = false) {
     new URL("../../public/device/matecrew.wasm", import.meta.url),
   );
   const paths: string[] = [];
-  const appBytes = await readFile(
-    new URL(
-      compiled === "kit"
-        ? "../../device/screens/kit-demo.dui"
-        : "../../device/screens/example.dui",
-      import.meta.url,
-    ),
-  );
+  const appBytes = encodeScene(compileScreen(compiled === "kit" ? kitDemo : hello));
   const image = await readFile(
     new URL("../../public/device/streamline-coffee.png", import.meta.url),
   );
@@ -189,7 +185,8 @@ test("compiled binary apps fetch through hooks, handle local state and survive a
   device.setNetwork(false);
   device.restart();
   await waitForPhase("offline");
-  assert.deepEqual(device.getSnapshot().bits, updated);
+  // The status bar's clock advances across a restart; everything under it must persist.
+  assert.deepEqual(device.getSnapshot().bits!.slice(56 * 100), updated!.slice(56 * 100));
 });
 
 test("theme selection redraws locally, survives sync and persists across offline restart", async () => {
@@ -197,19 +194,21 @@ test("theme selection redraws locally, survives sync and persists across offline
   device = new VirtualDevice(wasm, "test");
   device.start();
   await waitForPhase("online");
-  const flipper = device.getSnapshot().bits;
+  const paper = device.getSnapshot().bits;
+  // Kit screens pin their type: light themes agree, dark swaps ink and paper.
   device.setTheme("macos");
   assert.equal(device.getSnapshot().theme, "macos");
-  assert.notDeepEqual(device.getSnapshot().bits, flipper);
+  assert.deepEqual(device.getSnapshot().bits, paper);
+  device.setTheme("dark");
+  assert.notDeepEqual(device.getSnapshot().bits, paper);
   assert.deepEqual(
     device.getSnapshot().bits,
     wasm.render({
       type: "main",
-      state: { ...state(), theme: "macos" },
+      state: { ...state(), theme: "dark" },
       offline: false,
     }),
   );
-  device.setTheme("dark");
   const dark = device.getSnapshot().bits;
   device.syncNow();
   await delay(50);
@@ -260,20 +259,20 @@ test("remote-style app selection and screen taps drive Showcase without hardware
   device.selectApp("showcase");
   assert.equal(device.getSnapshot().app, "showcase");
   assert.notDeepEqual(device.getSnapshot().bits, mate);
-  device.tapScreen(51, 99); // Home -> hardware.
+  device.tapScreen(150, 31); // Home menu, "Composants" (taps use the 200 × 120 transport grid).
   assert.equal(
     (wasm.cacheApp().$navigation as { current: string }).current,
-    "hardware",
+    "components",
   );
-  device.tapScreen(95, 77);
-  device.tapScreen(95, 77);
+  device.tapScreen(24, 87); // "Prendre"
+  device.tapScreen(24, 87);
   assert.deepEqual(beeps, ["accepted", "accepted"]);
   device.selectApp("mate");
   assert.deepEqual(device.getSnapshot().bits, mate);
   device.selectApp("showcase");
   assert.equal(
     (wasm.cacheApp().$navigation as { current: string }).current,
-    "hardware",
+    "components",
   );
   device.setNetwork(false);
   const frame = device.getSnapshot().bits;

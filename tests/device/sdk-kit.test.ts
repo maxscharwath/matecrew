@@ -1,12 +1,11 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import * as ui from "../../device/authoring";
-import { compileScreen } from "../../device/authoring/jsx-runtime";
-import { encodeScene } from "../../device/authoring/binary";
+import * as ui from "@matecrew/device-ui";
+import { compileScreen } from "@matecrew/device-ui/compiler";
+import { encodeScene } from "@matecrew/device-ui/compiler";
 import { DeviceWasm } from "../../src/lib/device/virtual/wasm";
 import { downloadImage } from "../../src/lib/device/virtual/images";
-import kitDemo from "../../device/screens/kit-demo";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -29,7 +28,7 @@ test("TSX callbacks compile to buzzer effects emitted on every press", async () 
     return ui.Screen({
       width: 200,
       height: 120,
-      children: ui.Button({
+      children: ui.Pressable({
         x: 4,
         y: 104,
         width: 84,
@@ -131,14 +130,6 @@ test("composed chart data updates and line/bar/area render distinctly", async ()
   }
   assert.notDeepEqual(renders[0], renders[1]);
   assert.notDeepEqual(renders[0], renders[2]);
-  assert.deepEqual(
-    encodeScene(compileScreen(kitDemo)),
-    new Uint8Array(
-      await readFile(
-        new URL("../../device/screens/kit-demo.dui", import.meta.url),
-      ),
-    ),
-  );
 });
 
 test("compiler rejects invalid image sources, oversized images and excessive chart series", () => {
@@ -247,73 +238,55 @@ test("Showcase routes retain a bounded stack and state across offline restart", 
   const runtime = await wasm();
   runtime.loadShowcase();
   const home = runtime.renderApp();
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "home",
-  );
+  const current = () => (runtime.cacheApp().$navigation as { current: string }).current;
+  const local = () => runtime.cacheApp().local as Record<string, unknown>;
+  assert.equal(current(), "home");
   assert.deepEqual(runtime.imageRequests(), []);
   runtime.inputApp("left");
   assert.deepEqual(runtime.renderApp(), home);
   runtime.inputApp("right");
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "components",
-  );
+  assert.equal(current(), "type");
   assert.notDeepEqual(runtime.renderApp(), home);
   runtime.inputApp("right");
   runtime.inputApp("left");
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "components",
-  );
+  assert.equal(current(), "type");
   const saved = runtime.cacheApp();
   runtime.loadShowcase();
   runtime.restoreApp(saved);
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "components",
-  );
-  for (let i = 0; i < 4; i++) runtime.inputApp("right");
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "media",
-  );
+  assert.equal(current(), "type");
+  for (let i = 0; i < 5; i++) runtime.inputApp("right");
+  assert.equal(current(), "media");
   assert.equal(runtime.imageRequests().length, 1);
+  // Remote taps use the 200 × 120 transport grid (4 panel pixels per unit).
   runtime.inputApp("right");
-  runtime.pressApp(165, 85);
-  assert.equal((runtime.cacheApp().local as { theme: string }).theme, "dark");
+  runtime.pressApp(85, 41); // Logique: "+", a state update computed on the device
+  assert.equal(local().count, 2);
   runtime.inputApp("right");
-  runtime.pressApp(90, 77);
-  assert.equal(
-    (runtime.cacheApp().local as { showcaseProgress: number }).showcaseProgress,
-    80,
-  );
+  runtime.pressApp(158, 48); // Apparence: "Encre"
+  assert.equal(local().theme, "dark");
   runtime.inputApp("right");
-  assert.deepEqual(runtime.pressApp(90, 77), [
+  assert.deepEqual(runtime.pressApp(100, 46), [ // Matériel: "Succès"
     { kind: "beep", tone: "success" },
   ]);
   runtime.inputApp("right");
-  assert.equal(
-    (runtime.cacheApp().$navigation as { current: string }).current,
-    "home",
-  );
+  assert.equal(current(), "home");
   assert.deepEqual(
     (runtime.cacheApp().$navigation as { stack: string[] }).stack,
     ["home"],
   );
 });
 
-test("docked keys meet the display edge and preserve physical and pointer actions", async () => {
+test("key tabs meet the display edge and preserve physical and pointer actions", async () => {
   const app = compileScreen(() =>
     ui.Screen({
-      width: 400,
-      height: 240,
-      children: ui.KeyBar({
-        left: "Retour",
-        right: "Suite",
-        onLeft: { kind: "beep", tone: "key" },
-        onRight: { kind: "beep", tone: "success" },
-      }),
+      // As every screen: the main area fills, the keys stand on the bottom edge.
+      children: [ui.Main({}), ui.Keys({
+        reader: true,
+        children: [
+          ui.Key({ side: "left", onPress: { kind: "beep", tone: "key" }, children: "Retour" }),
+          ui.Key({ side: "right", primary: true, onPress: { kind: "beep", tone: "success" }, children: "Suite" }),
+        ],
+      })],
     }),
   );
   const runtime = await wasm();
@@ -321,12 +294,53 @@ test("docked keys meet the display edge and preserve physical and pointer action
   const frame = runtime.renderApp();
   const ink = (x: number, y: number) =>
     !!(frame[y * 100 + (x >> 3)] & (128 >> (x & 7)));
-  // Square lower corners touch the panel edge, while the downward arrow is paper.
-  assert(ink(0, 479));
-  assert(ink(279, 479));
-  assert(ink(520, 479));
-  assert(ink(799, 479));
-  assert.deepEqual(runtime.inputApp("left"), runtime.pressApp(32, 119));
-  assert.deepEqual(runtime.inputApp("right"), runtime.pressApp(168, 119));
-  assert.deepEqual(runtime.pressApp(100, 115), []);
+  // The keys strip sits at the bottom of the screen's flow; tabs are centred on the keys
+  // (x 130 and 670): an outlined one shows its sides down to the last row, the primary is ink.
+  assert(ink(15, 479) && ink(244, 479) && !ink(130, 479));
+  assert(ink(560, 479) && ink(670, 479) && ink(780, 479));
+  assert(!ink(400, 479));
+  assert.deepEqual(runtime.inputApp("left"), runtime.pressApp(32, 113));
+  assert.deepEqual(runtime.inputApp("right"), runtime.pressApp(167, 113));
+  assert.deepEqual(runtime.pressApp(100, 115), []); // the reader hint is not a control
+});
+
+test("messages use i18next's format: plural suffixes, {{name}} and contexts", () => {
+  const messages = ui.defineMessages({
+    fr: {
+      stock_zero: "Plus rien",
+      stock_one: "{{count}} maté pour {{name}}",
+      stock_other: "{{count}} matés pour {{name}}",
+      hello: "Salut {{ name }} !",
+      side: "Droite",
+      side_left: "Gauche",
+    },
+    en: { stock_one: "{{count}} maté", stock_other: "{{count}} matés", hello: "Hi {{name}}!", side: "Right", side_left: "Left" },
+  });
+  // What the engine reads: an ICU subset, built from the i18next keys.
+  assert.deepEqual(messages, {
+    fr: {
+      stock: "{count, plural, =0 {Plus rien} one {# maté pour {name}} other {# matés pour {name}}}",
+      hello: "Salut {name} !",
+      side: "Droite",
+      side_left: "Gauche",
+    },
+    en: { stock: "{count, plural, one {# maté} other {# matés}}", hello: "Hi {name}!", side: "Right", side_left: "Left" },
+  });
+  const app = compileScreen(() => {
+    const t = ui.useI18n(messages);
+    return ui.Screen({
+      children: [
+        ui.H2({ children: t("stock", { count: ui.bind("view.count", 0), name: "Alex" }) }),
+        ui.P({ children: t("side", { context: ui.bind("view.side", "right") }) }),
+      ],
+    });
+  });
+  assert.deepEqual(app.messages?.table["side#context"], [
+    "{context, select, left {Gauche} other {Droite}}",
+    "{context, select, left {Left} other {Right}}",
+  ]);
+  assert.equal(app.messages?.table.hello, undefined); // only the keys a screen uses
+  assert.ok(encodeScene(app).length > 0);
+  assert.throws(() => ui.defineMessages({ fr: { stock_one: "{{count}} maté" } }), /stock_other/);
+  assert.throws(() => ui.defineMessages({ fr: { hello: "Salut {name}" } }), /\{\{name\}\}/);
 });

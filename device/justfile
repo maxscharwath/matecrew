@@ -16,7 +16,7 @@ setup:
 
 # Redraw every screen to sim/out/*.png on each save.
 sim: ui
-    cd sim && cargo watch -q -w ../apps -w ../screens/terminal -w ../screens/terminal.tsx -w ../screens/example.tsx -w ../screens/showcase.tsx -w ../authoring -w ../engine -w ../ui -w src -s "cd .. && just ui && cd sim && cargo run"
+    cd sim && cargo watch -q -w ../apps -w ../sdk -w ../engine -w ../ui -w src -s "cd .. && just ui && cd sim && cargo run"
 
 # Unit tests that run on the Mac.
 test: ui
@@ -30,12 +30,22 @@ web: ui
     cd web && cargo build --release --target wasm32-unknown-unknown
     cp "$(cd web && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/wasm32-unknown-unknown/release/matecrew_web.wasm" ../public/device/matecrew.wasm
 
-# Rebuild the wasm on every save in core, ui or web; the virtual device in `just api` reloads it by itself.
+# Compile every TSX app in device.config.ts to dist/.
 ui:
-    cd .. && bun run device:ui
+    cd .. && bun dui build
 
+# Build the engine alone to WebAssembly (sdk/engine.wasm), for `dui render`, `dui test` and the studio.
+engine:
+    cd engine-wasm && cargo build --release --target wasm32-unknown-unknown
+    cp "$(cd engine-wasm && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/wasm32-unknown-unknown/release/device_engine_wasm.wasm" sdk/engine.wasm
+
+# Studio in the browser: emulated terminal and every preview, rebuilt on each save (TSX and Rust).
+studio *apps:
+    cd .. && bun dui dev {{apps}}
+
+# Rebuild the wasm on every save; the virtual device in `just api` reloads it by itself.
 web-watch:
-    cd web && cargo watch -q -w ../apps -w ../screens/terminal -w ../screens/terminal.tsx -w ../screens/example.tsx -w ../screens/showcase.tsx -w ../authoring -w ../engine -w ../core -w ../ui -w src -s "cd .. && just web"
+    cd web && cargo watch -q -w ../apps -w ../sdk -w ../engine -w ../core -w ../ui -w src -s "cd .. && just web"
 
 # Build, flash the XIAO over USB and open the serial monitor. Setup proposes matecrew.vercel.app.
 flash: ui

@@ -62,13 +62,24 @@ export const deviceScreen = z.object({
   batteryLowLabel: z.string().nullable(),
   items: z.array(z.object({ name: z.string(), stock: z.number().int(), low: z.boolean(), image: z.string() })),
   chart: z.object({ series: z.array(z.array(z.number().int())), max: z.number().int().positive(), days: z.number().int().positive() }).nullable(),
-  preparation: z.object({ title: z.string(), total: z.string(), items: z.array(z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string() })) }).nullable(),
+  preparation: z
+    .object({
+      title: z.string(),
+      total: z.string(),
+      items: z.array(z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string() })),
+      /** The session to serve; null for orders without one. */
+      sessionId: z.string().nullable(),
+      /** The right key on this screen: a runner's badge closes the session (`POST /api/device/serve`). */
+      serveLabel: z.string(),
+    })
+    .nullable(),
   lowLabel: z.string(), moreLabel: z.string(), chartLabel: z.string(),
   leftLabel: z.string(), rightLabel: z.string(),
 });
 export type DeviceScreen = z.infer<typeof deviceScreen>;
 
-export const deviceTheme = z.enum(["flipper", "macos", "dark"]);
+/** `paper` is the native kit; `dark` is paper inverted; `flipper` and `macos` are the old 2× looks. */
+export const deviceTheme = z.enum(["paper", "dark", "flipper", "macos"]);
 export type DeviceTheme = z.infer<typeof deviceTheme>;
 
 export const deviceState = z.object({
@@ -88,14 +99,22 @@ export const deviceState = z.object({
       today: z.number().int(),
       week: z.number().int(),
       month: z.number().int(),
+      /** The last 7 days, oldest first (`dayLabels`): per day, a count per `products` entry. */
+      days: z.array(z.array(z.number().int())).default([]),
+      /** What `days` counts: the products drunk most, then "Autres" for the rest. */
+      products: z.array(z.string()).default([]),
+      /** This month at the price the cans were bought, formatted: "CHF 12.40". */
+      cost: z.string().nullable().default(null),
     }),
   ),
+  /** Weekday of each `days` entry, in the office's language. */
+  dayLabels: z.array(z.string()).default([]),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
   screen: deviceScreen,
   /** Optional compiled DUI1 app; null uses the native matécrew screens. */
   appUrl: z.string().nullable().default(null),
-  theme: deviceTheme.default("flipper"),
+  theme: deviceTheme.default("paper"),
   /**
    * The newest firmware on the site; the terminal installs it when it is
    * newer than its own. `url` is a path on the site, fetched with the token.
@@ -123,6 +142,20 @@ export const takesResponse = z.object({
   /** Every take id the server is done with; the terminal drops them from its queue. */
   done: z.array(z.string()),
   rejected: z.array(z.object({ id: z.string(), reason: z.string() })),
+});
+
+/** `POST /api/device/serve`: "Servi" on the preparation screen, then the runner's badge. */
+export const serveRequest = z.object({
+  /** The session the preparation screen showed; null for orders without one. */
+  sessionId: z.string().nullable(),
+  badgeUid: z.string().trim().min(1).max(32),
+});
+
+export const serveResponse = z.object({
+  /** Orders marked served now; 0 when someone served them already. */
+  served: z.number().int(),
+  /** Why nothing was served: "unknown_badge" or "invalid_badge". */
+  reason: z.string().nullable(),
 });
 
 export const statusRequest = z.object({
@@ -163,5 +196,7 @@ export type LinkTokenError = z.infer<typeof linkTokenError>["error"];
 export type DeviceState = z.infer<typeof deviceState>;
 export type DeviceTake = z.infer<typeof deviceTake>;
 export type TakesResponse = z.infer<typeof takesResponse>;
+export type ServeRequest = z.infer<typeof serveRequest>;
+export type ServeResponse = z.infer<typeof serveResponse>;
 export type DeviceCommand = z.infer<typeof deviceCommand>;
 export type CommandsResponse = z.infer<typeof commandsResponse>;

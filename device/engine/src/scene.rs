@@ -4,10 +4,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 mod button;
 mod charts;
+pub mod expr;
+pub mod layout;
+pub mod i18n;
+pub use layout::Layout;
 mod input;
+mod qr;
 mod render;
 mod surface;
-mod typography;
+pub(crate) mod typography;
 pub use surface::{SurfaceStyle, Shadow};
 pub use typography::Typography;
 mod validation;
@@ -73,6 +78,16 @@ pub enum Action {
     Emit {
         name: String,
     },
+    /// Several actions on one press, in order; effects are concatenated.
+    Sequence {
+        actions: Vec<String>,
+    },
+    /// Local state set to a value computed from the app's data at the moment of the press.
+    #[serde(rename = "setStateBound")]
+    SetStateBound {
+        key: String,
+        value: Binding,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
@@ -82,14 +97,6 @@ pub struct Rect {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-}
-impl Rect {
-    fn area(self, origin: Point) -> Rectangle {
-        Rectangle::new(
-            origin + Point::new(self.x, self.y),
-            Size::new(self.width, self.height),
-        )
-    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -102,12 +109,37 @@ pub enum Binding {
     Literal {
         literal: Value,
     },
+    /// An operator (see `expr::op`) over bindings, computed when read.
+    Expr {
+        expr: u8,
+        #[serde(default)]
+        args: Vec<Binding>,
+    },
+    /// A translated message: `(locale, message)`, default locale first, and its arguments.
+    Message {
+        messages: Vec<(String, String)>,
+        #[serde(default)]
+        params: Vec<(String, Binding)>,
+    },
 }
 impl Binding {
-    pub(crate) fn resolve<'a>(&'a self, data: &'a Value, item: Option<&'a Value>) -> &'a Value {
+    pub(crate) fn resolve<'a>(&'a self, data: &'a Value, item: Option<&'a Value>) -> std::borrow::Cow<'a, Value> {
+        use std::borrow::Cow;
         match self {
-            Self::Literal { literal } => literal,
-            Self::Bound { bind, fallback } => {
+            Self::Literal { literal } => Cow::Borrowed(literal),
+            Self::Expr { expr, args } => Cow::Owned(expr::eval(*expr, args, data, item)),
+            Self::Message { messages, params } => {
+                let locale = i18n::locale(data, messages.iter().map(|(l, _)| l.as_str())).unwrap_or("");
+                let message = messages
+                    .iter()
+                    .find(|(l, m)| l == locale && !m.is_empty())
+                    .or_else(|| messages.first())
+                    .map_or("", |(_, m)| m.as_str());
+                let params: Vec<(String, Value)> =
+                    params.iter().map(|(name, b)| (name.clone(), b.resolve(data, item).into_owned())).collect();
+                Cow::Owned(Value::String(i18n::format(message, &params, locale)))
+            }
+            Self::Bound { bind, fallback } => Cow::Borrowed({
                 let (root, path) = if let Some(path) = bind.strip_prefix("item.") {
                     (item.unwrap_or(fallback), path)
                 } else {
@@ -122,7 +154,7 @@ impl Binding {
                         }
                     })
                     .unwrap_or(fallback)
-            }
+            }),
         }
     }
 }
@@ -145,6 +177,9 @@ pub enum Align {
 }
 fn one() -> u8 {
     1
+}
+fn four() -> u8 {
+    4
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ButtonIcon {
@@ -169,6 +204,9 @@ pub enum Node {
         rect: Rect,
         #[serde(default)]
         children: Vec<Node>,
+        /// Children as a flex line; absolute (rect x/y) without it.
+        #[serde(default)]
+        layout: Option<Layout>,
     },
     Row {
         rect: Rect,
@@ -192,6 +230,8 @@ pub enum Node {
         style: Option<SurfaceStyle>,
         #[serde(default)]
         children: Vec<Node>,
+        #[serde(default)]
+        layout: Option<Layout>,
     },
     Text {
         rect: Rect,
@@ -222,6 +262,12 @@ pub enum Node {
         max: Binding,
         stroke: u8,
         axes: bool,
+        /// Line width in pixels (1–4).
+        #[serde(default = "one")]
+        weight: u8,
+        /// Dithered tone under the line, 0 for none.
+        #[serde(default)]
+        fill: u8,
     },
     Button {
         rect: Rect,
@@ -231,6 +277,9 @@ pub enum Node {
         input: Option<String>,
         #[serde(default)]
         dock: bool,
+        /// Hit area and hardware input only: the app draws the control itself.
+        #[serde(default)]
+        ghost: bool,
         #[serde(default)]
         icon: Option<ButtonIcon>,
     },
@@ -244,6 +293,12 @@ pub enum Node {
         value: Binding,
         source_width: u32,
         source_height: u32,
+        /// Draw the sprite's ink in paper, for icons on ink surfaces.
+        #[serde(default)]
+        inverted: bool,
+        /// Compiled art, packed rows (MSB first): used instead of `value`.
+        #[serde(default)]
+        packed: Option<Vec<u8>>,
     },
     CartesianChart {
         rect: Rect,
@@ -254,6 +309,9 @@ pub enum Node {
         axes: bool,
         grid: bool,
         legend: bool,
+        /// Bar series pile up in one column per category, darkest at the bottom.
+        #[serde(default)]
+        stacked: bool,
     },
     WebImage {
         rect: Rect,
@@ -264,6 +322,18 @@ pub enum Node {
     Qr {
         rect: Rect,
         value: Binding,
+        /// 0 square modules, 1 dots, 2 rounded squares; finder patterns follow the style.
+        #[serde(default)]
+        style: u8,
+        /// Error correction: 0 low, 1 medium, 2 quartile, 3 high (needed under a logo).
+        #[serde(default)]
+        ecc: u8,
+        /// Quiet zone in modules.
+        #[serde(default = "four")]
+        quiet: u8,
+        /// Mark drawn in a cleared square at the centre.
+        #[serde(default)]
+        logo: Option<ButtonIcon>,
     },
     Repeat {
         rect: Rect,
@@ -291,6 +361,7 @@ pub enum BeepTone {
     Success,
     Error,
     Notification,
+    Badge,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

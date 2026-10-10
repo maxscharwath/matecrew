@@ -37,25 +37,29 @@ export type FlowScreen =
     }
   | { type: "unknownBadge"; uid: string; claimUrl: string | null }
   | { type: "notReady" }
-  | { type: "noItems" };
+  | { type: "noItems" }
+  | { type: "about" }
+  | { type: "served"; name: string; count: number };
 
 export type FlowEvent =
   | { type: "key"; side: Side }
+  | { type: "bothKeys" }
   | { type: "badge"; uid: string }
   | { type: "tick" };
 
-export type Beep = "key" | "accepted" | "error" | "notification";
+export type Beep = "key" | "accepted" | "error" | "notification" | "badge";
 
 export type Effect =
   | { type: "show"; screen: FlowScreen }
   | { type: "beep"; beep: Beep }
   | { type: "queue"; take: DeviceTake }
-  | { type: "noteUnknownBadge"; uid: string };
+  | { type: "noteUnknownBadge"; uid: string }
+  /** "Servi" and a runner's badge: serve the preparation's session now. */
+  | { type: "serve"; uid: string; name: string; sessionId: string | null };
 
 /** Screens the terminal draws itself, outside the take flow. */
 export type View =
   | { type: "boot"; stage: number }
-  | { type: "test" }
   | { type: "main"; state: DeviceState; offline: boolean }
   | { type: "dashboard"; data: DeviceScreen; offline: boolean }
   | { type: "connecting"; ssid: string }
@@ -74,10 +78,10 @@ export type ImageRequest = {
 export type AppEffect =
   | { kind: "fetch"; id: string; path: string }
   | { kind: "emit"; name: string }
-  | { kind: "beep"; tone: "key" | "success" | "error" | "notification" };
+  | { kind: "beep"; tone: "key" | "success" | "error" | "notification" | "badge" };
 
 interface Exports {
-  gpio_sample(left: number, right: number): number;
+  gpio_sample(left: number, right: number, nowMs: number): number;
   buzzer_pattern(tone: number): number;
   memory: WebAssembly.Memory;
   alloc(len: number): number;
@@ -128,7 +132,7 @@ export class DeviceWasm {
 
   /** Change typography and monochrome styling without recompiling screen definitions. */
   setTheme(theme: DeviceTheme): void {
-    this.exports.set_theme(theme === "macos" ? 1 : theme === "dark" ? 2 : 0);
+    this.exports.set_theme({ flipper: 0, macos: 1, dark: 2, paper: 3 }[theme] ?? 3);
   }
 
   /** Draws a screen and returns a copy of the 48 000-byte frame. */
@@ -214,8 +218,9 @@ export class DeviceWasm {
       ),
     ) as AppEffect[];
   }
-  sampleGpio(left: boolean, right: boolean): number {
-    return this.exports.gpio_sample(Number(left), Number(right));
+  /** 1 the left key, 2 the right one, 4 both together (the about page), 0 nothing yet. */
+  sampleGpio(left: boolean, right: boolean, nowMs: number): number {
+    return this.exports.gpio_sample(Number(left), Number(right), nowMs);
   }
   buzzerPattern(beep: Beep): [hz: number, ms: number][] {
     const len = this.exports.buzzer_pattern(
@@ -225,7 +230,9 @@ export class DeviceWasm {
           ? 2
           : beep === "notification"
             ? 3
-            : 0,
+            : beep === "badge"
+              ? 4
+              : 0,
     );
     return JSON.parse(
       decoder.decode(

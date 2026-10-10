@@ -4,17 +4,30 @@ import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
 import { itemImage, smallImage } from "@/lib/device/bitmap";
+import { buildCostingLedger } from "@/lib/costing";
+import { formatMoney, roundCents } from "@/lib/money";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
-import type { DeviceState, DeviceScreen } from "@/lib/device/contract";
+import { deviceTheme, type DeviceState, type DeviceScreen } from "@/lib/device/contract";
 
 /** Below this the terminal and the site warn that it needs charging. */
 export const LOW_BATTERY_MV = 3500;
 /** After a session's cutoff, the terminal shows what to prepare for this long, or until it is served. */
 export const PREPARATION_MINUTES = 90;
+
+/** Interim app download until per-device apps: `DEVICE_UI_APP` names one of `device/dist/*.dui`. */
+const DOWNLOADABLE_APPS = ["hello", "showcase"] as const;
+export function downloadableApp(): (typeof DOWNLOADABLE_APPS)[number] | null {
+  const app = process.env.DEVICE_UI_APP;
+  return DOWNLOADABLE_APPS.find((name) => name === app) ?? null;
+}
 /** Days of stock on the main screen's chart, today included. */
 const CHART_DAYS = 14;
 const CHART_MAX_ITEMS = 3;
 const DAY_MS = 86_400_000;
+/** Days on a person's summary chart, today included. */
+const SUMMARY_DAYS = 7;
+/** Products named on the chart; the rest stack as one "others" segment. */
+const SUMMARY_PRODUCTS = 3;
 
 function wifiBars(rssi: number | null): number | null {
   if (rssi == null) return null;
@@ -49,25 +62,92 @@ async function keyLabels(device: AuthenticatedDevice) {
   return { left: device.leftLabel ?? t("take"), right: device.rightLabel ?? t("summary") };
 }
 
-/** What each badge holder drank today, this week (from Monday) and this month, in the office's time zone. */
-async function consumptionByUser(officeId: string, timezone: string, userIds: string[]) {
+/**
+ * What each badge holder drank today, this week (from Monday), this month and on each of the last
+ * SUMMARY_DAYS days, in the office's time zone, and what this month cost them.
+ */
+async function consumptionByUser(officeId: string, timezone: string, locale: string, others: string, userIds: string[]) {
   const today = getDateInTimezone(new Date(), timezone);
   const weekStart = new Date(today.getTime() - ((today.getUTCDay() + 6) % 7) * DAY_MS);
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  const since = new Date(Math.min(weekStart.getTime(), monthStart.getTime()));
-  const entries = await prisma.consumptionEntry.findMany({
-    where: { officeId, userId: { in: userIds }, cancelledAt: null, date: { gte: since } },
-    select: { userId: true, date: true, qty: true },
-  });
-  const counts = new Map<string, { today: number; week: number; month: number }>();
+  const firstDay = new Date(today.getTime() - (SUMMARY_DAYS - 1) * DAY_MS);
+  const since = new Date(Math.min(weekStart.getTime(), monthStart.getTime(), firstDay.getTime()));
+  const [entries, costs] = await Promise.all([
+    prisma.consumptionEntry.findMany({
+      where: { officeId, userId: { in: userIds }, cancelledAt: null, date: { gte: since } },
+      select: { userId: true, date: true, qty: true, item: { select: { name: true } } },
+    }),
+    // A summary without its cost beats no state at all.
+    monthCosts(officeId, monthStart).catch(() => null),
+  ]);
+  const empty = () => ({ today: 0, week: 0, month: 0, byDay: new Map<string, number[]>() });
+  const counts = new Map<string, ReturnType<typeof empty>>();
   for (const e of entries) {
-    const c = counts.get(e.userId) ?? { today: 0, week: 0, month: 0 };
+    const c = counts.get(e.userId) ?? empty();
     if (e.date.getTime() === today.getTime()) c.today += e.qty;
     if (e.date >= weekStart) c.week += e.qty;
     if (e.date >= monthStart) c.month += e.qty;
+    const day = Math.round((e.date.getTime() - firstDay.getTime()) / DAY_MS);
+    if (day >= 0 && day < SUMMARY_DAYS) {
+      const days = c.byDay.get(e.item.name) ?? Array<number>(SUMMARY_DAYS).fill(0);
+      days[day] += e.qty;
+      c.byDay.set(e.item.name, days);
+    }
     counts.set(e.userId, c);
   }
-  return (userId: string) => counts.get(userId) ?? { today: 0, week: 0, month: 0 };
+  return (userId: string) => {
+    const { byDay, ...totals } = counts.get(userId) ?? empty();
+    return {
+      ...totals,
+      ...stacks(byDay, others),
+      cost: costs ? panelMoney(costs.get(userId) ?? 0, locale) : null,
+    };
+  };
+}
+
+/**
+ * A person's last days per product, for stacked bars: the products they drank most first, then
+ * one `others` segment when there are more than SUMMARY_PRODUCTS. `days[d][p]` is product `p` on
+ * day `d`, oldest day first.
+ */
+function stacks(byDay: Map<string, number[]>, others: string): { products: string[]; days: number[][] } {
+  const total = (days: number[]) => days.reduce((sum, n) => sum + n, 0);
+  const ranked = [...byDay.entries()].sort((a, b) => total(b[1]) - total(a[1]) || a[0].localeCompare(b[0]));
+  const named = ranked.length > SUMMARY_PRODUCTS + 1 ? ranked.slice(0, SUMMARY_PRODUCTS) : ranked;
+  const rest = ranked.slice(named.length);
+  const columns = rest.length > 0
+    ? [...named, [others, Array.from({ length: SUMMARY_DAYS }, (_, d) => rest.reduce((sum, [, days]) => sum + days[d], 0))] as const]
+    : named;
+  return {
+    products: columns.map(([name]) => name),
+    days: Array.from({ length: SUMMARY_DAYS }, (_, d) => columns.map(([, days]) => days[d])),
+  };
+}
+
+/** Francs each person drew this month, at the price the cans were bought (lib/costing.ts). */
+async function monthCosts(officeId: string, monthStart: Date): Promise<Map<string, number>> {
+  const ledger = await buildCostingLedger(officeId);
+  const costs = new Map<string, number>();
+  for (const draw of ledger.draws) {
+    if (!draw.userId || draw.at < monthStart) continue;
+    if (draw.kind !== "CONSUMPTION" && draw.kind !== "RETURN") continue;
+    costs.set(draw.userId, (costs.get(draw.userId) ?? 0) + draw.cost);
+  }
+  return costs;
+}
+
+/** Money for the panel, whose fonts are Latin-1: plain spaces instead of no-break ones. */
+function panelMoney(amount: number, locale: string): string {
+  return formatMoney(roundCents(amount), locale).replace(/[\u00a0\u202f]/g, " ");
+}
+
+/** The summary chart's days, oldest first: "lun" … "dim" in the office's language. */
+function dayLabels(timezone: string, locale: string): string[] {
+  const today = getDateInTimezone(new Date(), timezone);
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" });
+  return Array.from({ length: SUMMARY_DAYS }, (_, k) =>
+    weekday.format(new Date(today.getTime() - (SUMMARY_DAYS - 1 - k) * DAY_MS)).replace(/\.$/, ""),
+  );
 }
 
 /** Base64 of the packed bits, which device/core decodes. */
@@ -86,9 +166,12 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     keyLabels(device),
   ]);
   const release = await prisma.firmwareRelease.findFirst({ orderBy: { createdAt: "desc" } });
+  const screenT = await getTranslations({ locale: office.locale, namespace: "devices.screen" });
   const stats = await consumptionByUser(
     office.id,
     office.timezone,
+    office.locale,
+    screenT("others"),
     badges.map((b) => b.userId).filter((id): id is string => id !== null),
   );
   // The picker opens on the left key's item; the rest follow in shelf order.
@@ -106,11 +189,12 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits) })),
     ),
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
+    dayLabels: dayLabels(office.timezone, office.locale),
     syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
     serverTime: new Date().toISOString(),
     screen: await buildScreenData(device, { items, labels }),
-    appUrl: ["example", "kit"].includes(process.env.DEVICE_UI_APP ?? "") ? "/api/device/ui" : null,
-    theme: process.env.DEVICE_UI_THEME === "macos" ? "macos" : process.env.DEVICE_UI_THEME === "dark" ? "dark" : "flipper",
+    appUrl: downloadableApp() ? "/api/device/ui" : null,
+    theme: deviceTheme.catch("paper").parse(process.env.DEVICE_UI_THEME ?? "paper"),
     firmware: release && {
       version: release.version,
       url: `/api/device/firmware/${encodeURIComponent(release.version)}`,
@@ -176,7 +260,7 @@ async function preparation(officeId: string, timezone: string) {
     entry.names.push(r.user.name.split(" ")[0]);
     byItem.set(r.item.id, entry);
   }
-  return { label: session.label, total: requests.length, items: [...byItem.values()] };
+  return { sessionId: session.id, label: session.label, total: requests.length, items: [...byItem.values()] };
 }
 
 export async function buildScreenData(
@@ -241,6 +325,8 @@ export async function buildScreenData(
           image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits),
         })),
       ),
+      sessionId: prep.sessionId,
+      serveLabel: t("serve"),
     },
     lowLabel: t("lowStock"),
     moreLabel: t("more"),

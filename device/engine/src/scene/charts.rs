@@ -17,27 +17,63 @@ pub(super) struct Chart<'a> {
     pub axes: bool,
     pub grid: bool,
     pub legend: bool,
+    pub stacked: bool,
 }
+/// Native tones of stacked bar series, bottom first.
+const STACK_TONES: [u8; 4] = [100, 50, 25, 12];
 fn patterned<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     a: Point,
     b: Point,
     stroke: u8,
 ) -> Result<(), D::Error> {
+    thick(target, a, b, stroke, 1)
+}
+/// A line `weight` pixels wide; dots and dashes follow its major axis so thick dashes stay square.
+pub(super) fn thick<D: DrawTarget<Color = BinaryColor>>(
+    target: &mut D,
+    a: Point,
+    b: Point,
+    stroke: u8,
+    weight: u32,
+) -> Result<(), D::Error> {
+    let horizontal = (b.x - a.x).abs() >= (b.y - a.y).abs();
+    let w = weight.max(1) as i32;
     target.draw_iter(
         Line::new(a, b)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, weight.max(1)))
             .pixels()
-            .enumerate()
-            .filter_map(|(i, p)| {
-                (match stroke {
-                    1 => i % 3 == 0,
-                    2 => i % 6 < 3,
+            .filter(move |Pixel(p, _)| {
+                let step = if horizontal { p.x - a.x } else { p.y - a.y }.abs();
+                match stroke {
+                    1 => step % (3 * w) < w,
+                    2 => step % (6 * w) < 3 * w,
                     _ => true,
-                })
-                .then_some(p)
+                }
             }),
     )
+}
+/// Ordered-dither coverage, as surfaces use: `tone` percent of ink.
+pub(super) fn toned(p: Point, tone: u8) -> bool {
+    const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+    (BAYER[p.y.rem_euclid(4) as usize][p.x.rem_euclid(4) as usize] as u16 * 100 + 50) < tone as u16 * 16
+}
+/// Chart geometry per theme: native themes get 2 px lines, real margins and dithered greys.
+struct Look {
+    native: bool,
+    weight: u32,
+    left: u32,
+    legend: u32,
+    bottom: u32,
+}
+impl Look {
+    fn of(theme: Theme) -> Self {
+        if matches!(theme, Theme::Paper | Theme::Dark) {
+            Self { native: true, weight: 2, left: 40, legend: 30, bottom: 28 }
+        } else {
+            Self { native: false, weight: 1, left: 25, legend: 13, bottom: 13 }
+        }
+    }
 }
 fn number(value: f64) -> String {
     if value >= 1_000_000.0 {
@@ -70,21 +106,28 @@ impl Chart<'_> {
             .filter(|v| v.is_finite() && *v > 0.0)
             .unwrap_or_else(|| {
                 rows.iter()
-                    .flat_map(|row| {
-                        self.series
-                            .iter()
-                            .filter_map(move |series| sample(row, series))
+                    .map(|row| {
+                        // A stack reaches the sum of its bars.
+                        let stack: f64 = if self.stacked {
+                            self.series.iter().filter(|s| s.style == 1).filter_map(|s| sample(row, s)).sum()
+                        } else {
+                            0.0
+                        };
+                        self.series.iter().filter_map(|s| sample(row, s)).fold(stack, f64::max)
                     })
                     .fold(1.0, f64::max)
             });
+        let look = Look::of(theme);
         let label_axes = self.axes && area.size.width >= 72 && area.size.height >= 40;
-        let left = if label_axes { 25 } else { 1 };
-        let top = if self.legend { 13 } else { 1 };
+        let left = if label_axes { look.left } else { 1 };
+        let top = if self.legend { look.legend } else { 1 };
         let bottom = if label_axes && !self.x_key.is_empty() {
-            13
+            look.bottom
         } else {
-            2
+            look.weight + 1
         };
+        // Native labels sit on their grid line, centred on the font's figure height.
+        let figure = if look.native { 7 } else { 8 };
         let width = area.size.width.saturating_sub(left + 2) as i32;
         let height = area.size.height.saturating_sub(top + bottom) as i32;
         if width < 2 || height < 2 {
@@ -114,13 +157,14 @@ impl Chart<'_> {
             )?;
         }
         if label_axes {
-            for (value, y) in [(maximum, origin.y + 8), (0.0, base)] {
+            let low = if look.native { base + figure } else { base };
+            for (value, y) in [(maximum, origin.y + figure), (0.0, low)] {
                 text::label(
                     target,
                     font,
                     &number(value),
-                    Point::new(origin.x - 3, y),
-                    22,
+                    Point::new(origin.x - if look.native { 10 } else { 3 }, y),
+                    left as i32 - 4,
                     BinaryColor::On,
                     HorizontalAlignment::Right,
                 )?;
@@ -129,22 +173,34 @@ impl Chart<'_> {
         let n = rows.len();
         let bars = self.series.iter().filter(|s| s.style == 1).count().max(1) as i32;
         let mut bar_index = 0;
+        // Stacked: each category's height so far, and where a value lands.
+        let mut stacks = vec![0.0f64; n];
+        let level = |value: f64| base - (value.min(maximum) / maximum * (height - 1) as f64) as i32;
+        let columns = if self.stacked { 1 } else { bars };
         for (index, series) in self.series.iter().enumerate() {
             if self.legend {
                 let slot = area.size.width as i32 / self.series.len() as i32;
                 let x = area.top_left.x + index as i32 * slot;
-                patterned(
-                    target,
-                    Point::new(x, area.top_left.y + 5),
-                    Point::new(x + 8, area.top_left.y + 5),
-                    series.stroke,
-                )?;
+                let (swatch, gap, mid, baseline) = if look.native { (20, 28, 10, 15) } else { (8, 11, 5, 9) };
+                let y = area.top_left.y + mid;
+                if series.style == 0 || !look.native {
+                    thick(target, Point::new(x, y), Point::new(x + swatch, y), series.stroke, look.weight)?;
+                } else {
+                    // Bars and areas show their fill.
+                    let tone = match series.style {
+                        1 if self.stacked => STACK_TONES[(bar_index as usize).min(3)],
+                        1 => [100, 50, 25][usize::from(series.stroke.min(2))],
+                        _ => 35,
+                    };
+                    let r = Rectangle::new(Point::new(x, y - 6), Size::new(swatch as u32, 12));
+                    target.draw_iter(r.points().filter(|p| toned(*p, tone)).map(|p| Pixel(p, BinaryColor::On)))?;
+                }
                 text::label(
                     target,
                     font,
                     &series.label,
-                    Point::new(x + 11, area.top_left.y + 9),
-                    (slot - 13).max(0),
+                    Point::new(x + gap, area.top_left.y + baseline),
+                    (slot - gap - 2).max(0),
                     BinaryColor::On,
                     HorizontalAlignment::Left,
                 )?;
@@ -165,16 +221,35 @@ impl Chart<'_> {
                 if series.style == 1 {
                     let start = i as i32 * width / n.max(1) as i32;
                     let end = (i as i32 + 1) * width / n.max(1) as i32;
-                    let bar_width = ((end - start - 2) / bars).max(1);
-                    let x = origin.x + start + 1 + bar_index * bar_width;
-                    if p.y < base {
-                        for bx in x..(x + bar_width).min(origin.x + width) {
+                    let gutter = if look.native { (end - start) / 4 } else { 2 };
+                    let bar_width = ((end - start - gutter) / columns).max(1);
+                    let column = if self.stacked { 0 } else { bar_index };
+                    let x = origin.x + start + gutter / 2 + column * bar_width;
+                    // Native bars: one gap between series, solid / 50 % / 25 % by stroke; stacked
+                    // ones share a column, a 1 px rule on each segment's top.
+                    let inner = if look.native && columns > 1 { bar_width - 2 } else { bar_width };
+                    let (tone, top, bottom, cap) = if self.stacked {
+                        let below = stacks[i];
+                        stacks[i] += value;
+                        (STACK_TONES[(bar_index as usize).min(3)], level(below + value), level(below), 0)
+                    } else {
+                        ([100, 50, 25][usize::from(series.stroke.min(2))], p.y, base, 1)
+                    };
+                    let right = (x + inner.max(1)).min(origin.x + width);
+                    if top < bottom && (tone == 100 && (look.native || series.stroke == 0)) {
+                        // Solid bars: one fill, not a test per pixel.
+                        target.fill_solid(&Rectangle::new(Point::new(x, top), Size::new((right - x).max(0) as u32, (bottom - top) as u32)), BinaryColor::On)?;
+                    } else if top < bottom {
+                        for bx in x..right {
                             target.draw_iter(
-                                (p.y..base)
+                                (top..bottom)
                                     .filter(|y| {
-                                        series.stroke == 0
-                                            || (bx + *y) % (if series.stroke == 1 { 3 } else { 2 })
-                                                == 0
+                                        if look.native {
+                                            *y <= top + cap || toned(Point::new(bx, *y), tone)
+                                        } else {
+                                            series.stroke == 0
+                                                || (bx + *y) % (if series.stroke == 1 { 3 } else { 2 }) == 0
+                                        }
                                     })
                                     .map(|y| Pixel(Point::new(bx, y), BinaryColor::On)),
                             )?;
@@ -190,12 +265,12 @@ impl Chart<'_> {
                                     + (p.y - before.y) * (x - before.x) / (p.x - before.x).max(1);
                                 target.draw_iter(
                                     (y..base)
-                                        .filter(|y| (x + *y) % 3 == 0)
+                                        .filter(|y| if look.native { toned(Point::new(x, *y), 35) } else { (x + *y) % 3 == 0 })
                                         .map(|y| Pixel(Point::new(x, y), BinaryColor::On)),
                                 )?;
                             }
                         }
-                        patterned(target, before, p, series.stroke)?;
+                        thick(target, before, p, series.stroke, look.weight)?;
                     }
                     Pixel(p, BinaryColor::On).draw(target)?;
                     previous = Some(p);
@@ -206,32 +281,39 @@ impl Chart<'_> {
             }
         }
         if label_axes && !self.x_key.is_empty() && n > 0 {
-            let ticks = n.min(3);
-            for tick in 0..ticks {
-                let i = tick * n.saturating_sub(1) / ticks.saturating_sub(1).max(1);
-                let label = rows[i]
+            let label_of = |i: usize| {
+                rows[i]
                     .get(self.x_key)
-                    .map(|v| {
-                        v.as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| v.to_string())
-                    })
-                    .unwrap_or_default();
-                let x =
-                    origin.x + tick as i32 * (width - 1) / ticks.saturating_sub(1).max(1) as i32;
-                let align = if tick == 0 {
-                    HorizontalAlignment::Left
-                } else if tick + 1 == ticks {
-                    HorizontalAlignment::Right
+                    .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                    .unwrap_or_default()
+            };
+            let labels: Vec<String> = (0..n).map(label_of).collect();
+            // As many labels as fit with air between them: every `step`-th category. Bars carry
+            // theirs centred underneath; a line's sit on its points, the ends kept inside.
+            let widest = labels.iter().map(|l| text::spaced_width(font, l, 0)).max().unwrap_or(0);
+            let slot = (width / n as i32).max(1);
+            let step = ((widest + 8 + slot - 1) / slot).max(1) as usize;
+            let bars = self.series.iter().any(|series| series.style == 1);
+            for i in (0..n).step_by(step) {
+                let (x, align) = if bars {
+                    (origin.x + i as i32 * width / n as i32 + slot / 2, HorizontalAlignment::Center)
                 } else {
-                    HorizontalAlignment::Center
+                    let x = origin.x + i as i32 * (width - 1) / n.saturating_sub(1).max(1) as i32;
+                    let align = if i == 0 {
+                        HorizontalAlignment::Left
+                    } else if i + 1 == n {
+                        HorizontalAlignment::Right
+                    } else {
+                        HorizontalAlignment::Center
+                    };
+                    (x, align)
                 };
                 text::label(
                     target,
                     font,
-                    &label,
-                    Point::new(x, base + 11),
-                    (width / ticks as i32 - 2).max(0),
+                    &labels[i],
+                    Point::new(x, base + if look.native { 24 } else { 11 }),
+                    (slot * step as i32 - 2).max(0),
                     BinaryColor::On,
                     align,
                 )?;

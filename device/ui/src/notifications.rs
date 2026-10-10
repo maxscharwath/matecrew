@@ -7,7 +7,7 @@ fn layer() -> &'static Mutex<engine::Runtime> {
     LAYER.get_or_init(|| {
         Mutex::new(
             engine::Runtime::new(
-                engine::Scene::from_bytecode(include_bytes!("../../screens/system.dui"))
+                engine::Scene::from_bytecode(include_bytes!("../../dist/system/notification.dui"))
                     .expect("system layer bytecode"),
             )
             .expect("system layer"),
@@ -44,5 +44,5 @@ pub fn render<D: DrawTarget<Color = BinaryColor>>(
     }
     layer
         .scene()
-        .render_layer(target, layer.data(), crate::SCALE, theme)
+        .render_layer(target, layer.data(), crate::app_scale(layer.scene()), theme)
 }

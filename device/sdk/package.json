@@ -1,0 +1,30 @@
+{
+  "name": "@matecrew/device-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Device UI SDK: typed TSX compiled to DUI bytecode, rendered by a portable Rust engine on 1-bit e-ink",
+  "exports": {
+    ".": "./index.ts",
+    "./jsx-runtime": "./runtime/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./runtime/jsx-dev-runtime.ts",
+    "./compiler": "./compiler/index.ts",
+    "./config": "./config.ts",
+    "./preview": "./preview/index.ts",
+    "./emulator": "./emulator/index.ts",
+    "./types": "./runtime/types.ts",
+    "./icons/pixelarticons": "./icons/pixelarticons.ts",
+    "./icons/streamline-pixel": "./icons/streamline-pixel.ts",
+    "./icons/system": "./icons/system.ts",
+    "./icons/lucide": "./icons/lucide.ts"
+  },
+  "bin": {
+    "dui": "./cli/index.ts"
+  },
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2"
+  }
+}

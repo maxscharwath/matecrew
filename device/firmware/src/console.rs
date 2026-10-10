@@ -45,6 +45,8 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
                 Some(Command::App(app)) => Input::SelectApp(app),
                 Some(Command::Tap(x, y)) => Input::Tap(x, y),
                 Some(Command::Notify(message)) => Input::Notify(message),
+                Some(Command::BothKeys) => Input::Flow(Event::BothKeys),
+                Some(Command::Site(url)) => Input::MoveSite(url),
                 Some(Command::Help) => {
                     log::info!("console: {}", console::HELP);
                     continue;

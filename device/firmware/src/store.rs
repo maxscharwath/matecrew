@@ -107,6 +107,12 @@ impl Store {
         self.get("site")
     }
 
+    /// The same site at a new address (`site <url>` on the serial console): the token stays, and
+    /// a site that does not know it answers 401, which links the terminal again.
+    pub fn move_site(&self, site: &str) -> Result<()> {
+        self.set("site", site)
+    }
+
     /// A token is only good on the site that gave it: a new site forgets it.
     pub fn set_site(&self, site: &str) -> Result<()> {
         if self.site()?.as_deref() != Some(site) {

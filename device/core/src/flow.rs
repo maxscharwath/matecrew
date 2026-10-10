@@ -6,7 +6,8 @@
 //! shows the next one, the right key takes it. After the last item comes a
 //! card to leave without taking anything.
 //! Right key → "put your badge" → badge → what the person drank today, this
-//! week and this month.
+//! week and this month. While the site shows a preparation, the right key is
+//! "Servi": a runner's badge closes the session (`Effect::Serve`).
 
 use crate::{
     claim::Claim,
@@ -25,14 +26,19 @@ pub const MESSAGE_MS: u64 = 5_000;
 pub const SUMMARY_MS: u64 = 10_000;
 /// How long an unknown badge's claim QR stays.
 pub const CLAIM_MS: u64 = 30_000;
+/// How long the about page (both keys) stays without a key press.
+pub const ABOUT_MS: u64 = 60_000;
 
-/// In JSON: `{"type":"key","side":"left"}`, `{"type":"badge","uid":"04A1…"}`, `{"type":"tick"}`.
+/// In JSON: `{"type":"key","side":"left"}`, `{"type":"bothKeys"}`, `{"type":"badge","uid":"04A1…"}`,
+/// `{"type":"tick"}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
     Key {
         side: Side,
     },
+    /// Both keys together (`hardware::TouchKeys`): the terminal's about page, from anywhere.
+    BothKeys,
     /// A badge UID, as `normalize_uid` gives it.
     Badge {
         uid: String,
@@ -92,6 +98,16 @@ pub enum Screen {
         today: u32,
         week: u32,
         month: u32,
+        /// The last days, oldest first, per product, and their weekdays.
+        #[serde(default)]
+        days: Vec<Vec<u32>>,
+        #[serde(default)]
+        products: Vec<String>,
+        #[serde(default)]
+        labels: Vec<String>,
+        /// This month's cost, as the site formats it.
+        #[serde(default)]
+        cost: Option<String>,
     },
     /// `claim_url` lets the person link the badge to their account by scanning it.
     UnknownBadge {
@@ -103,9 +119,16 @@ pub enum Screen {
     NotReady,
     /// The office has no active item.
     NoItems,
+    /// Version, build, network and battery: the host's `$device`, nothing from the flow.
+    About,
+    /// The preparation was served: who, and how many orders.
+    Served {
+        name: String,
+        count: u32,
+    },
 }
 
-/// In JSON: `"key"`, `"accepted"`, `"error"`.
+/// In JSON: `"key"`, `"accepted"`, `"error"`, `"notification"`, `"badge"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Beep {
@@ -113,6 +136,8 @@ pub enum Beep {
     Accepted,
     Error,
     Notification,
+    /// A known badge was read.
+    Badge,
 }
 
 /// In JSON: `{"type":"show","screen":{…}}`, `{"type":"beep","beep":"key"}`,
@@ -133,6 +158,14 @@ pub enum Effect {
     /// Report this badge to the site with the next status.
     NoteUnknownBadge {
         uid: String,
+    },
+    /// Serve the preparation's session now (`contract::ServeRequest`), then show
+    /// `Screen::Served` with the count the site answers, or an error.
+    Serve {
+        uid: String,
+        name: String,
+        #[serde(rename = "sessionId")]
+        session_id: Option<String>,
     },
 }
 
@@ -158,6 +191,9 @@ enum Stage {
     Message {
         until: u64,
     },
+    About {
+        until: u64,
+    },
 }
 
 impl Flow {
@@ -180,13 +216,23 @@ impl Flow {
             Stage::Idle => None,
             Stage::AwaitBadge { until, .. }
             | Stage::Pick { until, .. }
-            | Stage::Message { until } => Some(until),
+            | Stage::Message { until }
+            | Stage::About { until } => Some(until),
         }
     }
 
     pub fn handle(&mut self, event: Event, cx: Context) -> Vec<Effect> {
         let expired = self.deadline().is_some_and(|until| cx.now_ms >= until);
         match (std::mem::take(&mut self.stage), event) {
+            // Whatever the terminal was doing: a take not confirmed yet is dropped, as on a timeout.
+            (_, Event::BothKeys) => {
+                self.stage = Stage::About {
+                    until: cx.now_ms + ABOUT_MS,
+                };
+                vec![beep(Beep::Key), show(Screen::About)]
+            }
+            (Stage::About { .. }, Event::Key { .. }) => vec![beep(Beep::Key), show(Screen::Main)],
+
             (Stage::Idle | Stage::Message { .. }, Event::Key { side }) => {
                 self.ask_for_badge(side, cx)
             }
@@ -221,7 +267,10 @@ impl Flow {
             ) => self.take(uid, name, index, cx),
 
             (
-                Stage::AwaitBadge { .. } | Stage::Pick { .. } | Stage::Message { .. },
+                Stage::AwaitBadge { .. }
+                | Stage::Pick { .. }
+                | Stage::Message { .. }
+                | Stage::About { .. },
                 Event::Tick,
             ) if expired => {
                 vec![show(Screen::Main)]
@@ -253,7 +302,10 @@ impl Flow {
         vec![
             beep(Beep::Key),
             show(Screen::Badge {
-                key_label: state.key(side).label.clone(),
+                key_label: match (side, preparing(state)) {
+                    (Side::Right, Some(preparation)) => preparation.serve_label.clone(),
+                    _ => state.key(side).label.clone(),
+                },
             }),
         ]
     }
@@ -276,6 +328,18 @@ impl Flow {
                 show(Screen::UnknownBadge { uid, claim_url }),
             ];
         };
+        if let (Side::Right, Some(preparation)) = (side, preparing(state)) {
+            // The runtime answers with the site's count; the message stage brings the main screen back.
+            self.message(cx, MESSAGE_MS);
+            return vec![
+                beep(Beep::Badge),
+                Effect::Serve {
+                    uid,
+                    name: badge.name.clone(),
+                    session_id: preparation.session_id.clone(),
+                },
+            ];
+        }
         match side {
             Side::Right => {
                 self.message(cx, SUMMARY_MS);
@@ -284,14 +348,18 @@ impl Flow {
                     today: badge.today,
                     week: badge.week,
                     month: badge.month,
+                    days: badge.days.clone(),
+                    products: badge.products.clone(),
+                    labels: state.day_labels.clone(),
+                    cost: badge.cost.clone(),
                 };
-                vec![beep(Beep::Accepted), show(screen)]
+                vec![beep(Beep::Badge), show(screen)]
             }
             Side::Left if state.items.is_empty() => {
                 self.message(cx, MESSAGE_MS);
                 vec![beep(Beep::Error), show(Screen::NoItems)]
             }
-            Side::Left => self.pick(uid, badge.name.clone(), 0, cx, Beep::Accepted),
+            Side::Left => self.pick(uid, badge.name.clone(), 0, cx, Beep::Badge),
         }
     }
 
@@ -356,6 +424,16 @@ impl Flow {
     }
 }
 
+/// The site shows a preparation and serves it from terminals (it names the key): the right key
+/// serves it. An older site sends no label, and the key keeps its own action.
+fn preparing(state: &DeviceState) -> Option<&crate::contract::Preparation> {
+    state
+        .screen
+        .as_ref()
+        .and_then(|screen| screen.preparation.as_ref())
+        .filter(|preparation| !preparation.serve_label.is_empty())
+}
+
 fn beep(beep: Beep) -> Effect {
     Effect::Beep { beep }
 }
@@ -402,8 +480,12 @@ mod tests {
                 today: 1,
                 week: 4,
                 month: 11,
+                days: vec![vec![0], vec![2], vec![1], vec![0], vec![0], vec![1], vec![1]],
+                products: vec!["Maté".into()],
+                cost: Some("CHF 12.40".into()),
             }],
             sync_times: vec![],
+            day_labels: ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from).to_vec(),
             server_time: "2026-10-09T18:25:00Z".into(),
             firmware: None,
             screen: None,
@@ -446,6 +528,74 @@ mod tests {
     }
 
     #[test]
+    fn during_a_preparation_the_right_key_serves_it_with_a_badge() {
+        let mut s = state();
+        let mut screen: crate::contract::DeviceScreen =
+            serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap();
+        screen.preparation = serde_json::from_value(serde_json::json!({
+            "title": "À préparer", "total": "8 matés", "items": [],
+            "sessionId": "s1", "serveLabel": "Servi"
+        }))
+        .unwrap();
+        s.screen = Some(screen);
+        let mut flow = Flow::default();
+        assert_eq!(
+            flow.handle(key(Side::Right), cx(&s, 0)),
+            [beep(Beep::Key), show(Screen::Badge { key_label: "Servi".into() })]
+        );
+        assert_eq!(
+            flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
+            [
+                beep(Beep::Badge),
+                Effect::Serve {
+                    uid: "04A1B2C3D4E5F6".into(),
+                    name: "Alex".into(),
+                    session_id: Some("s1".into()),
+                }
+            ]
+        );
+        assert_eq!(flow.handle(Event::Tick, cx(&s, 1_000 + MESSAGE_MS)), [show(Screen::Main)]);
+        // The left key still takes.
+        assert_eq!(
+            flow.handle(key(Side::Left), cx(&s, 20_000)),
+            [beep(Beep::Key), show(Screen::Badge { key_label: "Prendre".into() })]
+        );
+        assert_eq!(
+            serde_json::to_value(Effect::Serve { uid: "U".into(), name: "A".into(), session_id: None }).unwrap(),
+            serde_json::json!({"type":"serve","uid":"U","name":"A","sessionId":null})
+        );
+    }
+
+    #[test]
+    fn both_keys_open_the_about_page_from_anywhere_and_a_key_closes_it() {
+        let s = state();
+        let mut flow = Flow::default();
+        let about = [beep(Beep::Key), show(Screen::About)];
+        assert_eq!(flow.handle(Event::BothKeys, cx(&s, 0)), about);
+        assert!(!flow.wants_badge());
+        assert_eq!(flow.deadline(), Some(ABOUT_MS));
+        assert_eq!(flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 100)), []);
+        assert_eq!(
+            flow.handle(key(Side::Left), cx(&s, 1_000)),
+            [beep(Beep::Key), show(Screen::Main)]
+        );
+        assert!(flow.is_idle());
+        // In the middle of a take: the pick is dropped, nothing is queued.
+        flow.handle(key(Side::Left), cx(&s, 2_000));
+        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 2_500));
+        assert_eq!(flow.handle(Event::BothKeys, cx(&s, 3_000)), about);
+        assert_eq!(
+            flow.handle(Event::Tick, cx(&s, 3_000 + ABOUT_MS)),
+            [show(Screen::Main)]
+        );
+        assert!(flow.is_idle());
+        assert_eq!(
+            serde_json::to_value(Event::BothKeys).unwrap(),
+            serde_json::json!({"type":"bothKeys"})
+        );
+    }
+
+    #[test]
     fn left_key_badge_then_pick_an_item_and_take_it() {
         let s = state();
         let mut flow = Flow::default();
@@ -461,7 +611,7 @@ mod tests {
         assert!(flow.wants_badge());
         assert_eq!(
             flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
-            [beep(Beep::Accepted), pick("Maté", 36, 0)]
+            [beep(Beep::Badge), pick("Maté", 36, 0)]
         );
         assert_eq!(
             flow.handle(key(Side::Left), cx(&s, 2_000)),
@@ -552,12 +702,16 @@ mod tests {
         assert_eq!(
             flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
             [
-                beep(Beep::Accepted),
+                beep(Beep::Badge),
                 show(Screen::Summary {
                     name: "Alex".into(),
                     today: 1,
                     week: 4,
-                    month: 11
+                    month: 11,
+                    days: vec![vec![0], vec![2], vec![1], vec![0], vec![0], vec![1], vec![1]],
+                    products: vec!["Maté".into()],
+                    labels: ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from).to_vec(),
+                    cost: Some("CHF 12.40".into())
                 })
             ]
         );

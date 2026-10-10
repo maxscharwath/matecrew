@@ -15,9 +15,8 @@
     "setup:qstash": "bun scripts/setup-qstash.ts",
     "postinstall": "prisma generate",
     "vercel-build": "prisma generate && prisma migrate deploy && next build",
-    "device:ui": "bun run device:icons && bun scripts/build-terminal-ui.mjs && bun scripts/build-device-ui.mjs && bun scripts/build-device-ui.mjs device/screens/showcase.tsx && bun scripts/build-device-ui.mjs device/screens/kit-demo.tsx && bun scripts/build-device-ui.mjs device/screens/area-demo.tsx && bun scripts/build-device-ui.mjs device/apps/showcase/index.tsx device/apps/showcase/app.dui && bun scripts/build-device-ui.mjs device/screens/example.tsx device/engine/tests/fixtures/app.dui && bun scripts/build-device-ui.mjs device/screens/system.tsx && bun scripts/build-device-ui.mjs device/screens/boot.tsx",
-    "device:preview": "bun run device:ui && cargo run --manifest-path device/sim/Cargo.toml",
-    "device:icons": "bun scripts/build-device-icons.mjs"
+    "dui": "bun device/sdk/cli/index.ts",
+    "device:preview": "bun dui build && cargo run --manifest-path device/sim/Cargo.toml"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1000.0",
@@ -99,6 +98,6 @@
     "unrs-resolver"
   ],
   "workspaces": [
-    "device/authoring"
+    "device/sdk"
   ]
 }

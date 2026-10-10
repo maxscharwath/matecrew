@@ -39,46 +39,6 @@ fn main() {
             ui::badge_screen(d, "Prendre")
         });
     }
-    let showcase =
-        ui::engine::Scene::from_bytecode(include_bytes!("../../screens/showcase.dui")).unwrap();
-    for (name, theme) in [
-        ("flipper", ui::Theme::Flipper),
-        ("macos", ui::Theme::Macos),
-        ("dark", ui::Theme::Dark),
-    ] {
-        save(&out, &format!("icons-{name}"), |d| {
-            showcase.render_with_theme(d, &serde_json::json!({}), 2, theme)
-        });
-    }
-    let demo =
-        ui::engine::Scene::from_bytecode(include_bytes!("../../screens/kit-demo.dui")).unwrap();
-    let mut demo_runtime = ui::engine::Runtime::new(demo.clone()).unwrap();
-    save(&out, "kit-loading", |d| {
-        demo.render(d, demo_runtime.data(), 2)
-    });
-    for request in demo_runtime.image_requests() {
-        demo_runtime
-            .update_image(
-                &request,
-                include_bytes!("../../../public/device/streamline-coffee.png"),
-            )
-            .unwrap();
-    }
-    let area_demo =
-        ui::engine::Scene::from_bytecode(include_bytes!("../../screens/area-demo.dui")).unwrap();
-    for (name, theme) in [
-        ("flipper", ui::Theme::Flipper),
-        ("macos", ui::Theme::Macos),
-        ("dark", ui::Theme::Dark),
-    ] {
-        save(&out, &format!("kit-{name}"), |d| {
-            demo.render_with_theme(d, demo_runtime.data(), 2, theme)
-        });
-        save(&out, &format!("area-{name}"), |d| {
-            area_demo.render_with_theme(d, &serde_json::json!({}), 2, theme)
-        });
-    }
-
     let mut showcase_app = ui::apps::showcase().expect("showcase bytecode");
     showcase_app.update_device(info);
     showcase_app.update(
@@ -145,7 +105,7 @@ fn main() {
     });
 
     let app =
-        ui::engine::Scene::from_bytecode(include_bytes!("../../screens/example.dui")).unwrap();
+        ui::engine::Scene::from_bytecode(include_bytes!("../../dist/hello.dui")).unwrap();
     let mut app_runtime = ui::engine::Runtime::new(app.clone()).unwrap();
     app_runtime.update("stock", serde_json::json!({"office":{"name":"Lausanne"},"items":[{"name":"Maté Classic","stock":36}],"screen":{"chart":{"series":[[48,45,46,39,36]],"max":50}}}));
     save(&out, "tsx-app", |d| app.render(d, app_runtime.data(), 2));
@@ -154,7 +114,6 @@ fn main() {
         app.render(d, app_runtime.data(), 2)
     });
 
-    save(&out, "test", |d| ui::test_screen(d));
     save(&out, "setup", |d| ui::setup_screen(d, &setup));
     save(&out, "link", |d| {
         ui::link_screen(
@@ -190,8 +149,21 @@ fn main() {
     save(&out, "taken", |d| {
         ui::taken_screen(d, "Alex", "Maté Classic", Some(&image))
     });
+    let labels = ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from);
     save(&out, "summary", |d| {
-        ui::summary_screen(d, "Alex Martin", 1, 4, 11)
+        ui::summary_screen(
+            d,
+            &ui::SummaryInfo {
+                name: "Alex Martin",
+                today: 1,
+                week: 4,
+                month: 11,
+                days: &[1, 0, 0, 2, 0, 1, 1].map(|n| vec![n]),
+                products: &["Maté Classic".to_owned()],
+                labels: &labels,
+                cost: Some("CHF 12.40"),
+            },
+        )
     });
     save(&out, "update", |d| ui::update_screen(d, "0.2.0", 50));
     save(&out, "unknown-badge", |d| {

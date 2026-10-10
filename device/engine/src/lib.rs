@@ -1,4 +1,5 @@
 //! Generic, hardware-independent app renderer. Screens, resources and bindings are data, never JavaScript.
+pub mod clip;
 pub mod frame;
 mod limits;
 pub mod pixelated;

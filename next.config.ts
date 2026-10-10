@@ -6,9 +6,11 @@ const nextConfig: NextConfig = {
   // Release-note articles live as .mdx under content/whats-new, so MDX has to
   // be a recognised page/module extension.
   pageExtensions: ["ts", "tsx", "js", "jsx", "md", "mdx"],
+  // The device SDK is a TypeScript workspace package (icons, board emulation).
+  transpilePackages: ["@matecrew/device-ui"],
   // Ship the already-compiled device app; rendering and fonts live in Rust.
   outputFileTracingIncludes: {
-    "/api/device/ui": ["./device/screens/example.dui", "./device/screens/kit-demo.dui", "./device/apps/showcase/app.dui"],
+    "/api/device/ui": ["./device/dist/hello.dui", "./device/dist/showcase.dui"],
   },
   experimental: {
     serverActions: {

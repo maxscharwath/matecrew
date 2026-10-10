@@ -32,6 +32,12 @@ pub fn check_boot(store: &Store) -> Result<()> {
 }
 
 /// After a sync: this version works, the bootloader keeps it.
+/// The app slot this firmware runs from ("ota_0" or "ota_1"), for the about page.
+pub fn running_slot() -> Option<String> {
+    let slot = EspOta::new().ok()?.get_running_slot().ok()?;
+    Some(slot.label.as_str().to_owned())
+}
+
 pub fn confirm(store: &Store) -> Result<()> {
     EspOta::new()?.mark_running_slot_valid()?;
     if store.ota_pending()?.as_deref() == Some(FIRMWARE_VERSION) {

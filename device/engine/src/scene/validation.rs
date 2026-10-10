@@ -27,8 +27,8 @@ impl Node {
         let r = self.rect();
         if depth > MAX_DEPTH
             || *nodes > MAX_NODES
-            || r.width > MAX_VIEWPORT
-            || r.height > MAX_VIEWPORT
+            || !super::layout::Dim::valid(r.width)
+            || !super::layout::Dim::valid(r.height)
             || r.x.unsigned_abs() > MAX_VIEWPORT
             || r.y.unsigned_abs() > MAX_VIEWPORT
         {
@@ -39,7 +39,10 @@ impl Node {
             return false;
         }
         match self {
-            Self::Panel { children, style, .. } => style.as_ref().is_none_or(SurfaceStyle::valid)
+            Self::Panel { children, style, layout, .. } => style.as_ref().is_none_or(SurfaceStyle::valid)
+                && layout.as_ref().is_none_or(Layout::valid)
+                && children.iter().all(|n| n.valid(depth + 1, nodes)),
+            Self::Group { children, layout: Some(layout), .. } => layout.valid()
                 && children.iter().all(|n| n.valid(depth + 1, nodes)),
             Self::Button { icon, .. } => icon.as_ref().is_none_or(|icon| {
                 (1..=64).contains(&icon.width)
@@ -81,18 +84,26 @@ impl Node {
                         Binding::Literal { literal } => {
                             literal.as_str().is_some_and(crate::image::valid_source)
                         }
-                        Binding::Bound { .. } => true,
+                        Binding::Bound { .. } | Binding::Expr { .. } | Binding::Message { .. } => true,
                     }
             }
-            Self::Plot { stroke, .. } => *stroke <= 2,
             Self::Text { max_lines, typography, .. } => (1..=8).contains(max_lines) && typography.as_ref().is_none_or(Typography::valid),
+            Self::Plot { stroke, weight, fill, .. } => *stroke <= 2 && (1..=4).contains(weight) && *fill <= 100,
+            Self::Qr { style, ecc, quiet, logo, .. } => *style <= 2 && *ecc <= 3 && *quiet <= 8
+                && logo.as_ref().is_none_or(|logo| {
+                    (1..=128).contains(&logo.width)
+                        && (1..=128).contains(&logo.height)
+                        && logo.bits.len() == (logo.width * logo.height).div_ceil(8) as usize
+                }),
             Self::Image {
                 source_width,
                 source_height,
+                packed,
                 ..
             } => {
                 (1..=MAX_VIEWPORT).contains(source_width)
                     && (1..=MAX_VIEWPORT).contains(source_height)
+                    && packed.as_ref().is_none_or(|bits| bits.len() == (source_width * source_height).div_ceil(8) as usize)
             }
             _ => true,
         }
@@ -172,7 +183,18 @@ impl Scene {
                         Action::DialogChoice { .. } => true,
                         Action::Beep { .. } => true,
                         Action::Navigate { .. } => true,
-                        Action::SetState { key, .. } => state.contains_key(key),
+                        Action::SetState { key, .. } | Action::SetStateBound { key, .. } => state.contains_key(key),
+                        // One level: a sequence names existing actions that are not sequences.
+                        Action::Sequence { actions } => {
+                            (1..=8).contains(&actions.len())
+                                && actions.iter().all(|step| {
+                                    step != id
+                                        && self
+                                            .actions
+                                            .get(step)
+                                            .is_some_and(|a| !matches!(a, Action::Sequence { .. }))
+                                })
+                        }
                         Action::Fetch { resource } => resources.contains(resource),
                         Action::Emit { name } => valid_identifier(name),
                     }
