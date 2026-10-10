@@ -1,4 +1,14 @@
-//! DNS answers of the setup access point, kept here so they are tested on the Mac.
+//! DNS answers and connectivity checks of the setup access point, kept here so they are tested
+//! on the Mac.
+//!
+//! A phone that joins a network asks a known address and compares the answer with the one it
+//! expects online. Anything else means a captive portal, and it opens the portal's page in its
+//! login sheet: iOS asks captive.apple.com/hotspot-detect.html for "Success", Android a
+//! `generate_204` page for an empty 204 (Google, and Samsung's, Xiaomi's and Huawei's own),
+//! Windows `connecttest.txt`, Firefox detectportal.firefox.com. Before the Wi-Fi is set, every
+//! check gets a redirect to the form; once it is, the answer it expects online, so the sheet
+//! shows "Done" and closes. No DHCP option 114 (RFC 8910): it points iOS at a JSON API that
+//! must be served over HTTPS, which a local address cannot be.
 
 use std::net::Ipv4Addr;
 
@@ -35,11 +45,65 @@ pub fn dns_reply(query: &[u8], ip: Ipv4Addr) -> Option<Vec<u8>> {
     reply.extend_from_slice(&[0x00, 0x01, 0x00, answers, 0x00, 0x00, 0x00, 0x00]);
     reply.extend_from_slice(&query[12..end]);
     if answers == 1 {
-        // Name pointer to the question, type A, class IN, TTL 60 s, 4 bytes.
-        reply.extend_from_slice(&[0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04]);
+        // Name pointer to the question, type A, class IN, TTL 10 s, 4 bytes: a phone forgets
+        // the access point's answers soon after it leaves.
+        reply.extend_from_slice(&[0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x04]);
         reply.extend_from_slice(&ip.octets());
     }
     Some(reply)
+}
+
+/// Who sends a connectivity check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe {
+    Apple,
+    Android,
+    Windows,
+    Firefox,
+}
+
+const APPLE_HOSTS: [&str; 7] = [
+    "captive.apple.com",
+    "www.apple.com",
+    "www.appleiphonecell.com",
+    "www.ibook.com",
+    "www.itools.info",
+    "www.airport.us",
+    "www.thinkdifferent.us",
+];
+
+/// The connectivity check a request is, if it is one.
+pub fn probe(host: &str, path: &str) -> Option<Probe> {
+    let host = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
+    let path = path.split('?').next().unwrap_or(path).to_ascii_lowercase();
+    if APPLE_HOSTS.contains(&host.as_str()) || path.ends_with("/hotspot-detect.html") {
+        Some(Probe::Apple)
+    } else if path.ends_with("/generate_204") || path.ends_with("/gen_204") {
+        Some(Probe::Android)
+    } else if host.ends_with("msftconnecttest.com") || host.ends_with("msftncsi.com") {
+        Some(Probe::Windows)
+    } else if host == "detectportal.firefox.com" {
+        Some(Probe::Firefox)
+    } else {
+        None
+    }
+}
+
+/// What a connectivity check expects when the network reaches the internet: status, content
+/// type and body.
+pub fn online(probe: Probe, path: &str) -> (u16, &'static str, &'static str) {
+    match probe {
+        Probe::Apple => (200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"),
+        Probe::Android => (204, "text/plain", ""),
+        Probe::Windows if path.ends_with("ncsi.txt") => (200, "text/plain", "Microsoft NCSI"),
+        Probe::Windows => (200, "text/plain", "Microsoft Connect Test"),
+        Probe::Firefox if path.ends_with("success.txt") => (200, "text/plain", "success\n"),
+        Probe::Firefox => (
+            200,
+            "text/html",
+            "<meta http-equiv=\"refresh\" content=\"0;url=https://support.mozilla.org/kb/captive-portal\"/>",
+        ),
+    }
 }
 
 /// The name and type a DNS query asks for, for the log: ("captive.apple.com", 1).
@@ -103,6 +167,26 @@ mod tests {
         response[2] |= 0x80;
         assert!(dns_reply(&response, Ipv4Addr::LOCALHOST).is_none());
         assert!(dns_reply(&[1, 2, 3], Ipv4Addr::LOCALHOST).is_none());
+    }
+
+    #[test]
+    fn knows_each_platforms_connectivity_check() {
+        assert_eq!(probe("captive.apple.com", "/hotspot-detect.html"), Some(Probe::Apple));
+        assert_eq!(probe("www.apple.com", "/library/test/success.html"), Some(Probe::Apple));
+        assert_eq!(probe("connectivitycheck.gstatic.com", "/generate_204"), Some(Probe::Android));
+        assert_eq!(probe("connect.rom.miui.com", "/generate_204?x=1"), Some(Probe::Android));
+        assert_eq!(probe("www.google.com", "/gen_204"), Some(Probe::Android));
+        assert_eq!(probe("www.msftconnecttest.com", "/connecttest.txt"), Some(Probe::Windows));
+        assert_eq!(probe("detectportal.firefox.com:80", "/canonical.html"), Some(Probe::Firefox));
+        assert_eq!(probe("192.168.71.1", "/"), None);
+        assert_eq!(probe("example.com", "/favicon.ico"), None);
+    }
+
+    #[test]
+    fn answers_a_check_as_the_internet_would() {
+        assert_eq!(online(Probe::Android, "/generate_204").0, 204);
+        assert!(online(Probe::Apple, "/hotspot-detect.html").2.contains("<BODY>Success</BODY>"));
+        assert_eq!(online(Probe::Windows, "/ncsi.txt").2, "Microsoft NCSI");
     }
 
     #[test]

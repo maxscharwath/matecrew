@@ -2,17 +2,23 @@
 //! device's address and every unknown page redirects to the form: the phone's
 //! connectivity check (captive.apple.com, connectivitycheck.gstatic.com...)
 //! gets a redirect instead of its expected answer, so iOS and Android open the
-//! settings page on their own. Every DNS question and page is logged, to see
-//! on the serial monitor what a phone tried.
+//! settings page on their own (`matecrew_ui::captive`). Once the Wi-Fi is
+//! saved, the checks get their online answer and the phone's login sheet can
+//! close. Every DNS question and page is logged, to see on the serial monitor
+//! what a phone tried.
 
 use anyhow::Result;
 use embedded_svc::http::{Headers, Method};
 use embedded_svc::io::{Read, Write};
 use esp_idf_svc::http::server::{Configuration, EspHttpServer};
-use matecrew_ui::captive::{dns_reply, question};
+use matecrew_ui::captive::{dns_reply, online, probe, question};
 use matecrew_ui::form::{escape_html, field, parse_urlencoded};
 use std::net::{Ipv4Addr, UdpSocket};
-use std::sync::mpsc::Sender;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
+    Arc,
+};
 use std::thread;
 
 use crate::api::normalize_site;
@@ -38,6 +44,9 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Se
     let page = PAGE.replace("{{networks}}", &options).replace("{{site}}", &escape_html(&site));
     let home = format!("http://{ip}/");
     let host = ip.to_string();
+    // Set once the form is sent: the checks then get their online answer.
+    let done = Arc::new(AtomicBool::new(false));
+    let saving = done.clone();
 
     let mut server = EspHttpServer::new(&Configuration {
         uri_match_wildcard: true,
@@ -67,27 +76,56 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Se
         req.into_response(200, None, &[("content-type", "text/html; charset=utf-8")])?
             .write_all(page.as_bytes())?;
         if !creds.ssid.is_empty() {
+            saving.store(true, Ordering::Relaxed);
             let _ = saved.send(Setup { wifi: creds, site: chosen });
         }
         Ok(())
     })?;
 
-    server.fn_handler::<anyhow::Error, _>("/*", Method::Get, move |req| {
-        // Connectivity checks ask for other hosts (captive.apple.com,
-        // connectivitycheck.gstatic.com...). Answering them with a redirect
-        // tells the phone it is behind a portal, and it opens ours.
-        let asked = req.header("host").unwrap_or("").to_owned();
-        let path = req.uri().split('?').next().unwrap_or("/").to_owned();
-        if asked != host || path != "/" {
-            log::info!("portal: http://{asked}{path} → 302 {home}");
-            req.into_response(302, Some("Found"), &[("location", &home), ("cache-control", "no-store")])?;
-            return Ok(());
-        }
-        log::info!("portal: page served");
-        req.into_response(200, None, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")])?
-            .write_all(page.as_bytes())?;
-        Ok(())
-    })?;
+    // A redirect with a body and a closed connection: some checks want both.
+    let moved = format!("<html><body><a href=\"{home}\">matécrew</a></body></html>");
+    for method in [Method::Get, Method::Head] {
+        let (page, home, host, moved, done) = (page.clone(), home.clone(), host.clone(), moved.clone(), done.clone());
+        server.fn_handler::<anyhow::Error, _>("/*", method, move |req| {
+            let head = method == Method::Head;
+            let asked = req.header("host").unwrap_or("").to_owned();
+            let path = req.uri().split('?').next().unwrap_or("/").to_owned();
+            let check = probe(&asked, &path);
+            if let (Some(check), true) = (check, done.load(Ordering::Relaxed)) {
+                // Wi-Fi saved: the answer the check expects online, so the login sheet closes.
+                let (status, kind, body) = online(check, &path);
+                log::info!("portal: {check:?} check http://{asked}{path} → {status} (online)");
+                let mut reply = req.into_response(status, None, &[("content-type", kind), ("cache-control", "no-store"), ("connection", "close")])?;
+                if !head {
+                    reply.write_all(body.as_bytes())?;
+                }
+                return Ok(());
+            }
+            if asked != host || path != "/" {
+                // A connectivity check, or any other page: the redirect tells the phone it is
+                // behind a portal, and it opens ours.
+                match check {
+                    Some(check) => log::info!("portal: {check:?} check http://{asked}{path} → 302 {home}"),
+                    None => log::info!("portal: http://{asked}{path} → 302 {home}"),
+                }
+                let mut reply = req.into_response(
+                    302,
+                    Some("Found"),
+                    &[("location", &home), ("content-type", "text/html"), ("cache-control", "no-store"), ("connection", "close")],
+                )?;
+                if !head {
+                    reply.write_all(moved.as_bytes())?;
+                }
+                return Ok(());
+            }
+            log::info!("portal: page served");
+            let mut reply = req.into_response(200, None, &[("content-type", "text/html; charset=utf-8"), ("cache-control", "no-store")])?;
+            if !head {
+                reply.write_all(page.as_bytes())?;
+            }
+            Ok(())
+        })?;
+    }
 
     Ok(server)
 }
