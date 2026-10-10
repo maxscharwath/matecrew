@@ -1,3 +1,6 @@
+/** The piezo's LEDC output: D5, shared with the battery reading. */
+export const BUZZER_PIN = 6;
+
 /** Input pin levels, with independent sources so keyboard and multi-touch can overlap. */
 export class VirtualGpio {
   private readonly drivers = new Map<number, Set<string>>();
@@ -15,7 +18,7 @@ export class VirtualGpio {
     return high;
   }
   read(pin: number, nowMs = performance.now()): boolean {
-    if (pin === 44) {
+    if (pin === BUZZER_PIN) {
       const note = this.pwm.find(
         (note) => nowMs >= note.start && nowMs < note.end,
       );
@@ -27,7 +30,7 @@ export class VirtualGpio {
     }
     return (this.drivers.get(pin)?.size ?? 0) > 0;
   }
-  /** Timestamped LEDC program; read(44, t) exposes the actual 50%-duty pin level. */
+  /** Timestamped LEDC program; read(BUZZER_PIN, t) exposes the actual 50%-duty pin level. */
   playPwm(
     pattern: readonly (readonly [number, number])[],
     nowMs: number,

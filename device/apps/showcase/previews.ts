@@ -3,7 +3,7 @@ import { pages } from "./shared";
 
 const device = {
   board: { name: "Simulateur XIAO", simulated: true },
-  pins: { left: 5, right: 8, buzzer: 44 },
+  pins: { left: 5, right: 8, buzzer: 6 },
   wifi: { rssi: -55 },
   battery: { percent: 78 },
   clock: "10:42",

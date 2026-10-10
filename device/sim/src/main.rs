@@ -15,7 +15,7 @@ fn main() {
     }
 
     let info = ui::device_info::set(
-        serde_json::json!({"board":{"name":"Simulateur XIAO","simulated":true},"pins":{"left":5,"right":8,"buzzer":44},"wifi":{"rssi":-55},"battery":{"percent":78},"clock":"10:42"}),
+        serde_json::json!({"board":{"name":"Simulateur XIAO","simulated":true},"pins":{"left":5,"right":8,"buzzer":6},"wifi":{"rssi":-55},"battery":{"percent":78},"clock":"10:42"}),
     );
     let setup = ui::SetupInfo {
         ap_ssid: "matecrew-setup-50E4",

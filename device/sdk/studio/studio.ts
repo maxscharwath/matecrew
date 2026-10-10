@@ -83,7 +83,7 @@ function deviceInfo(): Record<string, unknown> {
   const now = new Date();
   return decorate({
     board: { name: "Émulateur XIAO ESP32-S3", simulated: true },
-    pins: { left: 5, right: 8, buzzer: 44 },
+    pins: { left: 5, right: 8, buzzer: 6 },
     wifi: { rssi: ui.offline.checked ? null : Number(ui.rssi.value) },
     // The terminal sends the voltage; the charge comes from the LiPo curve, as on the device.
     battery: { millivolts: Number(ui.battery.value), usb: ui.usb.checked },

@@ -42,11 +42,10 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 | Écran MOSI | D10 | D9 (MISO) n'est pas reliée à l'écran |
 | Touche gauche | D4 | TTP223, sortie active haute, mode momentané ; réveil deep sleep |
 | Touche droite | D9 | TTP223, idem ; D9 n'est reliée qu'aux trous de la carte driver (vérifié sur le schéma Seeed) |
-| PN532 SDA | IO41 | pastille sous le XIAO (pastille JTAG, libre comme GPIO tant que le JTAG reste sur l'USB) |
-| PN532 SCL | IO42 | idem ; `Wire.begin(41, 42)` |
-| Buzzer piézo passif | D7 | PWM (LEDC) vers 4 kHz, l'autre fil à GND |
-| Mesure batterie | D5 (ADC1) | point milieu d'un pont 1 MΩ / 1 MΩ entre BAT+ et GND : Vbat ≈ 2 × Vmesurée, à calibrer |
-| Libre | D6 | LED d'état éventuelle plus tard |
+| PN532 SDA | D6 | I2C 100 kHz, adresse 0x24 ; interrupteurs du module : 1 ON, 2 OFF (I2C), à régler hors tension |
+| PN532 SCL | D7 | D6 et D7 sont l'UART0, libre : la console passe par l'USB-Serial-JTAG |
+| Buzzer piézo passif | D5 | PWM (LEDC) vers 4 kHz, l'autre fil à GND ; partage D5 avec la mesure batterie (un piézo ne laisse passer aucun courant continu) : sortie le temps d'un bip, flottante sinon |
+| Mesure batterie | D5 (ADC1) | point milieu d'un pont 1 MΩ / 1 MΩ entre BAT+ et GND : Vbat ≈ 2 × Vmesurée, à calibrer ; optionnel, sans pont la batterie ne s'affiche pas |
 
 - **Écran** : dalle 7,5" 800 × 480 noir et blanc du kit « Seeed XIAO 7.5" ePaper Panel ». Elle est montée nappe en haut, donc il faudra peut-être tourner l'affichage de 180°.
 - **Lecteur NFC** : PN532 V3, mini-interrupteurs en I2C, adresse 0x24. IRQ et RSTO ne sont pas câblés.
@@ -94,7 +93,7 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 - Objectif de courant en veille : environ 50 µA en tout (XIAO S3 environ 14 µA, plus les deux TTP223, le pont de mesure, le PN532 et l'écran en veille).
 - Deep sleep par défaut. Le PN532 passe en power-down avant chaque mise en veille.
-- Écran : mettre le contrôleur en veille après chaque affichage. Rafraîchissement partiel (environ 1 s, sans flash) pour une mise à jour de données ; complet rapide (environ 2 s, un flash) pour un nouvel écran, dès que plus de 6 % des pixels changent (`ui/src/frame.rs`, `refresh`) : un partiel sur tout l'écran laisse l'ancien transparaître. Les partiels accumulés (30 % de l'écran) déclenchent aussi un complet, et un complet normal une fois par heure contre les images fantômes.
+- Écran : mettre le contrôleur en veille après chaque affichage. Rien ne flashe pendant qu'on utilise le terminal (demande de l'utilisateur) : rafraîchissement partiel (environ 1 s) pour une mise à jour de données, deux partiels de suite (environ 2 s) pour un nouvel écran, dès que plus de 6 % des pixels changent (`ui/src/frame.rs`, `refresh`) : un seul partiel sur tout l'écran laisse l'ancien transparaître. Le complet rapide (un flash) qui efface les images fantômes n'a lieu qu'après 60 s sans appui, à la synchro, quand les partiels accumulés atteignent 30 % de l'écran (`frame::worn`), 40 partiels ou une heure. Seul le premier écran au démarrage prend un complet.
 - Mémoire : JSON, scènes, Wi-Fi et mbedTLS vont en PSRAM (`sdkconfig.defaults`) ; garder environ 180 Ko de RAM interne libre (ligne `heap:` dans les logs). Sous 40 Ko, la pile Wi-Fi échouait (`ESP_ERR_NO_MEM`) et le firmware redémarrait.
 - Wi-Fi groupé : se connecter à chaque prise diviserait l'autonomie par deux environ.
 

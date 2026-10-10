@@ -1,18 +1,18 @@
 /**
  * The terminal, emulated: the engine session wired like the real XIAO ESP32-S3 board.
  * Touch keys drive GPIO 5 and 8 and are sampled every 20 ms through the board's Rust edge
- * detector; beeps play the board's LEDC programs on GPIO 44; the panel refreshes like
+ * detector; beeps play the board's LEDC programs on GPIO 6 (D5); the panel refreshes like
  * e-paper: changed windows refresh partially; a full refresh only at power-on, on `reboot`
  * and on a polarity change. Data updates never flash the whole panel.
  */
-import { flipped, refreshKind } from "./refresh";
+import { flipped, refreshPasses } from "./refresh";
 import type { Effect, Engine, Frame, Pin, Tone } from "../preview/engine";
 import { VirtualBuzzer } from "./buzzer";
-import { VirtualGpio } from "./gpio";
+import { BUZZER_PIN, VirtualGpio } from "./gpio";
 
 export const KEY_POLL_MS = 20;
 export const KEY_PINS = { left: 5, right: 8 } as const;
-export const BUZZER_PIN = 44;
+export { BUZZER_PIN };
 /** Panel timings, from the 7.5" datasheet: what BUSY shows while the panel draws. */
 export const REFRESH_MS = { partial: 300, full: 2000 } as const;
 
@@ -227,19 +227,17 @@ export class EmulatedBoard {
     this.log("beep", `${tone} · ${program.filter(([hz]) => hz).map(([hz, ms]) => `${hz} Hz ${ms} ms`).join(", ")}`);
   }
 
-  /** Pixels partial refreshes turned since the last full one: their ghosting adds up. */
-  private ghost = 0;
   private present(): void {
     const frame = this.engine.session.render();
     const box = !this.last || this.fullNext ? full(frame) : changed(this.last, frame);
     if (!box) return;
-    // As on the terminal: a new screen flashes once (fast full refresh), an update does not.
+    // As on the terminal: nothing flashes once on; a new screen is refreshed partially twice.
     const turned = this.last ? flipped(this.last.bits, frame.bits) : 0;
-    const kind = !this.last || this.fullNext ? "full" : refreshKind(turned, this.ghost, frame.width, frame.height);
-    this.ghost = kind === "full" ? 0 : this.ghost + turned;
+    const kind = !this.last || this.fullNext ? "full" : "partial";
+    const passes = kind === "full" ? 1 : refreshPasses(turned, frame.width, frame.height);
     this.fullNext = false;
     const at = performance.now();
-    this.busyUntil = at + REFRESH_MS[kind];
+    this.busyUntil = at + REFRESH_MS[kind] * passes;
     this.last = frame;
     const refresh = { kind, box: kind === "full" ? full(frame) : box, at } as const;
     this.log("refresh", `${kind} ${refresh.box.width}×${refresh.box.height} @ ${refresh.box.x},${refresh.box.y}`);

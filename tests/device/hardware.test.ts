@@ -1,7 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { VirtualBuzzer, VirtualGpio } from "@matecrew/device-ui/emulator";
+import { BUZZER_PIN, VirtualBuzzer, VirtualGpio } from "@matecrew/device-ui/emulator";
 import { DeviceWasm } from "../../src/lib/device/virtual/wasm";
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -84,7 +84,7 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
   ]);
 });
 
-test("GPIO 44 exposes PWM phase, silence and sequential firmware tones", () => {
+test("the buzzer pin exposes PWM phase, silence and sequential firmware tones", () => {
   const gpio = new VirtualGpio();
   gpio.playPwm(
     [
@@ -94,14 +94,14 @@ test("GPIO 44 exposes PWM phase, silence and sequential firmware tones", () => {
     ],
     100,
   );
-  assert.equal(gpio.read(44, 100), true);
-  assert.equal(gpio.read(44, 100.125), false); // half of a 250 µs period
-  assert.equal(gpio.read(44, 100.25), true);
-  assert.equal(gpio.read(44, 160), false);
-  assert.equal(gpio.read(44, 219), false);
-  assert.equal(gpio.read(44, 220), true);
-  assert.equal(gpio.read(44, 280), false);
-  assert.throws(() => gpio.drive(44, true, "external"));
+  assert.equal(gpio.read(BUZZER_PIN, 100), true);
+  assert.equal(gpio.read(BUZZER_PIN, 100.125), false); // half of a 250 µs period
+  assert.equal(gpio.read(BUZZER_PIN, 100.25), true);
+  assert.equal(gpio.read(BUZZER_PIN, 160), false);
+  assert.equal(gpio.read(BUZZER_PIN, 219), false);
+  assert.equal(gpio.read(BUZZER_PIN, 220), true);
+  assert.equal(gpio.read(BUZZER_PIN, 280), false);
+  assert.throws(() => gpio.drive(BUZZER_PIN, true, "external"));
 });
 
 test("audio resumes on activation, reproduces PWM timing, and releases nodes on mute", async () => {

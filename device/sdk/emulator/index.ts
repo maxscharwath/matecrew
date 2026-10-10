@@ -15,4 +15,4 @@ export {
   type Refresh,
 } from "./board";
 
-export { flipped, refreshKind, NEW_SCREEN_PERCENT, GHOST_PERCENT } from "./refresh";
+export { flipped, refreshPasses, worn, NEW_SCREEN_PERCENT, GHOST_PERCENT } from "./refresh";

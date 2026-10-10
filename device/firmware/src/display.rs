@@ -4,10 +4,11 @@
 //! nothing when the frame is the same, a partial refresh of the changed
 //! rectangle for an update, the controller kept awake from one to the next.
 //! Back on the main screen it goes to sleep. A new screen (`frame::refresh`:
-//! over 6 % of the pixels turn) takes the fast full refresh, a short flash:
-//! partial refreshes over a whole screen leave the old one showing through.
-//! So does the ghosting partial refreshes add up to, and the first screen, and
-//! the main screen after FULL_EVERY partial ones or FULL_AFTER.
+//! over 6 % of the pixels turn) drives its rectangle twice: once leaves the
+//! old screen showing through. Nothing flashes while the terminal is used:
+//! only the first screen takes a full refresh, and `clean`, called when the
+//! terminal is idle, once the ghosting adds up (`frame::worn`), after
+//! FULL_EVERY partial refreshes or FULL_AFTER.
 
 use anyhow::Result;
 use core::convert::Infallible;
@@ -84,18 +85,28 @@ impl Screen {
         self.present(false)
     }
 
-    /// Locally draw the idle screen, clear ghosting when due, then sleep the panel.
+    /// Locally draw the idle screen, then sleep the panel.
     pub fn show_main(
         &mut self,
         draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>,
     ) -> Result<()> {
         let _ = self.next.clear(BinaryColor::Off);
         let _ = draw(&mut self.next);
-        let due = self.partials >= FULL_EVERY
-            || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
-        self.present(due)?;
+        self.present(false)?;
         if self.epd.is_awake() {
             self.epd.sleep()?;
+        }
+        Ok(())
+    }
+
+    /// Clears the ghosting with the fast full refresh (a flash) when it is due. For when nobody
+    /// is using the terminal.
+    pub fn clean(&mut self) -> Result<()> {
+        let due = self.partials >= FULL_EVERY
+            || frame::worn(self.ghost)
+            || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
+        if due {
+            self.present(true)?;
         }
         Ok(())
     }
@@ -114,9 +125,8 @@ impl Screen {
 
     fn present(&mut self, full: bool) -> Result<()> {
         let started = Instant::now();
-        // A new screen (or enough ghosting) takes the fast full refresh; an update stays partial.
-        let refresh = frame::refresh(&self.shown, &self.next.bits, self.ghost);
-        if self.last_full.is_none() || full || refresh == frame::Refresh::Full {
+        let refresh = frame::refresh(&self.shown, &self.next.bits);
+        if self.last_full.is_none() || full {
             // The first refresh takes the long waveform: nobody knows what the panel showed before.
             let fast = self.last_full.is_some();
             self.epd.full(&self.next.bits, fast)?;
@@ -128,8 +138,8 @@ impl Screen {
                 if fast { "fast" } else { "full" },
                 started.elapsed().as_millis()
             );
-        } else if let frame::Refresh::Partial { window, turned } = refresh {
-            self.epd.partial(window, &self.shown, &self.next.bits)?;
+        } else if let frame::Refresh::Partial { window, turned, twice } = refresh {
+            self.epd.partial(window, &self.shown, &self.next.bits, if twice { 2 } else { 1 })?;
             self.partials += 1;
             self.ghost += turned;
             log::info!(

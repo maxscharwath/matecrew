@@ -1,4 +1,4 @@
-/** Web Audio output for the board's LEDC GPIO 44 waveform (square, 50% duty).
+/** Web Audio output for the board's LEDC GPIO 6 (D5) waveform (square, 50% duty).
  * Frequencies and durations come from Rust, shared with the physical firmware.
  */
 export class VirtualBuzzer {

@@ -22,7 +22,7 @@ bun test tests/device                     # compiler + shipped Wasm + virtual ho
 
 ### Studio and previews
 
-`dui dev` serves the emulated terminal: the 800 × 480 panel with e-paper partial and full refreshes, both TTP223 touch keys (click and hold, or ← →), taps on the screen, the piezo on GPIO 44 through Web Audio, the XIAO pin table with live levels, battery and Wi-Fi sliders feeding `$device`, and a serial monitor of inputs, beeps, fetches and refreshes. A TSX save recompiles the app in a fresh process and reloads it on the panel, keeping its navigation and local state; a Rust save rebuilds the engine first. The **Previews** tab draws every preview of every app; click one to boot it on the terminal.
+`dui dev` serves the emulated terminal: the 800 × 480 panel with e-paper partial and full refreshes, both TTP223 touch keys (click and hold, or ← →), taps on the screen, the piezo on GPIO 6 (D5) through Web Audio, the XIAO pin table with live levels, battery and Wi-Fi sliders feeding `$device`, and a serial monitor of inputs, beeps, fetches and refreshes. A TSX save recompiles the app in a fresh process and reloads it on the panel, keeping its navigation and local state; a Rust save rebuilds the engine first. The **Previews** tab draws every preview of every app; click one to boot it on the terminal.
 
 A preview is a named state to draw an app in. Point `previews` in `device.config.ts` at a module, or at a JSON file for previews generated elsewhere:
 
@@ -76,7 +76,7 @@ export default function App() {
 
 `onPress` accepts an action or a function **returning** an action. The compiler calls that function to obtain a declarative instruction; Rust emits the instruction on **every** press. Tones are `key`, `success`, and `error`; the firmware plays the piezo, while the simulator uses its sound adapter. Callbacks returning `void`, arbitrary runtime closures, `async` functions and arbitrary TypeScript execution are not supported. A callback can also return a state setter, navigation action or fetch action.
 
-`input="left"` names a hardware input without tying the UI to a GPIO or a pixel coordinate. The host maps physical or remote events into `runtime.input("left")`. On our XIAO ESP32-S3, left is GPIO 5 (D4), right is GPIO 8 (D9), and buzzer is GPIO 44 (D7). Existing coordinate-based apps still work.
+`input="left"` names a hardware input without tying the UI to a GPIO or a pixel coordinate. The host maps physical or remote events into `runtime.input("left")`. On our XIAO ESP32-S3, left is GPIO 5 (D4), right is GPIO 8 (D9), and buzzer is GPIO 6 (D5). Existing coordinate-based apps still work.
 
 ## Navigation
 
@@ -382,7 +382,7 @@ produce one rising edge; release/repress and simultaneous keys work independentl
 Keyboard auto-repeat is ignored. Blur/hidden-tab releases inputs. Remote console
 commands remain discrete events; local simulator buttons use the GPIO path.
 
-GPIO 44 exposes a time-indexed, 50%-duty PWM signal. Tone programs live in Rust
+GPIO 6 (D5) exposes a time-indexed, 50%-duty PWM signal. Tone programs live in Rust
 `core::hardware`, shared by LEDC on hardware and Web Audio in the emulator. A volume
 control changes speaker playback only. Muting does not change the simulated pin
 signal. Browsers require a gesture to activate audio and may throttle background

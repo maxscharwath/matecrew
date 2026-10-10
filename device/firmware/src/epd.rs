@@ -6,8 +6,8 @@
 //! - full: the controller's own waveform, about 4 s of black and white
 //!   flashes. Only at the first screen.
 //! - fast: the same with a shorter waveform. Clears the ghosting partial
-//!   refreshes leave.
-//! - partial: one rectangle, no flashing.
+//!   refreshes leave, when nobody is using the terminal.
+//! - partial: one rectangle, no flashing; driven twice for a new screen.
 //!
 //! Between partial refreshes the controller stays powered and in partial
 //! mode: waking it (reset, power on) and sending the old image again would
@@ -86,8 +86,9 @@ impl Epd {
         self.sleep()
     }
 
-    /// Refreshes only `window`, from `before` to `after` (whole frames).
-    pub fn partial(&mut self, window: Window, before: &[u8], after: &[u8]) -> Result<()> {
+    /// Refreshes only `window`, from `before` to `after` (whole frames), `passes` times: a second
+    /// pass drives the changed pixels again, so the old screen no longer shows through.
+    pub fn partial(&mut self, window: Window, before: &[u8], after: &[u8], passes: u32) -> Result<()> {
         let ink = |b: u8| if PARTIAL_INVERTS { !b } else { b };
         let started = Instant::now();
         let waking = self.state == State::Asleep;
@@ -110,22 +111,28 @@ impl Epd {
         }
         area.push(0x01); // scan inside the window only
         self.command(0x90, &area)?;
-        if waking {
-            // Its memory did not survive the sleep: tell it what the panel shows.
-            self.data_command(0x10, window.bytes(before).map(ink))?;
+        let passes = passes.max(1);
+        let mut sending = Duration::ZERO;
+        for pass in 0..passes {
+            let at = Instant::now();
+            if waking || pass > 0 {
+                // Its memory did not survive the sleep, or the first pass made the new image
+                // the old one: tell it what to drive from.
+                self.data_command(0x10, window.bytes(before).map(ink))?;
+            }
+            self.data_command(0x13, window.bytes(after).map(ink))?;
+            sending += at.elapsed();
+            self.command(0x12, &[])?;
+            FreeRtos::delay_ms(1);
+            self.wait()?;
         }
-        self.data_command(0x13, window.bytes(after).map(ink))?;
-        let sent = started.elapsed();
-        self.command(0x12, &[])?;
-        FreeRtos::delay_ms(1);
-        self.wait()?;
         self.command(0x92, &[])?; // partial out
         self.state = State::Partial;
         log::info!(
-            "epd: wake {} ms, send {} ms, refresh {} ms",
+            "epd: wake {} ms, send {} ms, refresh {} ms ({passes} pass)",
             woken.as_millis(),
-            (sent - woken).as_millis(),
-            (started.elapsed() - sent).as_millis()
+            sending.as_millis(),
+            (started.elapsed() - woken - sending).as_millis()
         );
         Ok(())
     }

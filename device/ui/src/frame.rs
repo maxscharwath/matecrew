@@ -70,11 +70,11 @@ pub fn flipped(before: &[u8], after: &[u8]) -> u32 {
 }
 
 /// A refresh that turns this share of the panel (percent of its pixels) is a new screen, not an
-/// update: a partial refresh would leave the old screen showing through, so it takes the fast
-/// full one (a short flash). Updates turn well under 1 %, screen changes 7 to 26 %.
+/// update: one partial refresh would leave the old screen showing through, so the window is
+/// refreshed twice, which needs no flash. Updates turn well under 1 %, screen changes 7 to 26 %.
 pub const NEW_SCREEN_PERCENT: u32 = 6;
 /// What partial refreshes leave behind adds up: past this share of the panel since the last full
-/// refresh, the next one is full.
+/// refresh, the panel wants a full one (a flash), once nobody is using the terminal.
 pub const GHOST_PERCENT: u32 = 30;
 
 /// `pixels` as a share of the panel, in percent.
@@ -82,22 +82,24 @@ pub fn share(pixels: u32) -> u32 {
     (u64::from(pixels) * 100 / u64::from(WIDTH * HEIGHT)) as u32
 }
 
-/// How to show `after` over `before`, given the pixels partial refreshes turned since the last
-/// full one (`ghost`): nothing, a partial refresh of a window, or the fast full refresh.
-pub fn refresh(before: &[u8], after: &[u8], ghost: u32) -> Refresh {
+/// How to show `after` over `before`: nothing, or a partial refresh of a window, twice for a new
+/// screen. None flashes.
+pub fn refresh(before: &[u8], after: &[u8]) -> Refresh {
     let Some(window) = changed(before, after) else { return Refresh::None };
     let turned = flipped(before, after);
-    if share(turned) >= NEW_SCREEN_PERCENT || share(ghost + turned) >= GHOST_PERCENT {
-        Refresh::Full
-    } else {
-        Refresh::Partial { window, turned }
-    }
+    Refresh::Partial { window, turned, twice: share(turned) >= NEW_SCREEN_PERCENT }
+}
+
+/// Whether the pixels partial refreshes turned since the last full refresh (`ghost`) call for
+/// a full one, the only refresh that flashes.
+pub fn worn(ghost: u32) -> bool {
+    share(ghost) >= GHOST_PERCENT
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refresh {
     None,
-    Partial { window: Window, turned: u32 },
+    Partial { window: Window, turned: u32, twice: bool },
     Full,
 }
 
@@ -155,18 +157,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_screen_refreshes_in_full_an_update_partially() {
+    fn a_new_screen_refreshes_twice_an_update_once_and_neither_flashes() {
         let blank = vec![0u8; BYTES];
         let mut update = blank.clone();
         update[1000] = 0xFF; // 8 pixels: a digit changed
-        assert!(matches!(refresh(&blank, &update, 0), Refresh::Partial { turned: 8, .. }));
-        assert_eq!(refresh(&blank, &blank, 0), Refresh::None);
+        assert!(matches!(refresh(&blank, &update), Refresh::Partial { turned: 8, twice: false, .. }));
+        assert_eq!(refresh(&blank, &blank), Refresh::None);
         let mut screen = blank.clone();
         screen[..BYTES / 10].fill(0xFF); // 10 % of the panel
-        assert_eq!(refresh(&blank, &screen, 0), Refresh::Full);
-        // Partial refreshes add up to a full one.
-        let ghost = WIDTH * HEIGHT * 30 / 100;
-        assert_eq!(refresh(&blank, &update, ghost), Refresh::Full);
+        assert!(matches!(refresh(&blank, &screen), Refresh::Partial { twice: true, .. }));
+        // Partial refreshes add up to a full one, for when the terminal is idle.
+        assert!(!worn(WIDTH * HEIGHT * 29 / 100));
+        assert!(worn(WIDTH * HEIGHT * 30 / 100));
     }
 
     #[test]

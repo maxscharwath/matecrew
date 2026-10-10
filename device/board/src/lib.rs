@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 pub const KEY_LEFT_GPIO: u8 = 5;
 pub const KEY_RIGHT_GPIO: u8 = 8;
-pub const BUZZER_GPIO: u8 = 44;
+/// D5: the piezo shares it with the battery reading (a piezo passes no direct current).
+pub const BUZZER_GPIO: u8 = 6;
 /// The firmware samples both keys at this period; so do the emulators.
 pub const KEY_POLL_MS: u64 = 20;
 /// After one key, the other within this window makes both keys (the terminal's about page)
@@ -40,14 +41,12 @@ pub const PINS: &[Pin] = &[
     Pin { pad: "D2", gpio: 3, function: "Écran BUSY", signal: Signal::Panel },
     Pin { pad: "D3", gpio: 4, function: "Écran DC", signal: Signal::Panel },
     Pin { pad: "D4", gpio: KEY_LEFT_GPIO, function: "Touche gauche (TTP223)", signal: Signal::Key },
-    Pin { pad: "D5", gpio: 6, function: "Batterie (pont 1 MΩ / 1 MΩ)", signal: Signal::Adc },
-    Pin { pad: "D6", gpio: 43, function: "Libre", signal: Signal::Free },
-    Pin { pad: "D7", gpio: BUZZER_GPIO, function: "Buzzer piézo (LEDC)", signal: Signal::Buzzer },
+    Pin { pad: "D5", gpio: BUZZER_GPIO, function: "Buzzer piézo (LEDC) et batterie (pont 1 MΩ / 1 MΩ)", signal: Signal::Buzzer },
+    Pin { pad: "D6", gpio: 43, function: "PN532 SDA (I2C 0x24)", signal: Signal::I2c },
+    Pin { pad: "D7", gpio: 44, function: "PN532 SCL", signal: Signal::I2c },
     Pin { pad: "D8", gpio: 7, function: "Écran SCK", signal: Signal::Panel },
     Pin { pad: "D9", gpio: KEY_RIGHT_GPIO, function: "Touche droite (TTP223)", signal: Signal::Key },
     Pin { pad: "D10", gpio: 9, function: "Écran MOSI", signal: Signal::Panel },
-    Pin { pad: "IO41", gpio: 41, function: "PN532 SDA (I2C 0x24)", signal: Signal::I2c },
-    Pin { pad: "IO42", gpio: 42, function: "PN532 SCL", signal: Signal::I2c },
 ];
 
 /// TTP223 outputs are active high with a pull-down. One event per rising edge, keys independent.

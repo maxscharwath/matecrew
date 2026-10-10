@@ -31,9 +31,6 @@ export const FIRMWARE_VERSION = "web";
 const SYNC_EVERY_MS = 120_000;
 const COMMANDS_WAIT_SECONDS = 25;
 const MAX_LOGS = 200;
-/** As the firmware's display: a full refresh at first, then on the main screen every 40 partial ones or every hour. */
-const FULL_EVERY = 40;
-const FULL_AFTER_MS = 3_600_000;
 
 /** The simulated readings the virtual terminal reports, set from the console. */
 export type Sensors = { batteryMv: number; wifiRssi: number; usb: boolean };
@@ -135,12 +132,10 @@ export class VirtualDevice {
     next: null,
   };
   private logId = 0;
-  private partials = 0;
-  /** Pixels partial refreshes turned since the last full one. */
-  private ghost = 0;
   /** SHA-256 of the token in hex, for the badge claim links. */
   private claimKey: string | null = null;
-  private lastFull: number | null = null;
+  /** As the firmware's display: only the first screen flashes (a full refresh). */
+  private refreshed = false;
 
   private sensors: Sensors = { batteryMv: 4000, wifiRssi: -55, usb: false };
   private onBeep: (beep: Beep) => void = () => {};
@@ -719,9 +714,9 @@ export class VirtualDevice {
       pins: {
         left: 5,
         right: 8,
-        buzzer: 44,
-        nfcSda: 41,
-        nfcScl: 42,
+        buzzer: 6,
+        nfcSda: 43,
+        nfcScl: 44,
         battery: 6,
       },
       firmware: { version: "web", build: "terminal virtuel" },
@@ -858,25 +853,13 @@ export class VirtualDevice {
 
   private display(bits: Uint8Array, view: View | "main"): void {
     this.view = view;
-    const due =
-      this.partials >= FULL_EVERY ||
-      (this.lastFull !== null && Date.now() - this.lastFull > FULL_AFTER_MS);
     const before = this.snapshot.bits;
     const turned = before ? flipped(before, bits) : 0;
-    if (!(this.lastFull === null || (view === "main" && due)) && turned === 0) return;
-    // As on the terminal: a new screen takes the fast full refresh, an update stays partial.
-    const full =
-      this.lastFull === null ||
-      (view === "main" && due) ||
-      refreshKind(turned, this.ghost, 800, 480) === "full";
-    if (full) {
-      this.partials = 0;
-      this.ghost = 0;
-      this.lastFull = Date.now();
-    } else {
-      this.partials += 1;
-      this.ghost += turned;
-    }
+    if (this.refreshed && turned === 0) return;
+    // As on the terminal: the first screen takes a full refresh; then nothing flashes, a new
+    // screen being refreshed partially twice.
+    const full = !this.refreshed;
+    this.refreshed = true;
     this.update({
       bits,
       refreshes: this.snapshot.refreshes + 1,
@@ -1022,4 +1005,4 @@ export class VirtualDevice {
     }
   }
 }
-import { VirtualGpio, flipped, refreshKind } from "@matecrew/device-ui/emulator";
+import { VirtualGpio, flipped } from "@matecrew/device-ui/emulator";

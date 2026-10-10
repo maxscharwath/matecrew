@@ -1,6 +1,6 @@
 //! Joining the office Wi-Fi, and the setup access point that asks for it.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use esp_idf_svc::wifi::{
     AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi,
 };
@@ -17,19 +17,41 @@ pub fn connect(wifi: &mut Wifi, creds: &WifiCredentials) -> Result<()> {
         ..Default::default()
     }))?;
     wifi.start()?;
-    wifi.connect()?;
-    wifi.wait_netif_up()?;
-    Ok(())
+    let joined = wifi.connect().and_then(|()| wifi.wait_netif_up());
+    if joined.is_err() {
+        log_signal(wifi, &creds.ssid);
+    }
+    Ok(joined?)
 }
 
-/// Joins again if the access point dropped the connection since the last sync.
-pub fn reconnect(wifi: &mut Wifi) -> Result<()> {
-    if !wifi.is_connected()? {
-        log::info!("Wi-Fi lost, joining again");
-        wifi.connect()?;
-        wifi.wait_netif_up()?;
+/// How strongly `ssid` is heard, in the log: why joining it failed (a weak signal is usually
+/// the antenna, unplugged from the XIAO).
+fn log_signal(wifi: &mut Wifi, ssid: &str) {
+    let _ = wifi.disconnect();
+    match wifi.scan() {
+        Ok(found) => match found.iter().filter(|ap| ap.ssid.as_str() == ssid).map(|ap| (ap.signal_strength, ap.channel)).max() {
+            Some((rssi, channel)) => log::warn!("wifi: {ssid} heard at {rssi} dBm on channel {channel}"),
+            None => log::warn!("wifi: {ssid} not heard, {} other networks are", found.len()),
+        },
+        Err(e) => log::warn!("wifi: scan failed: {e:#}"),
     }
-    Ok(())
+}
+
+/// Joins again if the access point dropped the connection since the last sync, without waiting:
+/// the attempt goes on in the driver while the terminal answers its keys, and a later sync finds
+/// the network up. Waiting held the keys for about 20 s at every try on a weak signal.
+pub fn reconnect(wifi: &mut Wifi) -> Result<()> {
+    if wifi.is_connected()? {
+        if !wifi.is_up()? {
+            bail!("Wi-Fi joined, waiting for an address");
+        }
+        return Ok(());
+    }
+    log::info!("Wi-Fi lost, joining again in the background");
+    if let Err(e) = wifi.wifi_mut().connect() {
+        log::warn!("Wi-Fi: {e}");
+    }
+    bail!("Wi-Fi not joined yet")
 }
 
 /// Wi-Fi MAC as "AC:A7:04:2B:50:E4": the hardware id shown on the link page.

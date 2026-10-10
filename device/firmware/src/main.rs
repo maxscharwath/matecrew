@@ -4,6 +4,7 @@
 
 mod api;
 mod buzzer;
+mod fetch;
 mod console;
 mod display;
 mod epd;
@@ -20,7 +21,7 @@ use anyhow::{bail, Result};
 use core::convert::Infallible;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{peripherals::Peripherals, reset},
+    hal::{gpio::Gpio6, peripherals::Peripherals, reset},
     nvs::EspDefaultNvsPartition,
     sys::{esp_random, settimeofday, timeval},
     wifi::{BlockingWifi, EspWifi},
@@ -72,12 +73,19 @@ pub enum Input {
     ForgetWifi,
     /// The serial console's `site <url>`: the same site at a new address.
     MoveSite(String),
+    /// An app's data or image, from the fetching thread.
+    Fetched(fetch::Fetched),
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
 const MAX_SITE_FAILURES: u32 = 10;
 /// How long an error stays on screen before the terminal starts over.
 const RETRY_AFTER: Duration = Duration::from_secs(30);
+/// The panel's ghosting is cleared (a flash) only after this long without a key or a tap.
+const CLEAN_WHEN_IDLE: Duration = Duration::from_secs(60);
+/// A sync waits this long after the last key or tap: it holds the keys while the site answers,
+/// up to `api::TIMEOUT` when it does not.
+const SYNC_WHEN_IDLE: Duration = Duration::from_secs(30);
 
 fn main() {
     // The terminal has no button and no switch: whatever fails, it starts over
@@ -116,7 +124,7 @@ fn app() -> Result<()> {
         log::warn!("no serial console commands: {e:#}");
     }
     keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone())?;
-    // D5 (GPIO 6): half the battery voltage. Without the ADC the status bar says "--".
+    // D5 (GPIO 6): half the battery voltage, and the piezo. Without the ADC the status bar says "--".
     let battery = (|| -> Result<_> {
         use esp_idf_svc::hal::adc::{
             attenuation::DB_12,
@@ -139,11 +147,13 @@ fn app() -> Result<()> {
             Box::new(|| None)
         }
     });
-    let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, p.pins.gpio44)?;
-    let nfc = match Nfc::new(p.i2c0, p.pins.gpio41, p.pins.gpio42) {
+    // SAFETY: the buzzer drives D5 only while it beeps, on this thread, between battery readings.
+    let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, unsafe { Gpio6::steal() })?;
+    let nfc = match Nfc::new(p.i2c0, p.pins.gpio43, p.pins.gpio44) {
         Ok(nfc) => Some(nfc),
         Err(e) => {
             log::warn!("no NFC reader ({e:#}): badges come from the console, `b <uid>`");
+            nfc::diagnose();
             None
         }
     };
@@ -242,6 +252,7 @@ fn app() -> Result<()> {
         site: site.clone(),
         claim_key,
         mirror: remote::Mirror::start(api.clone())?,
+        fetcher: fetch::Fetcher::start(api.clone(), sender.clone())?,
         api,
         state,
         app,
@@ -406,6 +417,7 @@ struct Terminal {
     inputs: Receiver<Input>,
     /// Keeps the channel open even if every input thread stops.
     _sender: Sender<Input>,
+    fetcher: fetch::Fetcher,
     flow: Flow,
     /// Origin of the flow's milliseconds.
     started: Instant,
@@ -437,6 +449,7 @@ impl Terminal {
         while self.inputs.try_recv().is_ok() {}
         self.sync(false);
         self.maybe_update();
+        let mut touched = Instant::now();
         let mut sync_at = Instant::now()
             + if self.offline {
                 OFFLINE_RETRY
@@ -469,12 +482,30 @@ impl Terminal {
                 Next::Input(Input::SelectApp(mode)) => {
                     self.pending_app = Some(mode);
                 }
-                Next::Input(Input::Tap(x, y)) => self.tap_screen(x, y)?,
-                Next::Input(Input::Flow(event)) => self.step(event)?,
+                Next::Input(Input::Fetched(fetched)) => self.fetched(fetched)?,
+                Next::Input(Input::Tap(x, y)) => {
+                    touched = Instant::now();
+                    self.tap_screen(x, y)?
+                }
+                Next::Input(Input::Flow(event)) => {
+                    touched = Instant::now();
+                    if matches!(event, Event::Key { .. } | Event::BothKeys) {
+                        self.buzzer.press();
+                    }
+                    let stepped = self.step(event);
+                    self.buzzer.handled();
+                    stepped?
+                }
                 Next::Tick => self.step(Event::Tick)?,
+                Next::SyncDue if touched.elapsed() < SYNC_WHEN_IDLE => {
+                    sync_at = touched + SYNC_WHEN_IDLE;
+                }
                 Next::Input(Input::Sync) | Next::SyncDue => {
                     if self.flow.is_idle() {
                         self.sync(false);
+                        if touched.elapsed() >= CLEAN_WHEN_IDLE {
+                            self.screen.clean()?;
+                        }
                         self.maybe_update();
                         sync_at = Instant::now()
                             + if self.offline {
@@ -658,9 +689,7 @@ impl Terminal {
                     ui::engine::scene::BeepTone::Badge => matecrew_core::flow::Beep::Badge,
                 }),
                 ui::engine::Effect::Fetch { id, path } => {
-                    if let (Some(app), Ok(value)) = (&mut self.app, self.api.app_data(&path)) {
-                        app.update(&id, value);
-                    }
+                    self.fetcher.request(fetch::Job::Data { id, path })
                 }
                 _ => {}
             }
@@ -668,13 +697,48 @@ impl Terminal {
         if let Some(side) = domain {
             return self.step_domain(Event::Key { side });
         }
-        // Show immediate local feedback before a potentially slow image download.
-        self.draw_main()?;
-        if let Some(app) = &mut self.app {
-            refresh_app_images(app, &self.api);
-        }
+        // The images come later, from the fetching thread.
+        self.request_images();
         self.save_app_cache()?;
         self.draw_main()
+    }
+
+    fn request_images(&mut self) {
+        if let Some(app) = &self.app {
+            for request in app.image_requests() {
+                self.fetcher.request(fetch::Job::Image(request));
+            }
+        }
+    }
+
+    /// An app's data or image arrived: shown at once on the app's screen.
+    fn fetched(&mut self, fetched: fetch::Fetched) -> Result<()> {
+        self.fetcher.arrived(&fetched);
+        let Some(app) = &mut self.app else { return Ok(()) };
+        match fetched {
+            fetch::Fetched::Data { id, value: Ok(value), .. } => {
+                app.update(&id, value);
+            }
+            fetch::Fetched::Image { request, bytes: Ok(bytes) } => {
+                if let Err(error) = app.update_image(&request, &bytes) {
+                    log::warn!("image decode: {error}");
+                }
+            }
+            fetch::Fetched::Data { path, value: Err(e), .. } => {
+                log::warn!("app data {path}: {e:#}");
+                return Ok(());
+            }
+            fetch::Fetched::Image { request, bytes: Err(e) } => {
+                log::warn!("image {}: {e:#}", request.src);
+                return Ok(());
+            }
+        }
+        self.request_images();
+        self.save_app_cache()?;
+        if self.flow.is_idle() {
+            self.draw_main()?;
+        }
+        Ok(())
     }
 
     fn step_domain(&mut self, event: Event) -> Result<()> {
@@ -788,7 +852,7 @@ impl Terminal {
             .trim_end_matches('/');
         ui::device_info::set(serde_json::json!({
             "board":{"name":"XIAO ESP32-S3","simulated":false},
-            "pins":{"left":5,"right":8,"buzzer":44,"nfcSda":41,"nfcScl":42,"battery":6},
+            "pins":{"left":5,"right":8,"buzzer":6,"nfcSda":43,"nfcScl":44,"battery":6},
             "firmware":{
                 "version":FIRMWARE_VERSION,
                 "build":FIRMWARE_BUILD,
@@ -804,7 +868,7 @@ impl Terminal {
                 "ip":ip,
                 "mac":wifi::hardware_id(&self.wifi).ok()
             },
-            "battery":self.supply.read().json(),
+            "battery":self.supply.read(self.buzzer.quiet()).json(),
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
             "clock":ui::device_info::clock(self.state.as_ref(), now())
         }))
@@ -919,7 +983,7 @@ impl Terminal {
 
         self.api.status(&StatusReport {
             firmware_version: FIRMWARE_VERSION,
-            battery_mv: self.supply.read().millivolts,
+            battery_mv: self.supply.read(self.buzzer.quiet()).millivolts,
             wifi_rssi: wifi::rssi(),
             unknown_badges: self.queue.unknown_badges(),
         })?;

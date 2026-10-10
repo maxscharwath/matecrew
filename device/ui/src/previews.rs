@@ -17,7 +17,7 @@ pub(crate) fn record(screen: &str, data: &Value) {
 fn simulated_device() -> Value {
     device_info::decorate(json!({
         "board":{"name":"Simulateur XIAO","simulated":true},
-        "pins":{"left":5,"right":8,"buzzer":44},
+        "pins":{"left":5,"right":8,"buzzer":6},
         "firmware":{"version":"0.3.0","build":"2026-10-10 09:12 UTC","commit":"546a98a","slot":"ota_0"},
         "site":"matecrew.vercel.app",
         "device":{"id":"cmv1eex25001zieyucz0rillv","name":"Terminal Lausanne"},
