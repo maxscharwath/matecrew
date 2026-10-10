@@ -244,7 +244,8 @@ fn app() -> Result<()> {
     let claim_key = claim::key(&token);
     screen.show(|d| ui::boot::render(d, 2))?;
     let api = Api::with_token(&site, token);
-    cores::on(Core::Core0, || remote::poll_commands(api.clone(), sender.clone()))?;
+    let mirror = cores::on(Core::Core0, || remote::Mirror::start(api.clone()))?;
+    cores::on(Core::Core0, || remote::poll_commands(api.clone(), sender.clone(), mirror.clone()))?;
     let state = store.state()?;
     let mode = store.app_mode()?;
     let mut app = state
@@ -277,7 +278,7 @@ fn app() -> Result<()> {
     Terminal {
         site: site.clone(),
         claim_key,
-        mirror: cores::on(Core::Core0, || remote::Mirror::start(api.clone()))?,
+        mirror,
         fetcher: cores::on(Core::Core0, || fetch::Fetcher::start(api.clone(), sender.clone()))?,
         _sntp: sntp,
         badge_on_reader: None,
@@ -1103,7 +1104,8 @@ impl Terminal {
 
         self.api.status(&StatusReport {
             firmware_version: FIRMWARE_VERSION,
-            battery_mv: self.supply.read(self.buzzer.quiet()).millivolts,
+            // The site refuses what no battery reads: without the divider, the pin floats.
+            battery_mv: self.supply.read(self.buzzer.quiet()).plausible_millivolts(),
             wifi_rssi: wifi::rssi(),
             unknown_badges: self.queue.unknown_badges(),
         })?;

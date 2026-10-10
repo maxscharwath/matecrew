@@ -1146,7 +1146,6 @@
       "others": "Autres",
       "preparationOf": "Préparation · {label}",
       "toPrepare": "{count, plural, one {# maté} other {# matés}}",
-      "chartTotal": "Stock total · {days} jours",
       "chart": "Stock · {days} jours",
       "more": "autres"
     },

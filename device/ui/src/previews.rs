@@ -55,7 +55,7 @@ fn previews() -> Value {
     let mut all = Collector(Map::new());
     all.add("stock", "Three items, the usual office", |d| dashboard_screen(d, &dashboard, false));
     all.add("stock-offline", "Same, without network", |d| dashboard_screen(d, &dashboard, true));
-    for count in [0, 1, 2, 6, 9, 20] {
+    for count in [0, 1, 2, 4, 5, 6, 9, 20] {
         let mut layout = dashboard.clone();
         layout.items = (0..count)
             .map(|i| {
@@ -64,6 +64,11 @@ fn previews() -> Value {
                 item
             })
             .collect();
+        // One line per shown item, as the site sends them.
+        if let Some(chart) = &mut layout.chart {
+            let lines = chart.series.clone();
+            chart.series = (0..count.min(6)).map(|i| lines[i % lines.len()].clone()).collect();
+        }
         all.add(&format!("stock-{count}"), &format!("{count} items"), |d| {
             dashboard_screen(d, &layout, false)
         });
@@ -150,7 +155,7 @@ fn flow(previews: &mut Map<String, Value>) {
             }
         }
     };
-    let home = ["stock", "stock-offline", "stock-0", "stock-1", "stock-2", "stock-6", "stock-9", "stock-20", "preparation"];
+    let home = ["stock", "stock-offline", "stock-0", "stock-1", "stock-2", "stock-4", "stock-5", "stock-6", "stock-9", "stock-20", "preparation"];
     on(&home, &[("left", "badge"), ("right", "summary")]);
     // While a preparation shows, the right key is "Servi": a runner's badge, then the site's count.
     on(&["preparation"], &[("right", "badge-serve")]);

@@ -7,6 +7,7 @@ export {
   dashboard,
   dashboardOne,
   dashboardTwo,
+  catalogueFour,
   catalogue,
   empty,
   preparation,

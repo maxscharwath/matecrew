@@ -177,7 +177,7 @@ impl Store {
     }
 
     pub fn set_state(&self, state: &DeviceState) -> Result<()> {
-        Ok(self.0.set_blob("state", &serde_json::to_vec(state)?)?)
+        Ok(self.0.set_blob("state", &serde_json::to_vec(&state.without_pictures())?)?)
     }
 
     /// Takes the site has not acknowledged yet, and badges it has not seen.

@@ -100,11 +100,16 @@ export function Facts({ rows, dense = false, ...layout }: LayoutProps & { rows: 
   );
 }
 
-/** A 24 × 24 product picture from the site, magnified on a sunken disc. */
-export function Product({ value, size, scale }: { value: unknown; size: number; scale: number }) {
+/**
+ * An item's picture on a sunken disc of `size`, pixel for pixel, never magnified: `picture` is
+ * 96 × 96 as the site draws it, `picture48` the same at half where there is less room.
+ */
+export function Picture({ value, size, half = false }: { value: unknown; size: number; half?: boolean }) {
+  const side = half ? 48 : 96;
   return (
     <Media size={size}>
-      <Image width={24 * scale} height={24 * scale} sourceWidth={24} sourceHeight={24} value={value} />
+      <Image width={side} height={side} sourceWidth={side} sourceHeight={side} value={value} />
     </Media>
   );
 }
+

@@ -76,7 +76,12 @@ pub struct Power {
 impl Power {
     /// Charge in percent; `None` without a plausible reading.
     pub fn percent(&self) -> Option<u8> {
-        self.millivolts.filter(|mv| PLAUSIBLE_MV.contains(mv)).map(percent)
+        self.plausible_millivolts().map(percent)
+    }
+
+    /// BAT+ when it reads like a battery; `None` without the divider on D5 (the pin floats).
+    pub fn plausible_millivolts(&self) -> Option<u16> {
+        self.millivolts.filter(|mv| PLAUSIBLE_MV.contains(mv))
     }
     /// On USB and not full yet. The charger lifts the voltage, so the charge reads high meanwhile.
     pub fn charging(&self) -> bool {
@@ -89,7 +94,7 @@ impl Power {
     /// `$device.battery`, as the hosts and the status bar read it.
     pub fn json(&self) -> Value {
         json!({
-            "millivolts": self.millivolts,
+            "millivolts": self.plausible_millivolts(),
             "percent": self.percent(),
             "usb": self.usb,
             "charging": self.charging(),

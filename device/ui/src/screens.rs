@@ -3,6 +3,7 @@ pub const DEFINITIONS: &[(&str, &[u8])] = &[
     ("about", include_bytes!("../../dist/mate/about.dui")),
     ("badge", include_bytes!("../../dist/mate/badge.dui")),
     ("catalogue", include_bytes!("../../dist/mate/catalogue.dui")),
+    ("catalogueFour", include_bytes!("../../dist/mate/catalogueFour.dui")),
     ("claim", include_bytes!("../../dist/mate/claim.dui")),
     ("connected", include_bytes!("../../dist/mate/connected.dui")),
     ("connecting", include_bytes!("../../dist/mate/connecting.dui")),

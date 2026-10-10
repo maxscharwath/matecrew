@@ -30,7 +30,7 @@ import {
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, ClockIcon, DoorOpenIcon, GlobeIcon } from "@matecrew/device-ui/icons/lucide";
 import { BadgeOverReader } from "../art";
-import { Frame, Product, useT, view } from "./shared";
+import { Frame, Picture, useT, view } from "./shared";
 
 /** After a key: the badge goes on the reader, right under the middle of the screen. */
 export function badge() {
@@ -50,7 +50,7 @@ export function pick() {
   return (
     <Frame title={view("title")} keys primary="right">
       <HStack gap={40} height="fill">
-        <Product value={view("image", [])} size={224} scale={6} />
+        <Picture value={view("picture", [])} size={160} />
         <VStack gap={16} width="fill">
           <Label>{t("pick.label", { position: view("status") })}</Label>
           <H1>{view("item")}</H1>

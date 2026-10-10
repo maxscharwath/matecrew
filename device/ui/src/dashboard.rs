@@ -30,6 +30,7 @@ pub fn state_screen<D: DrawTarget<Color = BinaryColor>>(
                     stock: i.stock,
                     low: i.stock <= 0,
                     image: i.image.clone(),
+                    picture: i.picture.clone(),
                 })
                 .collect(),
             chart: None,
@@ -81,8 +82,15 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
     value["moreCount"] = json!(data.items.len().saturating_sub(6));
     for item in value["items"].as_array_mut().unwrap() {
         item["visible"] = json!(true);
-        item["bits"] =
-            json!(decode_base64(item["image"].as_str().unwrap_or("")).unwrap_or_default());
+        let small = decode_base64(item["image"].as_str().unwrap_or("")).unwrap_or_default();
+        // 96 x 96 when the site sends it, shown as drawn or at half (`picture`).
+        let raw = decode_base64(item["picture"].as_str().unwrap_or(""))
+            .filter(|bits| !bits.is_empty())
+            .unwrap_or_else(|| small.clone());
+        let (full, half) = crate::picture::pictures(&raw);
+        item["bits"] = json!(small);
+        item["picture"] = json!(full);
+        item["picture48"] = json!(half);
     }
     if let Some(prep) = &data.preparation {
         value["prepRows"] = json!(prep
@@ -95,6 +103,9 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
                 "name":i.name,
                 "names":i.names,
                 "bits":decode_base64(&i.image).unwrap_or_default(),
+                "picture48":crate::picture::pictures(
+                    &decode_base64(if i.picture.is_empty() { &i.image } else { &i.picture }).unwrap_or_default()
+                ).1,
                 "visible":true
             }))
             .collect::<Vec<_>>());
@@ -107,7 +118,9 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
         "preparation"
     } else if data.items.is_empty() {
         "empty"
-    } else if data.items.len() > 3 {
+    } else if data.items.len() == 4 {
+        "catalogueFour"
+    } else if data.items.len() > 4 {
         "catalogue"
     } else if data.items.len() == 1 {
         "dashboardOne"
@@ -148,6 +161,7 @@ mod tests {
                 stock: i64::MIN,
                 low: true,
                 image: "invalid".into(),
+                picture: "invalid".into(),
             })
             .collect();
         let after = draw(&data, false);

@@ -53,14 +53,15 @@ interface Props {
   readonly sources: readonly string[];
 }
 
-/** The two ways a can leaves the fridge, labelled as the rest of the app does. */
-const SOURCES = ["DAILY_REQUEST", "MANUAL"] as const;
+/** The ways a can leaves the fridge, labelled as the rest of the app does. */
+const SOURCES = ["DAILY_REQUEST", "MANUAL", "DEVICE"] as const;
 type Source = (typeof SOURCES)[number];
 
 /**
  * Every consumption in the office, whoever drank it and however it was
- * recorded — a served daily request, a can taken on the spot, or an admin
- * backfill. Filter by member to see one person's whole history.
+ * recorded — a served daily request, a can taken on the spot, a badge on a
+ * terminal, or an admin backfill. Filter by member to see one person's whole
+ * history.
  */
 export async function ConsumptionListSection({
   officeId,
@@ -73,6 +74,7 @@ export async function ConsumptionListSection({
   const sourceLabel: Record<Source, string> = {
     DAILY_REQUEST: t("dashboard.dailyRequest"),
     MANUAL: t("dashboard.selfServe"),
+    DEVICE: t("dashboard.terminal"),
   };
 
   // Cancelled entries are reversed consumption: they bill nobody, so they are

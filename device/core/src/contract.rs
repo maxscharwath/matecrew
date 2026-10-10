@@ -75,6 +75,9 @@ pub struct Item {
     /// 24 x 24 pixels, packed 1-bit (1 = ink), base64. See [`ITEM_IMAGE_SIZE`].
     #[serde(default)]
     pub image: String,
+    /// 96 x 96, the definition the site draws it in; empty from sites that predate it.
+    #[serde(default)]
+    pub picture: String,
 }
 
 /// Side of an item's picture, in pixels of the 200 x 120 canvas.
@@ -152,6 +155,20 @@ pub fn is_newer_version(candidate: &str, current: &str) -> bool {
 }
 
 impl DeviceState {
+    /// This state without its 96 x 96 pictures, for the terminal's small settings store
+    /// (24 KB of NVS): the next sync brings them back, and the 24 x 24 images stay meanwhile.
+    pub fn without_pictures(&self) -> Self {
+        let mut lean = self.clone();
+        lean.items.iter_mut().for_each(|i| i.picture.clear());
+        if let Some(screen) = &mut lean.screen {
+            screen.items.iter_mut().for_each(|i| i.picture.clear());
+            if let Some(prep) = &mut screen.preparation {
+                prep.items.iter_mut().for_each(|i| i.picture.clear());
+            }
+        }
+        lean
+    }
+
     pub fn key(&self, side: Side) -> &Key {
         match side {
             Side::Left => &self.keys.left,
@@ -439,7 +456,10 @@ impl DeviceScreen {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ScreenItem {
+    /// `image`: 24 x 24, packed 1-bit, base64. `picture`: 96 x 96, from sites that send it.
     pub name: String, pub stock: i64, pub low: bool, pub image: String,
+    #[serde(default)]
+    pub picture: String,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ScreenChart {
@@ -459,6 +479,9 @@ pub struct Preparation {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PreparationItem {
     pub name: String, pub count: u32, pub names: String, pub image: String,
+    /// 96 x 96, from sites that send it.
+    #[serde(default)]
+    pub picture: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

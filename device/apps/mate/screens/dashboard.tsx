@@ -18,6 +18,7 @@ import {
   H3,
   Large,
   Small,
+  Footnote,
   Muted,
   Num,
   Spark,
@@ -28,7 +29,7 @@ import {
   OwtMark,
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, HandPlatterIcon, PackageOpenIcon, TriangleAlertIcon } from "@matecrew/device-ui/icons/lucide";
-import { Frame, Product, useT, view } from "./shared";
+import { Frame, Picture, useT, view } from "./shared";
 
 const item = (index: number, field: string, fallback: unknown = "") => view(`items.${index}.${field}`, fallback);
 
@@ -44,13 +45,28 @@ const Week = ({ index, height }: { index: number; height: number }) => (
   <Spark value={view(`chart.series.${index}`, [])} max={view("chart.max", 1)} height={height} />
 );
 
+/** The item's last days, with when they start and end in small under the line. */
+const Trend = ({ index, height }: { index: number; height: number }) => {
+  const t = useT();
+  return (
+    <VStack gap={2} width="fill">
+      <Week index={index} height={height} />
+      <HStack width="fill">
+        <Footnote>{t("chart.ago", { count: view("chart.days", 14) })}</Footnote>
+        <Spacer />
+        <Footnote>{t("chart.today")}</Footnote>
+      </HStack>
+    </VStack>
+  );
+};
+
 /** One item, alone: the number fills the screen. */
 export function dashboardOne() {
   const t = useT();
   return (
     <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={20}>
       <HStack gap={40} height="fill">
-        <Product value={item(0, "bits", [])} size={192} scale={6} />
+        <Picture value={item(0, "picture", [])} size={144} />
         <VStack gap={12} width="fill">
           <Stat>
             <StatLabel>{t("inStock")}</StatLabel>
@@ -62,7 +78,7 @@ export function dashboardOne() {
       </HStack>
       <VStack gap={8}>
         <Muted>{view("chartLabel")}</Muted>
-        <Week index={0} height={72} />
+        <Trend index={0} height={64} />
       </VStack>
     </Frame>
   );
@@ -74,7 +90,7 @@ export function dashboardTwo() {
   const column = (index: number) => (
     <Card width="fill" height="fill" gap={12}>
       <HStack gap={16}>
-        <Product value={item(index, "bits", [])} size={80} scale={3} />
+        <Picture value={item(index, "picture", [])} size={104} />
         <VStack gap={8} width="fill">
           <Large>{item(index, "name")}</Large>
           <Low index={index} />
@@ -85,7 +101,7 @@ export function dashboardTwo() {
         <StatValue size="xl">{item(index, "stock")}</StatValue>
       </Stat>
       <Spacer />
-      <Week index={index} height={48} />
+      <Trend index={index} height={40} />
     </Card>
   );
   return (
@@ -102,21 +118,21 @@ export function dashboard() {
   const row = (index: number) => (
     <VStack gap={6} width="fill">
       <HStack gap={16}>
-        <Product value={item(index, "bits", [])} size={64} scale={2} />
+        <Picture value={item(index, "picture48", [])} size={64} half />
         <VStack gap={6} width="fill">
           <Large>{item(index, "name")}</Large>
           <Low index={index} />
         </VStack>
         <Num size="md">{item(index, "stock")}</Num>
       </HStack>
-      <Week index={index} height={36} />
+      <Trend index={index} height={28} />
     </VStack>
   );
   return (
     <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" direction="row" gap={28}>
       <VStack gap={12} width="fill">
         <HStack gap={20}>
-          <Product value={item(0, "bits", [])} size={112} scale={4} />
+          <Picture value={item(0, "picture", [])} size={112} />
           <Stat>
             <StatLabel>{t("inStock")}</StatLabel>
             <StatValue size="2xl">{item(0, "stock")}</StatValue>
@@ -128,7 +144,7 @@ export function dashboard() {
         </HStack>
         <Spacer />
         <Muted>{view("chartLabel")}</Muted>
-        <Week index={0} height={64} />
+        <Trend index={0} height={56} />
       </VStack>
       <Separator vertical />
       <VStack gap={16} width="fill" justify="between">
@@ -140,28 +156,60 @@ export function dashboard() {
   );
 }
 
-/** Four to six items, as tiles; the rest are counted. */
+/** Stock, with the warning sign when it runs low. */
+const Stock = ({ index }: { index: number }) => (
+  <HStack gap={8} align="center">
+    <Num size="sm">{item(index, "stock")}</Num>
+    <Show when={item(index, "low", false)}>
+      <TriangleAlertIcon size={24} />
+    </Show>
+  </HStack>
+);
+
+/** Four items, two by two: a big picture, the name, the stock and its last days on each tile. */
+export function catalogueFour() {
+  const tile = (index: number) => (
+    <Card variant={index === 0 ? "outline" : "hairline"} width="fill" height="fill" direction="row" gap={16} padding={14} align="center">
+      <Picture value={item(index, "picture", [])} size={104} />
+      <VStack gap={6} width="fill">
+        <Small lines={2}>{item(index, "name")}</Small>
+        <Stock index={index} />
+        <Trend index={index} height={18} />
+      </VStack>
+    </Card>
+  );
+  return (
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={16}>
+      <HStack gap={16} align="stretch" height="fill">{[0, 1].map(tile)}</HStack>
+      <HStack gap={16} align="stretch" height="fill">{[2, 3].map(tile)}</HStack>
+    </Frame>
+  );
+}
+
+/** Five or six items, three by two; the rest are counted. */
 export function catalogue() {
   const t = useT();
   const tile = (index: number) => (
     <Show when={item(index, "visible", false)}>
-      <Card variant={index === 0 ? "outline" : "sunken"} width="fill" height="fill" direction="row" gap={14} padding={16} align="center">
-        <Product value={item(index, "bits", [])} size={64} scale={2} />
-        <VStack gap={4} width="fill">
-          <Small>{item(index, "name")}</Small>
-          <Num size="sm">{item(index, "stock")}</Num>
-        </VStack>
-        <Show when={item(index, "low", false)}>
-          <TriangleAlertIcon size={24} />
-        </Show>
+      <Card variant={index === 0 ? "outline" : "hairline"} width="fill" height="fill" gap={4} padding={[10, 12]}>
+        <HStack gap={12} align="center" width="fill">
+          <Picture value={item(index, "picture48", [])} size={64} half />
+          <VStack gap={2} width="fill">
+            <Small lines={2}>{item(index, "name")}</Small>
+            <Stock index={index} />
+          </VStack>
+        </HStack>
+        <Trend index={index} height={16} />
       </Card>
     </Show>
   );
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={16}>
-      <HStack gap={16} align="stretch" height="fill">{[0, 1, 2].map(tile)}</HStack>
-      <HStack gap={16} align="stretch" height="fill">{[3, 4, 5].map(tile)}</HStack>
-      <Muted align="right">{t("more", { count: view("moreCount", 0) })}</Muted>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={12}>
+      <HStack gap={12} align="stretch" height="fill">{[0, 1, 2].map(tile)}</HStack>
+      <HStack gap={12} align="stretch" height="fill">{[3, 4, 5].map(tile)}</HStack>
+      <Show when={view("moreCount", 0)}>
+        <Muted align="right">{t("more", { count: view("moreCount", 0) })}</Muted>
+      </Show>
     </Frame>
   );
 }
@@ -186,7 +234,7 @@ export function preparation() {
   const order = (i: number) => (
     <Show when={row(i, "visible", false)}>
       <Card variant="outline" width="fill" height={128} direction="row" gap={16} padding={[12, 16]} align="center">
-        <Product value={row(i, "bits", [])} size={72} scale={2} />
+        <Picture value={row(i, "picture48", [])} size={64} half />
         <VStack gap={2} width="fill">
           <HStack gap={10}>
             <Num size="sm">{row(i, "count", 0)}</Num>

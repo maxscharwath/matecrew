@@ -387,7 +387,8 @@ impl Flow {
             name: name.clone(),
             item: item.name.clone(),
             stock: item.stock,
-            image: item.image.clone(),
+            // The picture as drawn when the site sends it.
+            image: if item.picture.is_empty() { item.image.clone() } else { item.picture.clone() },
             index: index as u32,
             count: cx.state.map_or(0, |s| s.items.len()) as u32,
         };
@@ -418,7 +419,8 @@ impl Flow {
             show(Screen::Taken {
                 name,
                 item: item.name.clone(),
-                image: item.image.clone(),
+                // The picture as drawn when the site sends it.
+            image: if item.picture.is_empty() { item.image.clone() } else { item.picture.clone() },
             }),
         ]
     }
@@ -458,6 +460,7 @@ mod tests {
             name: name.into(),
             stock,
             image: String::new(),
+            picture: String::new(),
         };
         DeviceState {
             device: Named {

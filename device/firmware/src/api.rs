@@ -9,7 +9,14 @@ use matecrew_core::contract::{
     ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
+
+thread_local! {
+    /// Each thread keeps its connection to the site open between requests (keep-alive), one
+    /// per timeout it uses: a TLS handshake costs the ESP32 a second or more, longer on a weak
+    /// signal. Dropped on an error.
+    static CONNECTIONS: RefCell<Vec<(Duration, Client<EspHttpConnection>)>> = const { RefCell::new(Vec::new()) };
+}
 
 /// The site proposed during setup; the person can pick another one there.
 pub const DEFAULT_SITE: &str = match option_env!("MATECREW_URL") {
@@ -280,7 +287,31 @@ impl Api {
         }
     }
 
+    /// Sends on this thread's open connection; a connection the site closed meanwhile gets one
+    /// retry on a new one.
     fn send(&self, method: Method, path: &str, body: Body, timeout: Duration) -> Result<Reply> {
+        let kept = CONNECTIONS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let at = kept.iter().position(|(t, _)| *t == timeout)?;
+            Some(kept.swap_remove(at).1)
+        });
+        let reused = kept.is_some();
+        let mut client = match kept {
+            Some(client) => client,
+            None => Self::connect(timeout)?,
+        };
+        let mut sent = self.send_on(&mut client, method, path, &body);
+        if sent.is_err() && reused {
+            client = Self::connect(timeout)?;
+            sent = self.send_on(&mut client, method, path, &body);
+        }
+        if sent.is_ok() {
+            CONNECTIONS.with(|kept| kept.borrow_mut().push((timeout, client)));
+        }
+        sent
+    }
+
+    fn connect(timeout: Duration) -> Result<Client<EspHttpConnection>> {
         let connection = EspHttpConnection::new(&Configuration {
             crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
             timeout: Some(timeout),
@@ -288,9 +319,12 @@ impl Api {
             buffer_size_tx: Some(1024),
             ..Default::default()
         })?;
-        let mut client = Client::wrap(connection);
+        Ok(Client::wrap(connection))
+    }
+
+    fn send_on(&self, client: &mut Client<EspHttpConnection>, method: Method, path: &str, body: &Body) -> Result<Reply> {
         let url = format!("{}{path}", self.site);
-        let (payload, content_type) = match &body {
+        let (payload, content_type) = match body {
             Body::None => (None, None),
             Body::Json(json) => (Some(json.as_slice()), Some("application/json")),
             Body::Bytes(bytes) => (Some(*bytes), Some("application/octet-stream")),

@@ -22,7 +22,8 @@ export function downloadableApp(): (typeof DOWNLOADABLE_APPS)[number] | null {
 }
 /** Days of stock on the main screen's chart, today included. */
 const CHART_DAYS = 14;
-const CHART_MAX_ITEMS = 3;
+/** Items with their own line on the chart: as many as the main screen shows. */
+const CHART_MAX_ITEMS = 6;
 const DAY_MS = 86_400_000;
 /** Days on a person's summary chart, today included. */
 const SUMMARY_DAYS = 7;
@@ -186,7 +187,11 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       right: { action: "RETURN", itemId: null, label: labels.right },
     },
     items: await Promise.all(
-      ordered.map(async (i) => ({ id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits) })),
+      ordered.map(async (i) => {
+        const drawn = await itemImage(i.imageKey, i.terminalImage);
+        // `image` for firmware that predates 96 x 96 pictures; `picture` as drawn.
+        return { id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(drawn).bits), picture: base64(drawn.bits) };
+      }),
     ),
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
     dayLabels: dayLabels(office.timezone, office.locale),
@@ -281,12 +286,9 @@ export async function buildScreenData(
   }).format(new Date());
 
   const thresholds = items.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
-  // Larger catalogues use aggregate history, keeping the graph present without an unreadable legend.
-  const allHistory = items.length ? await stockHistory(office.id, office.timezone, items) : [];
-  const aggregate = items.length > CHART_MAX_ITEMS;
-  const history = aggregate
-    ? [Array.from({ length: CHART_DAYS }, (_, day) => allHistory.reduce((sum, series) => sum + series[day], 0))]
-    : allHistory;
+  // One line per item the main screen shows, each on its tile; the rest are only counted.
+  const shown = items.slice(0, CHART_MAX_ITEMS);
+  const history = shown.length ? await stockHistory(office.id, office.timezone, shown) : [];
   const max = Math.max(10, ...history.flat());
   const chartMax = Math.ceil(max / 10) * 10;
 
@@ -299,12 +301,17 @@ export async function buildScreenData(
     batteryPercent: batteryPercent(device.batteryMv),
     batteryLowLabel: device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV ? t("batteryLow") : null,
     items: await Promise.all(
-      items.map(async (i, index) => ({
-        name: i.name,
-        stock: i.qty,
-        low: i.qty <= thresholds[index],
-        image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits),
-      })),
+      items.map(async (i, index) => {
+        const drawn = await itemImage(i.imageKey, i.terminalImage);
+        return {
+          name: i.name,
+          stock: i.qty,
+          low: i.qty <= thresholds[index],
+          // 24 x 24 for firmware that predates `picture`, 96 x 96 as drawn.
+          image: base64(smallImage(drawn).bits),
+          picture: base64(drawn.bits),
+        };
+      }),
     ),
     chart:
       items.length > 0
@@ -318,19 +325,23 @@ export async function buildScreenData(
       title: prep.label ? t("preparationOf", { label: prep.label }) : t("preparation"),
       total: t("toPrepare", { count: prep.total }),
       items: await Promise.all(
-        prep.items.map(async (i) => ({
-          name: i.name,
-          count: i.names.length,
-          names: i.names.join(", "),
-          image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits),
-        })),
+        prep.items.map(async (i) => {
+          const drawn = await itemImage(i.imageKey, i.terminalImage);
+          return {
+            name: i.name,
+            count: i.names.length,
+            names: i.names.join(", "),
+            image: base64(smallImage(drawn).bits),
+            picture: base64(drawn.bits),
+          };
+        }),
       ),
       sessionId: prep.sessionId,
       serveLabel: t("serve"),
     },
     lowLabel: t("lowStock"),
     moreLabel: t("more"),
-    chartLabel: t(aggregate ? "chartTotal" : "chart", { days: CHART_DAYS }),
+    chartLabel: t("chart", { days: CHART_DAYS }),
     leftLabel: labels.left,
     rightLabel: labels.right,
   };

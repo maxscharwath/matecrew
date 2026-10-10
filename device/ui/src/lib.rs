@@ -11,6 +11,7 @@ pub mod device_info;
 pub mod form;
 pub mod frame;
 pub mod notifications;
+pub mod picture;
 #[cfg(test)]
 mod previews;
 mod screens;
@@ -245,7 +246,7 @@ pub fn pick_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "pick",
-        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"item":info.item,"stock":info.stock,"stockHint":if info.index.saturating_add(1)==info.count {"Suivant : quitter"}else{"en stock"},"image":info.image.unwrap_or(&[]),"left":"Suivant","right":"Prendre"}),
+        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"item":info.item,"stock":info.stock,"stockHint":if info.index.saturating_add(1)==info.count {"Suivant : quitter"}else{"en stock"},"image":info.image.unwrap_or(&[]),"picture":picture::pictures(info.image.unwrap_or(&[])).0,"left":"Suivant","right":"Prendre"}),
     )
 }
 pub fn leave_screen<D: DrawTarget<Color = BinaryColor>>(

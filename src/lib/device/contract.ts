@@ -60,13 +60,25 @@ export const deviceScreen = z.object({
   wifiBars: z.number().int().min(0).max(3).nullable(),
   batteryPercent: z.number().int().min(0).max(100).nullable(),
   batteryLowLabel: z.string().nullable(),
-  items: z.array(z.object({ name: z.string(), stock: z.number().int(), low: z.boolean(), image: z.string() })),
+  items: z.array(
+    z.object({
+      name: z.string(),
+      stock: z.number().int(),
+      low: z.boolean(),
+      /** 24 x 24, packed 1-bit, base64. */
+      image: z.string(),
+      /** 96 x 96 as drawn, packed 1-bit, base64; firmware that predates it ignores it. */
+      picture: z.string().optional(),
+    }),
+  ),
   chart: z.object({ series: z.array(z.array(z.number().int())), max: z.number().int().positive(), days: z.number().int().positive() }).nullable(),
   preparation: z
     .object({
       title: z.string(),
       total: z.string(),
-      items: z.array(z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string() })),
+      items: z.array(
+        z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string(), picture: z.string().optional() }),
+      ),
       /** The session to serve; null for orders without one. */
       sessionId: z.string().nullable(),
       /** The right key on this screen: a runner's badge closes the session (`POST /api/device/serve`). */
@@ -87,7 +99,9 @@ export const deviceState = z.object({
   office: z.object({ name: z.string(), timezone: z.string(), locale: z.string() }),
   keys: z.object({ left: deviceKey, right: deviceKey }),
   /** In the picker's order. `image`: 24 x 24 pixels, packed 1-bit (1 = ink), base64. */
-  items: z.array(z.object({ id: z.string(), name: z.string(), stock: z.number().int(), image: z.string() })),
+  items: z.array(
+    z.object({ id: z.string(), name: z.string(), stock: z.number().int(), image: z.string(), picture: z.string().optional() }),
+  ),
   /**
    * Assigned badges only: an UID missing here is unknown to the terminal.
    * With what the holder drank today, this week and this month, for "Ma conso".
