@@ -73,17 +73,30 @@ pub enum Tone {
     Notification,
     /// A badge was read and recognised: a quick rising sparkle, near the piezo's resonance.
     Badge,
+    /// The terminal starts.
+    Boot,
+    /// A badge nobody has claimed yet.
+    Unknown,
 }
 impl Tone {
     /// LEDC square wave at 50 % duty, as `(hz, ms)`. A zero frequency is a silent interval.
     pub fn program(self) -> &'static [(u32, u64)] {
         match self {
             Self::Key => &[(1319, 18), (1568, 12)],
-            Self::Success => &[(1047, 40), (0, 18), (1319, 40), (0, 18), (1568, 45), (0, 22), (2093, 65)],
-            Self::Error => &[(659, 65), (0, 35), (523, 90)],
+            // 8-bit "level cleared": C6 E6 G6 C7, a breath, then G6 C7 held.
+            Self::Success => &[(1047, 55), (1319, 55), (1568, 55), (2093, 90), (0, 40), (1568, 55), (2093, 170)],
+            // A chromatic fall, B4 to G#4, the last one held: the arcade "miss".
+            Self::Error => &[(494, 70), (0, 25), (466, 70), (0, 25), (440, 70), (0, 25), (415, 220)],
             Self::Notification => &[(1568, 35), (0, 30), (1319, 35), (0, 30), (2093, 70)],
             // C7 E7 G7 then C8, legato: a contactless "tiling", brighter and shorter than Success.
             Self::Badge => &[(2093, 26), (2637, 26), (3136, 26), (4186, 90)],
+            // Power-on: a fast run up two octaves from C4, a breath, then G6 and a held C7.
+            Self::Boot => &[
+                (262, 35), (330, 35), (392, 35), (523, 35), (659, 35), (784, 35), (1047, 35),
+                (0, 60), (1568, 70), (2093, 160),
+            ],
+            // "Huh?": G5, a step down to E5, then up to B5, like a question.
+            Self::Unknown => &[(784, 80), (0, 40), (659, 60), (0, 30), (988, 160)],
         }
     }
 }

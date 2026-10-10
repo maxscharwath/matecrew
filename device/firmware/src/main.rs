@@ -140,6 +140,7 @@ fn app() -> Result<()> {
     let buzzer = cores::on(Core::Core1, || {
         Buzzer::start(p.ledc.timer0, p.ledc.channel0, unsafe { Gpio6::steal() })
     })?;
+    buzzer.beep(matecrew_core::flow::Beep::Boot);
     cores::on(Core::Core1, || {
         keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone())
     })?;

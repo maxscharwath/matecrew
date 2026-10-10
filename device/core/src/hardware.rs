@@ -33,6 +33,8 @@ impl From<Beep> for device_board::Tone {
             Beep::Error => Self::Error,
             Beep::Notification => Self::Notification,
             Beep::Badge => Self::Badge,
+            Beep::Boot => Self::Boot,
+            Beep::Unknown => Self::Unknown,
         }
     }
 }

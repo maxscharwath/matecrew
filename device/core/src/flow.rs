@@ -138,6 +138,10 @@ pub enum Beep {
     Notification,
     /// A known badge was read.
     Badge,
+    /// The terminal starts.
+    Boot,
+    /// A badge nobody has claimed yet.
+    Unknown,
 }
 
 /// In JSON: `{"type":"show","screen":{…}}`, `{"type":"beep","beep":"key"}`,
@@ -323,7 +327,7 @@ impl Flow {
                 .zip(cx.unix)
                 .map(|(claim, unix)| claim.url(&uid, unix));
             return vec![
-                beep(Beep::Error),
+                beep(Beep::Unknown),
                 Effect::NoteUnknownBadge { uid: uid.clone() },
                 show(Screen::UnknownBadge { uid, claim_url }),
             ];
@@ -729,7 +733,7 @@ mod tests {
         assert_eq!(
             flow.handle(badge("04FFFFFFFFFFFF"), cx(&s, 1_000)),
             [
-                beep(Beep::Error),
+                beep(Beep::Unknown),
                 Effect::NoteUnknownBadge {
                     uid: "04FFFFFFFFFFFF".into()
                 },

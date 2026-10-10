@@ -39,6 +39,8 @@ pub extern "C" fn buzzer_pattern(tone: u32) -> i32 {
         2 => matecrew_core::flow::Beep::Error,
         3 => matecrew_core::flow::Beep::Notification,
         4 => matecrew_core::flow::Beep::Badge,
+        5 => matecrew_core::flow::Beep::Unknown,
+        6 => matecrew_core::flow::Beep::Boot,
         _ => matecrew_core::flow::Beep::Key,
     };
     let bytes = serde_json::to_vec(beep.tones()).unwrap();

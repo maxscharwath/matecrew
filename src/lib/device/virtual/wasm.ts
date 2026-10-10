@@ -47,7 +47,7 @@ export type FlowEvent =
   | { type: "badge"; uid: string }
   | { type: "tick" };
 
-export type Beep = "key" | "accepted" | "error" | "notification" | "badge";
+export type Beep = "key" | "accepted" | "error" | "notification" | "badge" | "boot" | "unknown";
 
 export type Effect =
   | { type: "show"; screen: FlowScreen }
@@ -232,7 +232,11 @@ export class DeviceWasm {
             ? 3
             : beep === "badge"
               ? 4
-              : 0,
+              : beep === "unknown"
+                ? 5
+                : beep === "boot"
+                  ? 6
+                  : 0,
     );
     return JSON.parse(
       decoder.decode(

@@ -63,13 +63,13 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
     [1568, 12],
   ]);
   assert.deepEqual(wasm.buzzerPattern("accepted"), [
-    [1047, 40],
-    [0, 18],
-    [1319, 40],
-    [0, 18],
-    [1568, 45],
-    [0, 22],
-    [2093, 65],
+    [1047, 55],
+    [1319, 55],
+    [1568, 55],
+    [2093, 90],
+    [0, 40],
+    [1568, 55],
+    [2093, 170],
   ]);
   assert.deepEqual(wasm.buzzerPattern("badge"), [
     [2093, 26],
@@ -78,10 +78,16 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
     [4186, 90],
   ]);
   assert.deepEqual(wasm.buzzerPattern("error"), [
-    [659, 65],
-    [0, 35],
-    [523, 90],
+    [494, 70],
+    [0, 25],
+    [466, 70],
+    [0, 25],
+    [440, 70],
+    [0, 25],
+    [415, 220],
   ]);
+  assert.equal(wasm.buzzerPattern("unknown").at(-1)?.[0], 988);
+  assert.equal(wasm.buzzerPattern("boot").length, 10);
 });
 
 test("the buzzer pin exposes PWM phase, silence and sequential firmware tones", () => {
