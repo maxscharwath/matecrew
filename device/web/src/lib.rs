@@ -132,6 +132,8 @@ pub fn draw(frame: &mut Frame, view: &View) {
                 code,
                 url,
                 url_with_code,
+                // The virtual terminal has no radio.
+                bluetooth: "",
             },
         ),
         View::Linked { office, name } => ui::linked_screen(frame, office, name),

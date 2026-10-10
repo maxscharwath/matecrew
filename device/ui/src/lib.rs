@@ -132,6 +132,8 @@ pub struct SetupInfo<'a> {
     pub ap_ssid: &'a str,
     pub ap_password: &'a str,
     pub portal_url: &'a str,
+    /// "matecrew-50E4 · 123456": the Bluetooth name and passkey, empty without Bluetooth.
+    pub bluetooth: &'a str,
 }
 
 /// Shown while the terminal waits for an admin to approve its code on the site.
@@ -142,6 +144,8 @@ pub struct LinkInfo<'a> {
     pub url: &'a str,
     /// Address with the code, encoded in the QR.
     pub url_with_code: &'a str,
+    /// As in [`SetupInfo`].
+    pub bluetooth: &'a str,
 }
 
 /// Right side of the status bar.
@@ -174,7 +178,7 @@ pub fn setup_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "setup",
-        json!({"title":"Mise en service","ssid":info.ap_ssid,"password":info.ap_password,"portal":info.portal_url.trim_start_matches("http://"),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password)}),
+        json!({"title":"Mise en service","ssid":info.ap_ssid,"password":info.ap_password,"portal":info.portal_url.trim_start_matches("http://"),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password),"bluetooth":info.bluetooth}),
     )
 }
 pub fn link_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -184,7 +188,7 @@ pub fn link_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "link",
-        json!({"title":"Mise en service","code":info.code,"url":info.url,"qr":info.url_with_code}),
+        json!({"title":"Mise en service","code":info.code,"url":info.url,"qr":info.url_with_code,"bluetooth":info.bluetooth}),
     )
 }
 pub fn linked_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -246,7 +250,7 @@ pub fn pick_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "pick",
-        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"item":info.item,"stock":info.stock,"stockHint":if info.index.saturating_add(1)==info.count {"Suivant : quitter"}else{"en stock"},"image":info.image.unwrap_or(&[]),"picture":picture::pictures(info.image.unwrap_or(&[])).0,"left":"Suivant","right":"Prendre"}),
+        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"index":info.index,"count":info.count,"item":info.item,"stock":info.stock,"image":info.image.unwrap_or(&[]),"picture":picture::pictures(info.image.unwrap_or(&[])).0,"left":"Suivant","right":"Prendre"}),
     )
 }
 pub fn leave_screen<D: DrawTarget<Color = BinaryColor>>(

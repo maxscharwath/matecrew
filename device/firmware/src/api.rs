@@ -11,6 +11,10 @@ use matecrew_core::contract::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cell::RefCell, time::Duration};
 
+/// The console's long wait: always open, so the status bar's arrows blink when it is sent and
+/// when it answers rather than staying lit.
+const WAIT: &str = "/api/device/commands";
+
 thread_local! {
     /// Each thread keeps its connection to the site open between requests (keep-alive), one
     /// per timeout it uses: a TLS handshake costs the ESP32 a second or more, longer on a weak
@@ -288,8 +292,13 @@ impl Api {
     }
 
     /// Sends on this thread's open connection; a connection the site closed meanwhile gets one
-    /// retry on a new one.
+    /// retry on a new one. The status bar shows the transfer (`net`).
     fn send(&self, method: Method, path: &str, body: Body, timeout: Duration) -> Result<Reply> {
+        let wait = path.starts_with(WAIT);
+        if wait {
+            crate::net::pulse(true);
+        }
+        let _shown = (!wait).then(|| crate::net::transfer(!matches!(method, Method::Get)));
         let kept = CONNECTIONS.with(|kept| {
             let mut kept = kept.borrow_mut();
             let at = kept.iter().position(|(t, _)| *t == timeout)?;
@@ -307,6 +316,9 @@ impl Api {
         }
         if sent.is_ok() {
             CONNECTIONS.with(|kept| kept.borrow_mut().push((timeout, client)));
+            if wait {
+                crate::net::pulse(false);
+            }
         }
         sent
     }

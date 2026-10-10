@@ -1132,6 +1132,74 @@
     "knockShots": "{shots, plural, =0 {No shots left} one {# shot left} other {# shots left}}",
     "noFlip": "Set down, not flipped — the can has to turn over at least once"
   },
+  "deviceBluetooth": {
+    "title": "Bluetooth",
+    "subtitle": "Set up a new terminal or control one in range, from this browser.",
+    "open": "Bluetooth",
+    "back": "Terminals",
+    "unsupported": "This browser has no Bluetooth. Use Chrome or Edge on Android, Windows, macOS or ChromeOS. On an iPhone, set the terminal up with the QR on its screen.",
+    "connect": "Find a terminal",
+    "connecting": "Connecting…",
+    "disconnect": "Disconnect",
+    "disconnected": "Terminal disconnected.",
+    "pairingHint": "On the first change, the browser asks for a code: the one on the terminal's screen (BLE · 6 digits).",
+    "info": {
+      "firmware": "Firmware",
+      "hardwareId": "Identifier",
+      "wifi": "Wi-Fi",
+      "site": "Site",
+      "linked": "Linked to a site",
+      "notLinked": "Not linked yet",
+      "uptime": "Up for {minutes} min"
+    },
+    "setup": {
+      "title": "Set up this terminal",
+      "description": "The Wi-Fi, this site's address and the approval go in one write: the terminal restarts, joins the network and links to this office with no code to type.",
+      "network": "Wi-Fi network",
+      "otherNetwork": "Other network…",
+      "ssid": "Network name",
+      "password": "Wi-Fi password",
+      "name": "Terminal name",
+      "defaultName": "Terminal",
+      "submit": "Set up",
+      "sending": "Sending to the terminal…",
+      "waiting": "The terminal restarts and links to the site…",
+      "linked": "Terminal linked. Open its page to configure it.",
+      "openDevice": "Open the terminal",
+      "timeout": "The terminal did not link within 10 minutes. Check the Wi-Fi on its screen.",
+      "alreadyLinked": "This terminal is already linked to a site: configure it from its page."
+    },
+    "control": {
+      "title": "Control and debug",
+      "description": "Live over Bluetooth, without the site.",
+      "left": "Left key",
+      "right": "Right key",
+      "both": "Both",
+      "badge": "Badge UID",
+      "sendBadge": "Badge",
+      "sync": "Sync",
+      "restart": "Restart",
+      "log": "Log",
+      "logEmpty": "The terminal's lines show here once paired.",
+      "firmware": "Update the firmware",
+      "firmwareHint": "A firmware .bin file; the terminal checks the image and restarts on it.",
+      "upload": "Send",
+      "uploading": "Sending {percent} %",
+      "updated": "Firmware sent: the terminal restarts on it."
+    },
+    "errors": {
+      "unsupported": "No Bluetooth in this browser.",
+      "cancelled": "Cancelled.",
+      "not-found": "Terminal not found.",
+      "disconnected": "The terminal disconnected.",
+      "protocol": "This terminal's firmware is newer than this site: update the site.",
+      "invalid": "Value refused: {message}",
+      "refused": "The terminal refused: {message}",
+      "timeout": "The terminal does not answer.",
+      "transport": "Bluetooth error: {message}",
+      "forbidden": "Only an admin of the office can link a terminal."
+    }
+  },
   "devices": {
     "keys": {
       "take": "Take",
@@ -1212,11 +1280,7 @@
       "customUid": "Tap UID {uid}",
       "noBadge": "No badge matches.",
       "invalidUid": "Invalid UID: 8 to 20 hex digits.",
-      "mirror": "Device screen, {when}",
-      "preview": "Site preview: the device has not sent its screen yet.",
       "offlineHint": "The device is not answering live. Sync, restart and forget Wi-Fi will go out on its next connection. Keys and badges expire after a minute.",
-      "activity": "Activity",
-      "noActivity": "No commands yet.",
       "status": {
         "waiting": "waiting",
         "delivered": "received",
@@ -1228,19 +1292,120 @@
         "badge": "Badge {uid}",
         "sync": "Sync",
         "restart": "Restart",
-        "forgetWifi": "Forget Wi-Fi"
+        "forgetWifi": "Forget Wi-Fi",
+        "tap": "Tap at {x}, {y}",
+        "app": "Open {app}"
       },
       "shortcuts": "Keyboard: ← and → for the keys, B to tap a badge, S to sync.",
-      "details": "Device",
       "firmware": "Firmware",
       "battery": "Battery",
       "signal": "Wi-Fi",
       "hardwareId": "Identifier",
-      "more": "More actions",
       "waiting": "{count, plural, one {# command waiting} other {# commands waiting}}",
-      "noFrame": "The device has not sent its screen yet.",
       "application": "Application",
-      "tapScreen": "Click a displayed button to control the device"
+      "tapScreen": "Click a displayed button to control the device",
+      "sendFailed": "The command could not be sent.",
+      "tapHint": "Click the screen to tap it.",
+      "tabs": {
+        "console": "Console",
+        "activity": "Activity",
+        "settings": "Settings"
+      },
+      "strip": {
+        "link": "Link",
+        "linkLive": "Commands arrive within a second",
+        "linkQueued": "Commands wait for its next connection",
+        "lastSeen": "Last contact",
+        "firmwareReported": "Reported at its last sync",
+        "notReported": "Not reported yet",
+        "batteryLow": "low",
+        "batteryImplausible": "No plausible reading",
+        "signal": {
+          "excellent": "Excellent",
+          "good": "Good",
+          "fair": "Fair",
+          "weak": "Weak"
+        },
+        "screen": "Screen",
+        "screenNone": "Not received",
+        "screenLive": "Mirrored while the console is open",
+        "screenLast": "The last one it sent",
+        "screenHint": "Sent once the terminal sees the console"
+      },
+      "monitor": {
+        "title": "Monitor",
+        "count": "{count, plural, one {# line} other {# lines}}",
+        "clear": "Clear",
+        "empty": "Nothing yet.",
+        "kind": {
+          "input": "input",
+          "system": "system",
+          "screen": "screen",
+          "link": "link",
+          "error": "error"
+        }
+      },
+      "log": {
+        "opened": "Console open: while it stays open, the terminal mirrors its screen and takes commands at once.",
+        "pollBack": "Back in touch with the site.",
+        "pollFailed": "Status unavailable ({error}).",
+        "reachable": "The terminal is answering live.",
+        "unreachable": "The terminal stopped answering: commands will wait for its next connection.",
+        "firmware": "Firmware {version}",
+        "firstFrame": "Screen received, drawn {when}",
+        "refresh": "{passes, plural, one {Partial refresh} other {# partial refreshes}} {width}×{height} at {x},{y} · {percent} % of the pixels",
+        "frameFailed": "Could not load the screen ({error})."
+      },
+      "controls": {
+        "title": "Controls",
+        "live": "The terminal answers live: each command reaches it within a second.",
+        "keys": "Keys",
+        "left": "Left",
+        "right": "Right",
+        "both": "Both",
+        "badge": "Badge",
+        "uid": "Badge UID",
+        "randomUid": "Random UID",
+        "tap": "Tap",
+        "badgeHint": "8 to 20 hex digits. The reader under the screen (B) lists the office's badges.",
+        "terminal": "Terminal",
+        "openApp": "Open an app…"
+      },
+      "board": {
+        "subtitle": "Its wiring; a pad lights up while the console drives it.",
+        "pad": "Pad",
+        "function": "Function",
+        "pins": {
+          "panelRst": "Panel RST",
+          "panelCs": "Panel CS",
+          "panelBusy": "Panel BUSY",
+          "panelDc": "Panel DC",
+          "keyLeft": "Left key (TTP223)",
+          "buzzer": "Piezo and battery reading",
+          "nfcSda": "PN532 SDA (I2C 0x24)",
+          "nfcScl": "PN532 SCL",
+          "panelSck": "Panel SCK",
+          "keyRight": "Right key (TTP223)",
+          "panelMosi": "Panel MOSI"
+        }
+      },
+      "noScreen": {
+        "title": "Waiting for the terminal's screen",
+        "live": "It sends it as soon as it sees the console open, usually within a few seconds.",
+        "offline": "The terminal is offline: its screen shows up here when it reconnects.",
+        "preview": "Preview from the site's data",
+        "previewLoading": "Rendering the preview…"
+      },
+      "indicator": {
+        "busy": "{passes, plural, one {Refreshing} other {Refreshing ×#}}",
+        "preview": "Preview · site data",
+        "hidePreview": "Hide",
+        "mirror": "Live mirror · {when}",
+        "last": "Last screen · {when}"
+      },
+      "settingsHint": "Its name on the site, and the item the picker opens on.",
+      "unlinkHint": "The terminal loses its access at its next connection and shows a link code again. Its takes stay.",
+      "takesHint": "What the terminal sent, most recent first."
     },
     "virtual": {
       "open": "Virtual terminal",

@@ -11,10 +11,10 @@
  *     </Keys>
  *   </Screen>
  */
-import { Button as Pressable, Group, HStack, Image, Stack, VStack, bind, type Children, type Content, type Handler, type TextChildren } from "../runtime/jsx-runtime";
+import { Button as Pressable, Group, HStack, Image, Show, Stack, VStack, bind, type Children, type Content, type Handler, type TextChildren } from "../runtime/jsx-runtime";
 import type { Element, Node } from "../runtime/types";
 import type { LayoutProps } from "../runtime/layout";
-import { ArrowDownIcon, NfcIcon } from "../icons/lucide";
+import { ArrowDownIcon, ArrowDownUpIcon, NfcIcon } from "../icons/lucide";
 import { KEYS, MARGIN, SCREEN, STATUS, TABS } from "./tokens";
 import { Overlay, Separator, Surface } from "./surface";
 import { Label, Large, Muted, inline } from "./typography";
@@ -42,6 +42,10 @@ export function StatusBar({
         <Large lines={1} width="fill">{children}</Large>
         {trailing ?? (status ? (
           <HStack gap={10} align="center">
+            {/* While the terminal talks to the site (`$device.net.busy`, set around a sync). */}
+            <Show when={bind("$device.net.busy", false)}>
+              <ArrowDownUpIcon size={22} />
+            </Show>
             <Large>{bind("$device.clock", "--:--")}</Large>
             <Image width={24} height={24} sourceWidth={24} sourceHeight={24} value={bind("$device.status.wifi", [])} />
             <Image width={24} height={24} sourceWidth={24} sourceHeight={24} value={bind("$device.status.battery", [])} />

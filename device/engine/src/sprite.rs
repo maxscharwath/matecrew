@@ -1,20 +1,43 @@
 //! Packed 1-bit sprites on any target, using horizontal spans instead of one fill per pixel.
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*, primitives::Rectangle};
 
-/// MSB-first, tightly packed rows. Set bits draw ink; unset bits can be transparent or paper.
+/// MSB-first, tightly packed rows. Set bits draw ink; unset bits are transparent or paper.
+///
+/// Three colours: a second plane of the same size after the first is the sprite's opacity.
+/// A pixel without ink paints paper where it is set, and lets what is under it show where it
+/// is not: the white body of a can stays white on a grey disc, the space around it shows the
+/// disc. Without the plane, paper is as the caller says.
 pub struct PackedSprite<'a> {
     bits: &'a [u8],
+    mask: Option<&'a [u8]>,
     size: Size,
 }
 impl<'a> PackedSprite<'a> {
-    /// Rejects empty dimensions, arithmetic overflow and truncated assets.
+    /// Rejects empty dimensions, arithmetic overflow and truncated assets. Twice the bytes of
+    /// one plane carry the opacity plane too.
     pub fn new(bits: &'a [u8], size: Size) -> Option<Self> {
         if size.width == 0 || size.height == 0 {
             return None;
         }
         let pixels = (size.width as usize).checked_mul(size.height as usize)?;
         let bytes = pixels.checked_add(7)? / 8;
-        (bits.len() >= bytes).then_some(Self { bits, size })
+        if bits.len() < bytes {
+            return None;
+        }
+        let mask = (bits.len() >= 2 * bytes).then(|| &bits[bytes..2 * bytes]);
+        Some(Self { bits: &bits[..bytes], mask, size })
+    }
+
+    /// The colour pixel `i` paints, if any.
+    fn paint(&self, i: usize, ink: BinaryColor, paper: Option<BinaryColor>) -> Option<BinaryColor> {
+        let set = |plane: &[u8]| plane[i >> 3] & (0x80 >> (i & 7)) != 0;
+        if set(self.bits) {
+            Some(ink)
+        } else if let Some(mask) = self.mask {
+            set(mask).then(|| ink.invert())
+        } else {
+            paper
+        }
     }
 
     /// Draw with integer scaling, optional opaque background, and the target's clipping.
@@ -45,19 +68,16 @@ impl<'a> PackedSprite<'a> {
             return Ok(());
         }
         for y in 0..self.size.height {
-            let is_ink = |x: u32| {
-                let i = y as usize * self.size.width as usize + x as usize;
-                self.bits[i >> 3] & (0x80 >> (i & 7)) != 0
-            };
+            let color_at = |x: u32| self.paint(y as usize * self.size.width as usize + x as usize, ink, paper);
             let mut x = 0;
             while x < self.size.width {
                 let start = x;
-                let on = is_ink(x);
+                let color = color_at(x);
                 x += 1;
-                while x < self.size.width && is_ink(x) == on {
+                while x < self.size.width && color_at(x) == color {
                     x += 1;
                 }
-                let Some(color) = (if on { Some(ink) } else { paper }) else {
+                let Some(color) = color else {
                     continue;
                 };
                 target.fill_solid(
@@ -86,22 +106,21 @@ impl PackedSprite<'_> {
         if size.width == 0 || size.height == 0 || size.width > 4096 || size.height > 4096 {
             return Ok(());
         }
-        let is_ink = |x: u32, y: u32| {
+        let color_at = |x: u32, y: u32| {
             let sx = (x as u64 * self.size.width as u64 / size.width as u64) as u32;
             let sy = (y as u64 * self.size.height as u64 / size.height as u64) as u32;
-            let i = sy as usize * self.size.width as usize + sx as usize;
-            self.bits[i >> 3] & (0x80 >> (i & 7)) != 0
+            self.paint(sy as usize * self.size.width as usize + sx as usize, ink, paper)
         };
         for y in 0..size.height {
             let mut x = 0;
             while x < size.width {
                 let start = x;
-                let on = is_ink(x, y);
+                let color = color_at(x, y);
                 x += 1;
-                while x < size.width && is_ink(x, y) == on {
+                while x < size.width && color_at(x, y) == color {
                     x += 1;
                 }
-                if let Some(color) = if on { Some(ink) } else { paper } {
+                if let Some(color) = color {
                     target.fill_solid(
                         &Rectangle::new(
                             at + Point::new(start as i32, y as i32),
@@ -164,6 +183,19 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn an_opacity_plane_paints_paper_where_set_and_nothing_elsewhere() {
+        // 8 x 1: ink, opaque paper, then transparent pixels.
+        let bits = [0b1000_0000, 0b1100_0000];
+        let sprite = PackedSprite::new(&bits, Size::new(8, 1)).unwrap();
+        let mut frame = Frame::new(800, 480).unwrap();
+        frame.bits.fill(0xFF);
+        // The caller's paper is ignored: the plane decides.
+        sprite.draw_resized(&mut frame, Point::zero(), Size::new(8, 1), BinaryColor::On, Some(BinaryColor::Off)).unwrap();
+        assert_eq!(frame.bits[0], 0b1011_1111, "ink, paper, then the ink already there");
+        assert!(PackedSprite::new(&bits[..1], Size::new(8, 1)).unwrap().mask.is_none());
+    }
+
     #[test]
     fn invalid_assets_and_overflowing_footprints_do_not_draw() {
         assert!(PackedSprite::new(&[], Size::new(24, 24)).is_none());

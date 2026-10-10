@@ -16,7 +16,7 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -48,6 +48,7 @@ pub fn poll_commands(api: Api, inputs: Sender<Input>, mirror: Mirror) -> Result<
                 log::info!("console: {command:?}");
                 let input = match command {
                     Command::Key { side, .. } => Input::Flow(Event::Key { side }),
+                    Command::Both { .. } => Input::Flow(Event::BothKeys),
                     Command::Badge { uid, .. } => match normalize_uid(&uid) {
                         Some(uid) => Input::Flow(Event::Badge { uid }),
                         None => continue,
@@ -66,6 +67,11 @@ pub fn poll_commands(api: Api, inputs: Sender<Input>, mirror: Mirror) -> Result<
         })?;
     Ok(())
 }
+
+/// The status bar's rows in a packed frame (56 px of 800 / 8 bytes): the clock and the arrows.
+const STATUS_BYTES: usize = 56 * 800 / 8;
+/// How often a change in the status bar alone is uploaded.
+const STATUS_EVERY: Duration = Duration::from_secs(30);
 
 /// Uploads each new frame while the console is open; when several pile up, only the latest
 /// goes. Opening the console uploads the screen at once.
@@ -86,20 +92,33 @@ impl Mirror {
             .spawn(move || {
                 let mut latest: Option<Vec<u8>> = None;
                 let mut sent = true;
+                let mut uploaded: Option<Vec<u8>> = None;
+                let mut status_uploaded: Option<Instant> = None;
                 while let Ok(message) = received.recv() {
                     for message in std::iter::once(message).chain(received.try_iter()) {
                         if let Some(frame) = message {
                             latest = Some(frame);
-                            sent = false;
-                        } else {
-                            sent = false;
                         }
+                        sent = false;
                     }
                     let Some(frame) = latest.as_ref().filter(|_| !sent && watched.load(Ordering::Relaxed)) else {
                         continue;
                     };
+                    // Uploading lights the status bar's network arrow, which changes the screen,
+                    // which uploads again: a change in the status bar alone goes at most every
+                    // STATUS_EVERY; the next one elsewhere carries it.
+                    let status_only = uploaded.as_ref().is_some_and(|before| before[STATUS_BYTES..] == frame[STATUS_BYTES..]);
+                    if status_only && status_uploaded.is_some_and(|at| at.elapsed() < STATUS_EVERY) {
+                        continue;
+                    }
                     match api.put_frame(frame) {
-                        Ok(()) => sent = true,
+                        Ok(()) => {
+                            sent = true;
+                            uploaded = Some(frame.clone());
+                            if status_only {
+                                status_uploaded = Some(Instant::now());
+                            }
+                        }
                         Err(e) => log::warn!("screen mirror: {e:#}"),
                     }
                 }

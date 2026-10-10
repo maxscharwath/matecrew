@@ -1,8 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { adminDevice } from "@/lib/device/admin";
-import { bitsToPng } from "@/lib/device/frame";
 
-/** PNG of what the terminal last reported on its panel; the console's mirror. */
+/**
+ * What the terminal last reported on its panel, for the console's mirror and
+ * the device list's thumbnail: the 800 × 480 1-bit frame as it came (packed
+ * MSB first, 1 = ink), base64 in JSON. The browser draws it on a canvas.
+ * JSON rather than octet-stream because Vercel's CDN only compresses an
+ * allowlist of types: a mostly blank panel's 48 000 bytes then travel as a few KB.
+ */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ officeId: string; deviceId: string }> },
@@ -16,7 +21,20 @@ export async function GET(
 
   const etag = `"${frame.hash}"`;
   const headers = { ETag: etag, "Cache-Control": "private, no-cache" };
-  if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
-  const png = await bitsToPng(Buffer.from(frame.bits));
-  return new Response(new Uint8Array(png), { headers: { ...headers, "Content-Type": "image/png" } });
+  if (matches(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
+  return Response.json(
+    {
+      hash: frame.hash,
+      drawnAt: frame.drawnAt.toISOString(),
+      width: 800,
+      height: 480,
+      bits: Buffer.from(frame.bits).toString("base64"),
+    },
+    { headers },
+  );
+}
+
+/** If-None-Match may list several tags, and a compressing proxy may have weakened ours. */
+function matches(header: string | null, etag: string): boolean {
+  return !!header && header.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag);
 }

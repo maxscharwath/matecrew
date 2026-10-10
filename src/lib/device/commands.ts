@@ -16,6 +16,8 @@ export const FRAME_BYTES = (800 * 480) / 8;
 
 export type ConsoleCommand =
   | { kind: "key"; side: "left" | "right" }
+  /** Both keys together: the terminal's about page. Stored as a KEY row, arg "both". */
+  | { kind: "both" }
   | { kind: "badge"; uid: string }
   | { kind: "sync"; app?: "mate" | "showcase" }
   | { kind: "tap"; x: number; y: number }
@@ -24,6 +26,7 @@ export type ConsoleCommand =
 
 const KIND_TO_ROW = {
   key: "KEY",
+  both: "KEY",
   badge: "BADGE",
   sync: "SYNC",
   tap: "KEY",
@@ -38,7 +41,9 @@ export function toRow(command: ConsoleCommand): {
   const arg =
     command.kind === "key"
       ? command.side
-      : command.kind === "badge"
+      : command.kind === "both"
+        ? "both"
+        : command.kind === "badge"
         ? command.uid
         : command.kind === "tap"
           ? `tap:${command.x}:${command.y}`
@@ -61,6 +66,7 @@ export function toWire(
           x: Number(tap[1]),
           y: Number(tap[2]),
         };
+      if (row.arg === "both") return { id: row.id, kind: "both" };
       return row.arg === "left" || row.arg === "right"
         ? { id: row.id, kind: "key", side: row.arg }
         : null;

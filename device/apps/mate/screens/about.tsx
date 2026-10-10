@@ -82,6 +82,8 @@ export function about() {
             [t("about.chip"), cond(device("chip.id", ""), concat(device("chip.model", ""), " · ", device("chip.id")), "--")],
             [t("about.battery"), battery],
             [t("about.uptime"), t("about.uptimeValue", { h: div(sub(minutes, mod(minutes, 60)), 60), m: mod(minutes, 60) })],
+            // Name and this boot's passkey: what a browser nearby pairs with.
+            [t("about.bluetooth"), device("bluetooth", "--")],
           ]}
         />
       </Main>

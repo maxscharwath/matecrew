@@ -1132,6 +1132,74 @@
     "knockShots": "{shots, plural, =0 {Plus de munitions} one {# tir restant} other {# tirs restants}}",
     "noFlip": "Posée, pas lancée — la canette doit faire au moins un flip"
   },
+  "deviceBluetooth": {
+    "title": "Bluetooth",
+    "subtitle": "Configure un terminal neuf ou pilote un terminal à portée, depuis ce navigateur.",
+    "open": "Bluetooth",
+    "back": "Terminaux",
+    "unsupported": "Ce navigateur ne parle pas Bluetooth. Utilise Chrome ou Edge sur Android, Windows, macOS ou ChromeOS. Sur iPhone, configure le terminal avec le QR affiché sur son écran.",
+    "connect": "Chercher un terminal",
+    "connecting": "Connexion…",
+    "disconnect": "Déconnecter",
+    "disconnected": "Terminal déconnecté.",
+    "pairingHint": "Au premier envoi, le navigateur demande un code : c'est celui affiché sur l'écran du terminal (BLE · 6 chiffres).",
+    "info": {
+      "firmware": "Firmware",
+      "hardwareId": "Identifiant",
+      "wifi": "Wi-Fi",
+      "site": "Site",
+      "linked": "Relié à un site",
+      "notLinked": "Pas encore relié",
+      "uptime": "Allumé depuis {minutes} min"
+    },
+    "setup": {
+      "title": "Configurer ce terminal",
+      "description": "Le Wi-Fi, l'adresse de ce site et l'autorisation partent en un seul envoi : le terminal redémarre, rejoint le réseau et se relie à ce bureau sans code à saisir.",
+      "network": "Réseau Wi-Fi",
+      "otherNetwork": "Autre réseau…",
+      "ssid": "Nom du réseau",
+      "password": "Mot de passe Wi-Fi",
+      "name": "Nom du terminal",
+      "defaultName": "Terminal",
+      "submit": "Configurer",
+      "sending": "Envoi au terminal…",
+      "waiting": "Le terminal redémarre et se relie au site…",
+      "linked": "Terminal relié. Ouvre sa page pour le régler.",
+      "openDevice": "Ouvrir le terminal",
+      "timeout": "Le terminal ne s'est pas relié dans les 10 minutes. Vérifie le Wi-Fi sur son écran.",
+      "alreadyLinked": "Ce terminal est déjà relié à un site : sa configuration se fait depuis sa page."
+    },
+    "control": {
+      "title": "Piloter et déboguer",
+      "description": "En direct par Bluetooth, sans passer par le site.",
+      "left": "Touche gauche",
+      "right": "Touche droite",
+      "both": "Les deux",
+      "badge": "UID du badge",
+      "sendBadge": "Badger",
+      "sync": "Synchroniser",
+      "restart": "Redémarrer",
+      "log": "Journal",
+      "logEmpty": "Les lignes du terminal s'affichent ici une fois appairé.",
+      "firmware": "Mettre à jour le firmware",
+      "firmwareHint": "Un fichier .bin du firmware ; le terminal vérifie l'image et redémarre dessus.",
+      "upload": "Envoyer",
+      "uploading": "Envoi {percent} %",
+      "updated": "Firmware envoyé : le terminal redémarre dessus."
+    },
+    "errors": {
+      "unsupported": "Bluetooth indisponible dans ce navigateur.",
+      "cancelled": "Annulé.",
+      "not-found": "Terminal introuvable.",
+      "disconnected": "Le terminal s'est déconnecté.",
+      "protocol": "Ce terminal a un firmware plus récent que ce site : mets le site à jour.",
+      "invalid": "Valeur refusée : {message}",
+      "refused": "Le terminal a refusé : {message}",
+      "timeout": "Le terminal ne répond pas.",
+      "transport": "Erreur Bluetooth : {message}",
+      "forbidden": "Seul un admin du bureau peut relier un terminal."
+    }
+  },
   "devices": {
     "keys": {
       "take": "Prendre",
@@ -1212,11 +1280,7 @@
       "customUid": "Badger l'UID {uid}",
       "noBadge": "Aucun badge ne correspond.",
       "invalidUid": "UID invalide : 8 à 20 chiffres hexadécimaux.",
-      "mirror": "Écran de l'appareil, {when}",
-      "preview": "Aperçu du site : l'appareil n'a pas encore envoyé son écran.",
       "offlineHint": "L'appareil ne répond pas en direct. Synchro, redémarrage et oubli du Wi-Fi partiront à sa prochaine connexion. Touches et badges expirent au bout d'une minute.",
-      "activity": "Activité",
-      "noActivity": "Aucune commande pour l'instant.",
       "status": {
         "waiting": "en attente",
         "delivered": "reçue",
@@ -1228,19 +1292,120 @@
         "badge": "Badge {uid}",
         "sync": "Synchro",
         "restart": "Redémarrage",
-        "forgetWifi": "Oubli du Wi-Fi"
+        "forgetWifi": "Oubli du Wi-Fi",
+        "tap": "Appui à l'écran en {x}, {y}",
+        "app": "Ouvrir {app}"
       },
       "shortcuts": "Clavier : ← et → pour les touches, B pour badger, S pour synchroniser.",
-      "details": "Appareil",
       "firmware": "Firmware",
       "battery": "Batterie",
       "signal": "Wi-Fi",
       "hardwareId": "Identifiant",
-      "more": "Plus d'actions",
       "waiting": "{count, plural, one {# commande en attente} other {# commandes en attente}}",
-      "noFrame": "L'appareil n'a pas encore envoyé son écran.",
       "application": "Application",
-      "tapScreen": "Cliquez sur un bouton affiché pour piloter l’appareil"
+      "tapScreen": "Cliquez sur un bouton affiché pour piloter l’appareil",
+      "sendFailed": "La commande n'a pas pu être envoyée.",
+      "tapHint": "Un clic sur l'écran y appuie.",
+      "tabs": {
+        "console": "Console",
+        "activity": "Activité",
+        "settings": "Réglages"
+      },
+      "strip": {
+        "link": "Liaison",
+        "linkLive": "Les commandes arrivent en une seconde",
+        "linkQueued": "Les commandes attendent sa prochaine connexion",
+        "lastSeen": "Dernier contact",
+        "firmwareReported": "Annoncé à sa dernière synchro",
+        "notReported": "Pas encore remonté",
+        "batteryLow": "faible",
+        "batteryImplausible": "Mesure non plausible",
+        "signal": {
+          "excellent": "Excellent",
+          "good": "Bon",
+          "fair": "Moyen",
+          "weak": "Faible"
+        },
+        "screen": "Écran",
+        "screenNone": "Pas reçu",
+        "screenLive": "Copié tant que la console est ouverte",
+        "screenLast": "Le dernier qu'il a envoyé",
+        "screenHint": "Envoyé dès que le terminal voit la console"
+      },
+      "monitor": {
+        "title": "Moniteur",
+        "count": "{count, plural, one {# ligne} other {# lignes}}",
+        "clear": "Effacer",
+        "empty": "Rien pour l'instant.",
+        "kind": {
+          "input": "entrée",
+          "system": "système",
+          "screen": "écran",
+          "link": "liaison",
+          "error": "erreur"
+        }
+      },
+      "log": {
+        "opened": "Console ouverte : tant qu'elle le reste, le terminal copie son écran ici et prend les commandes aussitôt.",
+        "pollBack": "De nouveau en contact avec le site.",
+        "pollFailed": "État indisponible ({error}).",
+        "reachable": "Le terminal répond en direct.",
+        "unreachable": "Le terminal ne répond plus : les commandes attendront sa prochaine connexion.",
+        "firmware": "Firmware {version}",
+        "firstFrame": "Écran reçu, dessiné {when}",
+        "refresh": "{passes, plural, one {Rafraîchissement partiel} other {# rafraîchissements partiels}} {width}×{height} en {x},{y} · {percent} % des pixels",
+        "frameFailed": "Impossible de charger l'écran ({error})."
+      },
+      "controls": {
+        "title": "Commandes",
+        "live": "Le terminal répond en direct : chaque commande lui parvient en une seconde.",
+        "keys": "Touches",
+        "left": "Gauche",
+        "right": "Droite",
+        "both": "Les deux",
+        "badge": "Badge",
+        "uid": "UID du badge",
+        "randomUid": "UID aléatoire",
+        "tap": "Badger",
+        "badgeHint": "8 à 20 chiffres hexadécimaux. Le lecteur sous l'écran (B) liste les badges du bureau.",
+        "terminal": "Terminal",
+        "openApp": "Ouvrir une app…"
+      },
+      "board": {
+        "subtitle": "Son câblage ; une broche s'allume quand la console l'actionne.",
+        "pad": "Broche",
+        "function": "Fonction",
+        "pins": {
+          "panelRst": "Écran RST",
+          "panelCs": "Écran CS",
+          "panelBusy": "Écran BUSY",
+          "panelDc": "Écran DC",
+          "keyLeft": "Touche gauche (TTP223)",
+          "buzzer": "Piézo et mesure de la batterie",
+          "nfcSda": "PN532 SDA (I2C 0x24)",
+          "nfcScl": "PN532 SCL",
+          "panelSck": "Écran SCK",
+          "keyRight": "Touche droite (TTP223)",
+          "panelMosi": "Écran MOSI"
+        }
+      },
+      "noScreen": {
+        "title": "En attente de l'écran du terminal",
+        "live": "Il l'envoie dès qu'il voit la console ouverte, en général en quelques secondes.",
+        "offline": "Le terminal est hors ligne : son écran s'affichera ici à sa reconnexion.",
+        "preview": "Aperçu avec les données du site",
+        "previewLoading": "Rendu de l'aperçu…"
+      },
+      "indicator": {
+        "busy": "{passes, plural, one {Rafraîchissement} other {Rafraîchissement ×#}}",
+        "preview": "Aperçu · données du site",
+        "hidePreview": "Masquer",
+        "mirror": "Miroir en direct · {when}",
+        "last": "Dernier écran · {when}"
+      },
+      "settingsHint": "Son nom sur le site, et l'article sur lequel s'ouvre le choix.",
+      "unlinkHint": "Le terminal perd son accès à sa prochaine connexion et affiche de nouveau un code de liaison. Ses prises restent.",
+      "takesHint": "Ce que le terminal a envoyé, du plus récent au plus ancien."
     },
     "virtual": {
       "open": "Terminal virtuel",

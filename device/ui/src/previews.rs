@@ -22,6 +22,7 @@ fn simulated_device() -> Value {
         "site":"matecrew.vercel.app",
         "device":{"id":"cmv1eex25001zieyucz0rillv","name":"Terminal Lausanne"},
         "chip":{"model":"ESP32-S3","id":"ACA704123456"},
+        "bluetooth":"matecrew-50E4 · 482913",
         "wifi":{"rssi":-55,"ssid":"OWT-Office","ip":"10.0.4.27","mac":"AC:A7:04:12:34:56"},
         "battery":{"millivolts":4004,"usb":false},
         "uptimeMinutes":134,
@@ -86,10 +87,10 @@ fn previews() -> Value {
     all.add("badge-serve", "Servi: the runner's badge", |d| badge_screen(d, "Servi"));
     all.add("served", "The site served the session", |d| served_screen(d, "Alex", 9));
     all.add("setup", "First start: join the setup Wi-Fi", |d| {
-        setup_screen(d, &SetupInfo { ap_ssid: "matecrew-setup-50E4", ap_password: "k7m2xq9pab", portal_url: "http://192.168.71.1" })
+        setup_screen(d, &SetupInfo { ap_ssid: "matecrew-setup-50E4", ap_password: "k7m2xq9pab", portal_url: "http://192.168.71.1", bluetooth: "matecrew-50E4 · 482913" })
     });
     all.add("link", "Waiting for an admin to approve the code", |d| {
-        link_screen(d, &LinkInfo { code: "QFH7-FXRT", url: "matecrew.vercel.app/link", url_with_code: "https://matecrew.vercel.app/link?code=QFH7-FXRT" })
+        link_screen(d, &LinkInfo { code: "QFH7-FXRT", url: "matecrew.vercel.app/link", url_with_code: "https://matecrew.vercel.app/link?code=QFH7-FXRT", bluetooth: "matecrew-50E4 · 482913" })
     });
     all.add("linked", "Approved", |d| linked_screen(d, "Lausanne", "Terminal Lausanne"));
     all.add("connecting", "Joining the office Wi-Fi", |d| connecting_screen(d, "OWT-Office"));

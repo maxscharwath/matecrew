@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BatteryLow, BatteryMedium, Cpu, Nfc, Plus } from "lucide-react";
+import { BatteryLow, BatteryMedium, Bluetooth, Cpu, Nfc, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { assignBadge } from "@/app/org/[officeId]/admin/devices/actions";
+import { FrameThumbnail } from "@/components/device-console/frame-canvas";
 
 const LOW_BATTERY_MV = 3500;
 
@@ -51,6 +52,7 @@ function batteryPercent(mv: number): number {
 
 export function DevicesManager({ officeId, linkUrl, members, badges, devices }: Props) {
   const t = useTranslations("devices");
+  const tBluetooth = useTranslations("deviceBluetooth");
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap gap-2">
@@ -58,6 +60,11 @@ export function DevicesManager({ officeId, linkUrl, members, badges, devices }: 
         <Button asChild variant="outline">
           <Link href={`/org/${officeId}/admin/devices/virtual`}>
             <Cpu /> {t("virtual.open")}
+          </Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href={`/org/${officeId}/admin/devices/bluetooth`}>
+            <Bluetooth /> {tBluetooth("open")}
           </Link>
         </Button>
       </div>
@@ -110,17 +117,8 @@ function DeviceTile({ officeId, device }: { officeId: string; device: DeviceRow 
       href={base}
       className="overflow-hidden rounded-xl border bg-card transition-colors outline-none hover:border-foreground/30 focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
-      <div className="aspect-[800/480] border-b bg-[#ECEAE3]">
-        {device.frameHash && (
-          // eslint-disable-next-line @next/next/no-img-element -- generated per request, not a static asset
-          <img
-            src={`${base}/frame?h=${device.frameHash}`}
-            alt=""
-            width={800}
-            height={480}
-            className="size-full mix-blend-multiply"
-          />
-        )}
+      <div className="aspect-[800/480] border-b bg-[#f4f2ec]">
+        {device.frameHash && <FrameThumbnail url={`${base}/frame?h=${device.frameHash}`} />}
       </div>
       <div className="flex items-center gap-3 px-4 py-3">
         <span className={cn("size-2 shrink-0 rounded-full", device.online ? "bg-emerald-500" : "bg-zinc-400")} />

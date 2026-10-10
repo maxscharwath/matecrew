@@ -1,0 +1,13 @@
+{
+  "name": "@matecrew/device-link",
+  "version": "0.1.0",
+  "description": "Set up, control, debug and update a device over Bluetooth LE (Web Bluetooth) or through a server, with one typed API",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": ["*.ts", "!*.test.ts", "README.md"],
+  "sideEffects": false,
+  "keywords": ["web-bluetooth", "ble", "esp32", "ota", "provisioning", "iot"]
+}

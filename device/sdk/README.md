@@ -185,9 +185,14 @@ from y = 424, the keys under x = 130 and 670, the badge reader under x = 400. Ra
 
 **Type**: `H1`–`H4`, `Lead`, `P`, `Large`, `Small`, `Muted`, `Footnote` (11 px), `Label` (spaced
 capitals), `Num` (Logisoso figures, `xs` to `2xl`; `lg` and up hold digits and `+ - . , : /` only).
+Words are OWT's faces, as on owt.swiss: Space Grotesk for the bold titles (`H1`–`H4`: bold
+`grotesk` from 20 px), Montserrat for the rest. Sizes keep the ladder (and line heights) of the
+Free Universal fonts they replaced.
 Text is the children. `lines` sets how many lines before an ellipsis; `fit` shrinks the text through
 its family's smaller sizes before it would ellipsize (on by default in `StatLabel` and `StatValue`).
-Fonts carry Latin-1: write `--` or `-` rather than `—`, `'` rather than `’`.
+`grotesk` text also carries `– — ‘ ’ “ ” … € • ‹ › − ← ↑ → ↓ ≤ ≥` and thin spaces; `Num` and the
+`flipper` and `macos` themes' fonts carry Latin-1 only: there, write `-` rather than `—`, `'` rather
+than `’`.
 
 **Components**: `Card` (+ `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`,
 `CardFooter`), `Surface` (`outline`, `hairline`, `sunken`, `tint`, `ink`, `paper`, `ghost`),

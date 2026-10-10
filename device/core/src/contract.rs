@@ -252,6 +252,8 @@ pub struct StatusReport<'a> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Command {
     Key { id: String, side: Side },
+    /// Both keys together: the about page.
+    Both { id: String },
     /// Already normalized by the site.
     Badge { id: String, uid: String },
     Sync { id: String, #[serde(default)] app: Option<BuiltinApp> },

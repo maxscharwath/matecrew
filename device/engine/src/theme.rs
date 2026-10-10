@@ -10,7 +10,7 @@ pub enum Theme {
     #[default]
     Flipper,
     Macos,
-    /// Native resolution: the grotesque, hairlines and soft radii.
+    /// Native resolution: OWT's faces (Montserrat, Space Grotesk), hairlines and soft radii.
     Paper,
     /// `paper` with ink and paper swapped.
     Dark,

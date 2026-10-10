@@ -80,23 +80,27 @@ pub enum Tone {
 }
 impl Tone {
     /// LEDC square wave at 50 % duty, as `(hz, ms)`. A zero frequency is a silent interval.
+    ///
+    /// Every note sits between 1.5 and 4.2 kHz: a passive piezo is loudest near its resonance
+    /// (2 to 4 kHz) and barely heard in the low register, and 50 % duty is already a square
+    /// wave's loudest.
     pub fn program(self) -> &'static [(u32, u64)] {
         match self {
-            Self::Key => &[(1319, 18), (1568, 12)],
-            // 8-bit "level cleared": C6 E6 G6 C7, a breath, then G6 C7 held.
-            Self::Success => &[(1047, 55), (1319, 55), (1568, 55), (2093, 90), (0, 40), (1568, 55), (2093, 170)],
-            // A chromatic fall, B4 to G#4, the last one held: the arcade "miss".
-            Self::Error => &[(494, 70), (0, 25), (466, 70), (0, 25), (440, 70), (0, 25), (415, 220)],
-            Self::Notification => &[(1568, 35), (0, 30), (1319, 35), (0, 30), (2093, 70)],
+            Self::Key => &[(2637, 18), (3136, 12)],
+            // 8-bit "level cleared": C7 E7 G7 C8, a breath, then G7 C8 held.
+            Self::Success => &[(2093, 55), (2637, 55), (3136, 55), (4186, 90), (0, 40), (3136, 55), (4186, 170)],
+            // A chromatic fall, B6 to G#6, the last one held: the arcade "miss".
+            Self::Error => &[(1976, 70), (0, 25), (1865, 70), (0, 25), (1760, 70), (0, 25), (1661, 220)],
+            Self::Notification => &[(3136, 35), (0, 30), (2637, 35), (0, 30), (4186, 70)],
             // C7 E7 G7 then C8, legato: a contactless "tiling", brighter and shorter than Success.
             Self::Badge => &[(2093, 26), (2637, 26), (3136, 26), (4186, 90)],
-            // Power-on: a fast run up two octaves from C4, a breath, then G6 and a held C7.
+            // Power-on: a fast run up from C6 to C8, a breath, then G7 and a held C8.
             Self::Boot => &[
-                (262, 35), (330, 35), (392, 35), (523, 35), (659, 35), (784, 35), (1047, 35),
-                (0, 60), (1568, 70), (2093, 160),
+                (1568, 35), (2093, 35), (2349, 35), (2637, 35), (3136, 35), (3520, 35), (4186, 35),
+                (0, 60), (3136, 70), (4186, 160),
             ],
-            // "Huh?": G5, a step down to E5, then up to B5, like a question.
-            Self::Unknown => &[(784, 80), (0, 40), (659, 60), (0, 30), (988, 160)],
+            // "Huh?": G7, a step down to E7, then up to B7, like a question.
+            Self::Unknown => &[(3136, 80), (0, 40), (2637, 60), (0, 30), (3951, 160)],
         }
     }
 }
@@ -155,6 +159,15 @@ impl Presses {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_tone_is_one_ledc_can_play() {
+        let tones = [Tone::Key, Tone::Success, Tone::Error, Tone::Notification, Tone::Badge, Tone::Boot, Tone::Unknown];
+        for tone in tones {
+            for &(hz, _) in tone.program() {
+                assert!(hz == 0 || (1_500..=4_200).contains(&hz), "{tone:?} plays {hz} Hz, out of the piezo's loud range");
+            }
+        }
+    }
     #[test]
     fn a_lone_key_waits_for_the_chord_window_and_both_keys_make_one_press() {
         let mut keys = Presses::default();

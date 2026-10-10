@@ -20,6 +20,8 @@ const BUS_TIMEOUT: Duration = Duration::from_millis(50);
 
 pub struct Nfc {
     i2c: I2cDriver<'static>,
+    /// The PN532's firmware, "1.6", for the boot log.
+    version: String,
 }
 
 /// Why no PN532 answered, in the log: the idle level of D6 and D7 (a powered module pulls both
@@ -96,15 +98,21 @@ impl Nfc {
     /// Fails when no PN532 answers, so the terminal can run without one.
     pub fn new(i2c: I2C0<'static>, sda: Gpio43<'static>, scl: Gpio44<'static>) -> Result<Self> {
         let i2c = I2cDriver::new(i2c, sda, scl, &Config::new().baudrate(100.kHz().into()))?;
-        let mut nfc = Self { i2c };
+        let mut nfc = Self { i2c, version: String::new() };
         // The first transfer only wakes it up.
         let _ = nfc.i2c.write(ADDRESS, &[0x00], TickType::from(BUS_TIMEOUT).ticks());
         thread::sleep(Duration::from_millis(5));
         let version = nfc.command(pn532::GET_FIRMWARE_VERSION, &[], Duration::from_millis(500))?;
-        log::info!("PN532 firmware {}.{}", version.get(1).unwrap_or(&0), version.get(2).unwrap_or(&0));
+        nfc.version = format!("{}.{}", version.get(1).unwrap_or(&0), version.get(2).unwrap_or(&0));
+        log::info!("PN532 firmware {}", nfc.version);
         nfc.command(pn532::SAM_CONFIGURATION, &pn532::SAM_NORMAL, Duration::from_millis(500))?;
         nfc.command(pn532::RF_CONFIGURATION, &pn532::FEW_RETRIES, Duration::from_millis(500))?;
         Ok(nfc)
+    }
+
+    /// The PN532's firmware version, "1.6".
+    pub fn version(&self) -> &str {
+        &self.version
     }
 
     /// UID of the badge on the reader, in uppercase hex, or `None` if there is none.

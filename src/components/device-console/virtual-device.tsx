@@ -23,6 +23,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -398,9 +399,12 @@ function LinkCard({
   const t = useTranslations("devices.virtual");
   const [pending, setPending] = useState(false);
   return (
-    <Card className="gap-3 border-amber-500/40 py-4">
+    <Card className="gap-3 py-4">
       <CardHeader className="px-4">
-        <CardTitle className="text-sm">{t("linkTitle")}</CardTitle>
+        <CardTitle className="flex items-center justify-between gap-2 text-sm">
+          {t("linkTitle")}
+          <Badge variant="secondary">{t("phase.linking")}</Badge>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 px-4">
         <div className="font-mono text-2xl font-semibold tracking-widest">

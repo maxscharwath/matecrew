@@ -67,7 +67,10 @@ export const deviceScreen = z.object({
       low: z.boolean(),
       /** 24 x 24, packed 1-bit, base64. */
       image: z.string(),
-      /** 96 x 96 as drawn, packed 1-bit, base64; firmware that predates it ignores it. */
+      /**
+       * 96 x 96 as drawn, packed 1-bit, then its opacity plane (2 x 1152 bytes), base64:
+       * ink black, opaque paper white, the rest transparent. Older firmware ignores it.
+       */
       picture: z.string().optional(),
     }),
   ),
@@ -186,6 +189,8 @@ export const statusRequest = z.object({
  */
 export const deviceCommand = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  /** Both keys together; firmware that predates it ignores it. */
+  z.object({ id: z.string(), kind: z.literal("both") }),
   z.object({ id: z.string(), kind: z.literal("badge"), uid: z.string() }),
   z.object({ id: z.string(), kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),
   z.object({ id: z.string(), kind: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),

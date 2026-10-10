@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
-import { itemImage, smallImage } from "@/lib/device/bitmap";
+import { itemImage, smallImage, withOpacity } from "@/lib/device/bitmap";
 import { buildCostingLedger } from "@/lib/costing";
 import { formatMoney, roundCents } from "@/lib/money";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
@@ -190,7 +190,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       ordered.map(async (i) => {
         const drawn = await itemImage(i.imageKey, i.terminalImage);
         // `image` for firmware that predates 96 x 96 pictures; `picture` as drawn.
-        return { id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(drawn).bits), picture: base64(drawn.bits) };
+        return { id: i.id, name: i.name, stock: i.qty, image: base64(smallImage(drawn).bits), picture: base64(withOpacity(drawn)) };
       }),
     ),
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
@@ -309,7 +309,7 @@ export async function buildScreenData(
           low: i.qty <= thresholds[index],
           // 24 x 24 for firmware that predates `picture`, 96 x 96 as drawn.
           image: base64(smallImage(drawn).bits),
-          picture: base64(drawn.bits),
+          picture: base64(withOpacity(drawn)),
         };
       }),
     ),
@@ -332,7 +332,7 @@ export async function buildScreenData(
             count: i.names.length,
             names: i.names.join(", "),
             image: base64(smallImage(drawn).bits),
-            picture: base64(drawn.bits),
+            picture: base64(withOpacity(drawn)),
           };
         }),
       ),

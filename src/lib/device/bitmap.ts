@@ -187,6 +187,49 @@ export function smallImage(b: Bitmap): Bitmap {
   return shrink(b, ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
 }
 
+/**
+ * The picture followed by its opacity plane, the three colours the terminal draws: ink black,
+ * paper white where it belongs to the object, transparent around it. The surroundings are the
+ * paper reachable from the edges without crossing ink, so the white body of a can stays white
+ * on the grey disc behind it and the space around the can shows the disc.
+ */
+export function withOpacity(b: Bitmap): Uint8Array {
+  const { width, height, bits } = b;
+  const ink = (i: number) => (bits[i >> 3] & (0x80 >> (i & 7))) !== 0;
+  const outside = new Uint8Array(width * height);
+  const stack: number[] = [];
+  const reach = (x: number, y: number) => {
+    const i = y * width + x;
+    if (!outside[i] && !ink(i)) {
+      outside[i] = 1;
+      stack.push(i);
+    }
+  };
+  for (let x = 0; x < width; x++) {
+    reach(x, 0);
+    reach(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    reach(0, y);
+    reach(width - 1, y);
+  }
+  while (stack.length) {
+    const i = stack.pop()!;
+    const x = i % width;
+    const y = (i - x) / width;
+    if (x > 0) reach(x - 1, y);
+    if (x < width - 1) reach(x + 1, y);
+    if (y > 0) reach(x, y - 1);
+    if (y < height - 1) reach(x, y + 1);
+  }
+  const planes = new Uint8Array(bits.length * 2);
+  planes.set(bits);
+  for (let i = 0; i < width * height; i++) {
+    if (!outside[i]) planes[bits.length + (i >> 3)] |= 0x80 >> (i & 7);
+  }
+  return planes;
+}
+
 export async function itemImage(
   imageKey: string | null,
   terminalImage?: Uint8Array | null,

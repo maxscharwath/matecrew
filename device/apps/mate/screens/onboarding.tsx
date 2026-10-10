@@ -8,6 +8,7 @@ import {
   HStack,
   VStack,
   Spacer,
+  Show,
   QrCode,
   Steps,
   Surface,
@@ -16,6 +17,7 @@ import {
   Lead,
   Num,
   Muted,
+  Footnote,
   Empty,
   EmptyMedia,
   EmptyTitle,
@@ -24,7 +26,7 @@ import {
   AlertDescription,
   type Children,
 } from "@matecrew/device-ui";
-import { CircleCheckBigIcon, IdCardIcon, InfoIcon, TriangleAlertIcon, WifiIcon } from "@matecrew/device-ui/icons/lucide";
+import { BluetoothIcon, CircleCheckBigIcon, IdCardIcon, InfoIcon, TriangleAlertIcon, WifiIcon } from "@matecrew/device-ui/icons/lucide";
 import { Facts, Frame, Instruction, useT, view } from "./shared";
 
 function Onboarding({ step, children }: { step: number; children?: Children }) {
@@ -36,13 +38,28 @@ function Onboarding({ step, children }: { step: number; children?: Children }) {
   );
 }
 
+/** Or from a browser nearby, over Bluetooth: the name to pick and the passkey it asks for. */
+function Bluetooth() {
+  return (
+    <Show when={view("bluetooth", "")}>
+      <HStack gap={6} align="center">
+        <BluetoothIcon size={16} />
+        <Footnote>{view("bluetooth", "")}</Footnote>
+      </HStack>
+    </Show>
+  );
+}
+
 /** Step 1: the phone joins the terminal's own Wi-Fi and opens its settings page. */
 export function setup() {
   const t = useT();
   return (
     <Onboarding step={0}>
       <HStack gap={32} align="start" height="fill">
-        <QrCode value={view("qr")} size={280}>{t("setup.noCamera", { url: view("portal") })}</QrCode>
+        <VStack gap={10} align="center">
+          <QrCode value={view("qr")} size={280}>{t("setup.noCamera", { url: view("portal") })}</QrCode>
+          <Bluetooth />
+        </VStack>
         <VStack gap={14} width="fill" height="fill">
           <Label>{t("setup.step")}</Label>
           <H2>{t("setup.heading")}</H2>
@@ -97,7 +114,10 @@ export function link() {
   return (
     <Onboarding step={1}>
       <HStack gap={32} align="start" height="fill">
-        <QrCode value={view("qr")} size={280}>{t("link.scan")}</QrCode>
+        <VStack gap={10} align="center">
+          <QrCode value={view("qr")} size={280}>{t("link.scan")}</QrCode>
+          <Bluetooth />
+        </VStack>
         <VStack gap={14} width="fill" height="fill">
           <Label>{t("link.step")}</Label>
           <H2>{t("link.heading")}</H2>

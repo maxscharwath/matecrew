@@ -21,6 +21,7 @@ fn main() {
         ap_ssid: "matecrew-setup-50E4",
         ap_password: "k7m2xq9pab",
         portal_url: "http://192.168.71.1",
+        bluetooth: "matecrew-50E4 · 482913",
     };
 
     let mut dashboard =
@@ -122,6 +123,7 @@ fn main() {
                 code: "QFH7-FXRT",
                 url: "matecrew.vercel.app/link",
                 url_with_code: "https://matecrew.vercel.app/link?code=QFH7-FXRT",
+                bluetooth: "matecrew-50E4 · 482913",
             },
         )
     });

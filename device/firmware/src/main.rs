@@ -3,6 +3,7 @@
 //! draw every screen locally from the site’s data.
 
 mod api;
+mod ble;
 mod buzzer;
 mod cores;
 mod fetch;
@@ -10,6 +11,7 @@ mod console;
 mod display;
 mod epd;
 mod keys;
+mod net;
 mod nfc;
 mod ota;
 mod portal;
@@ -84,6 +86,8 @@ pub enum Input {
     BadgeSeen(String),
     /// A touch key, already beeped by the keys thread the moment it was touched.
     Pressed(Event),
+    /// A transfer with the site started or ended: the status bar's arrows may change.
+    Net,
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -108,7 +112,8 @@ fn main() {
 
 fn app() -> Result<()> {
     esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
+    // The log goes to the serial port and to a browser paired over Bluetooth.
+    ble::init_logging();
     log::info!("matecrew device {FIRMWARE_VERSION}");
 
     let p = Peripherals::take()?;
@@ -131,7 +136,17 @@ fn app() -> Result<()> {
     })?;
 
     let (sender, inputs) = mpsc::channel();
-    screen.show(|d| ui::boot::render(d, 0))?;
+    net::watch(sender.clone());
+    // The start, live: each step on the boot screen as it goes (`ui::boot::BootLog`).
+    let mut boot = ui::boot::BootLog::new(6);
+    // Words come from the boot screen's catalog, in the office's language (cached state).
+    if let Ok(Some(state)) = store.state() {
+        ui::set_locale(&state.office.locale);
+    }
+    boot.start("screen", &[]);
+    boot.done("screenReady", &[]);
+    boot.start("reader", &[]);
+    screen.show(|d| boot.render(d))?;
     if let Err(e) = console::watch(sender.clone()) {
         log::warn!("no serial console commands: {e:#}");
     }
@@ -175,22 +190,30 @@ fn app() -> Result<()> {
             None
         }
     };
+    match &nfc {
+        Some(nfc) => boot.done("readerReady", &[("version", nfc.version())]),
+        None => boot.fail("readerMissing", &[]),
+    }
 
     let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(p.modem, sys_loop.clone(), Some(nvs))?,
+        EspWifi::new(p.modem, sys_loop.clone(), Some(nvs.clone()))?,
         sys_loop,
     )?;
+    // Bluetooth LE: setup, control and updates from a browser nearby.
+    let ble = start_ble(&wifi, Store::new(nvs)?, sender.clone());
+    let bluetooth = ble.as_ref().map(ble::Ble::label).unwrap_or_default();
     let site = store
         .site()?
         .unwrap_or_else(|| api::DEFAULT_SITE.to_owned());
     log::info!("site {site}");
     let Some(creds) = store.wifi()? else {
-        setup_wifi(&mut wifi, &mut screen, &store, &site)?;
+        setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth)?;
         reset::restart();
     };
 
     let linked = store.token()?.is_some();
-    screen.show(|d| ui::boot::render(d, 1))?;
+    boot.start("wifiJoining", &[("ssid", &creds.ssid)]);
+    screen.show(|d| boot.render(d))?;
     if !linked {
         // Setting up: say what happens at each step.
         screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
@@ -199,6 +222,7 @@ fn app() -> Result<()> {
         if linked {
             // A paired terminal must still boot and accept badges using cached state.
             log::warn!("Wi-Fi unavailable, starting from cached state: {e:#}");
+            boot.fail("wifiOffline", &[]);
         } else {
             let failures = store.wifi_failures()?.saturating_add(1);
             log::warn!(
@@ -222,11 +246,16 @@ fn app() -> Result<()> {
         }
     } else {
         store.set_wifi_failures(0)?;
+        match wifi::rssi() {
+            Some(rssi) => boot.done("wifiJoined", &[("ssid", &creds.ssid), ("rssi", &rssi.to_string())]),
+            None => boot.done("wifiJoinedQuiet", &[("ssid", &creds.ssid)]),
+        }
     }
     // The clock from the internet (NTP, every hour), whether the site answers or not: the status
     // bar and the takes' times are right after a restart. A sync with the site sets it too.
     let sntp = cores::on(Core::Core0, || {
         EspSntp::new_with_callback(&SntpConf::default(), |since_epoch| {
+            net::pulse(false);
             log::info!("clock set by NTP: {} s since 1970", since_epoch.as_secs())
         })
     })
@@ -239,11 +268,14 @@ fn app() -> Result<()> {
 
     let token = match store.token()? {
         Some(token) => token,
-        None => link(&wifi, &mut screen, &store, &site)?,
+        None => link(&wifi, &mut screen, &store, &site, &bluetooth)?,
     };
 
     let claim_key = claim::key(&token);
-    screen.show(|d| ui::boot::render(d, 2))?;
+    boot.start("site", &[]);
+    boot.done("siteReady", &[("host", api::host(&site))]);
+    boot.start("apps", &[]);
+    screen.show(|d| boot.render(d))?;
     let api = Api::with_token(&site, token);
     let mirror = cores::on(Core::Core0, || remote::Mirror::start(api.clone()))?;
     cores::on(Core::Core0, || remote::poll_commands(api.clone(), sender.clone(), mirror.clone()))?;
@@ -275,15 +307,21 @@ fn app() -> Result<()> {
             app.update("showcase", serde_json::to_value(state)?);
         }
     }
-    screen.show(|d| ui::boot::render(d, 3))?;
+    boot.done(if app.is_some() { "appsLoaded" } else { "mateLoaded" }, &[]);
+    boot.start("ready", &[]);
+    boot.done("allReady", &[]);
+    screen.show(|d| boot.render(d))?;
     Terminal {
         site: site.clone(),
         claim_key,
         mirror,
         fetcher: cores::on(Core::Core0, || fetch::Fetcher::start(api.clone(), sender.clone()))?,
         _sntp: sntp,
+        _ble: ble,
+        bluetooth,
         badge_on_reader: None,
         pressed: false,
+        net_drawn: (false, false),
         pending: VecDeque::new(),
         dirty: false,
         api,
@@ -320,10 +358,63 @@ fn chip_id() -> Option<String> {
     ok.then(|| mac.iter().map(|b| format!("{b:02X}")).collect())
 }
 
+/// Starts the Bluetooth link, named after the end of the Wi-Fi MAC like the setup access point.
+/// The terminal works without it.
+fn start_ble(wifi: &Wifi, store: Store, inputs: Sender<Input>) -> Option<ble::Ble> {
+    let started = (|| -> Result<ble::Ble> {
+        let hardware_id = wifi::hardware_id(wifi)?;
+        let suffix: String = hardware_id.split(':').skip(4).collect();
+        let identity = ble::Identity {
+            name: format!("matecrew-{suffix}"),
+            hardware_id,
+            firmware: matecrew_core::link::Firmware {
+                version: FIRMWARE_VERSION.into(),
+                build: FIRMWARE_BUILD.into(),
+                commit: FIRMWARE_COMMIT.into(),
+                slot: ota::running_slot(),
+            },
+        };
+        // Its host task and notifier with the Wi-Fi on core 0.
+        cores::on(Core::Core0, || ble::start(store, inputs, identity))
+    })();
+    started.inspect_err(|e| log::warn!("no Bluetooth: {e:#}")).ok()
+}
+
+/// Polls with the link secret that came over Bluetooth until the site hands the token over, for
+/// as long as such a link lives (10 minutes). `None` when the site refuses it: a code is shown.
+fn link_with_secret(api: &Api, store: &Store, screen: &mut Panel, secret: &str) -> Result<Option<String>> {
+    log::info!("linking with the secret that came over Bluetooth");
+    let deadline = Instant::now() + Duration::from_secs(10 * 60);
+    let mut interval = 0;
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_secs(interval));
+        interval = interval.max(5);
+        match api.link_poll(secret) {
+            Ok(LinkPoll::Granted(granted)) => {
+                store.set_link_secret(None)?;
+                store.set_token(&granted.access_token)?;
+                log::info!("linked to {} as {}", granted.office_name, granted.device_name);
+                screen.show(|d| ui::linked_screen(d, &granted.office_name, &granted.device_name))?;
+                thread::sleep(Duration::from_secs(5));
+                return Ok(Some(granted.access_token));
+            }
+            Ok(LinkPoll::Pending) => {}
+            Ok(LinkPoll::SlowDown) => interval += 5,
+            Ok(LinkPoll::Restart) => break,
+            Err(e) => log::warn!("link poll failed: {e:#}"),
+        }
+    }
+    store.set_link_secret(None)?;
+    log::warn!("the Bluetooth link secret was refused or expired: showing a code instead");
+    Ok(None)
+}
+
 /// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
-fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<()> {
+/// A browser can send it over Bluetooth meanwhile (`ble.rs` saves it and restarts).
+fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str, bluetooth: &str) -> Result<()> {
     let ap = wifi::start_setup_access_point(wifi)?;
     log::info!("setup access point {} at {}", ap.ssid, ap.ip);
+    ble::set_networks(ap.networks.clone());
     let portal_url = format!("http://{}", ap.ip);
     screen.show(|d| {
         ui::setup_screen(
@@ -332,6 +423,7 @@ fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str) ->
                 ap_ssid: &ap.ssid,
                 ap_password: &ap.password,
                 portal_url: &portal_url,
+                bluetooth,
             },
         )
     })?;
@@ -350,10 +442,16 @@ fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str) ->
     Ok(())
 }
 
-/// Shows a code until an office admin approves it on the site, then keeps the token.
-fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<String> {
+/// Shows a code until an office admin approves it on the site, then keeps the token. A link the
+/// site approved ahead (its secret came over Bluetooth with the Wi-Fi) needs no code.
+fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str, bluetooth: &str) -> Result<String> {
     let hardware_id = wifi::hardware_id(wifi)?;
     let api = Api::anonymous(site);
+    if let Some(secret) = store.link_secret()? {
+        if let Some(token) = link_with_secret(&api, store, screen, &secret)? {
+            return Ok(token);
+        }
+    }
     let mut failures = 0;
     loop {
         let start = match api.link_start(&hardware_id) {
@@ -396,6 +494,7 @@ fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str) -> Result<St
                     code: &start.user_code,
                     url: short_url,
                     url_with_code: &start.verification_uri_complete,
+                    bluetooth,
                 },
             )
         })?;
@@ -452,11 +551,17 @@ struct Terminal {
     _sender: Sender<Input>,
     /// Keeps the NTP clock running.
     _sntp: Option<EspSntp<'static>>,
+    /// The Bluetooth link, kept for the life of the terminal.
+    _ble: Option<ble::Ble>,
+    /// Its name and this boot's passkey, for the about page.
+    bluetooth: String,
     fetcher: fetch::Fetcher,
     /// The badge on the reader while idle, toasted once until it is taken away.
     badge_on_reader: Option<String>,
     /// A key press being handled already beeped: the key beep its screen asks for is that one.
     pressed: bool,
+    /// The network arrows (up, down) the last drawn screen shows.
+    net_drawn: (bool, bool),
     /// Inputs taken off the channel early, to see whether more are waiting.
     pending: VecDeque<Input>,
     /// A screen was skipped because more inputs were waiting: drawn once they are handled.
@@ -526,6 +631,11 @@ impl Terminal {
                     self.pending_app = Some(mode);
                 }
                 Next::Input(Input::Fetched(fetched)) => self.fetched(fetched)?,
+                Next::Input(Input::Net) => {
+                    if net::shown() != self.net_drawn {
+                        self.redraw_current()?;
+                    }
+                }
                 Next::Input(Input::BadgeSeen(uid)) => {
                     touched = Instant::now();
                     self.badge_seen(&uid)?
@@ -602,6 +712,9 @@ impl Terminal {
                 self.redraw_current()?;
                 continue;
             }
+            if net::shown() != self.net_drawn {
+                return Ok(Next::Input(Input::Net));
+            }
             let mut deadline = self
                 .flow
                 .deadline()
@@ -636,6 +749,8 @@ impl Terminal {
             } else {
                 deadline - now
             };
+            // Wake when the network arrows go out (the top of this loop redraws them).
+            let wait = net::hide_at().map_or(wait, |at| wait.min(at.saturating_duration_since(now) + Duration::from_millis(20)));
             match self.inputs.recv_timeout(wait) {
                 Ok(input) => return Ok(Next::Input(input)),
                 Err(RecvTimeoutError::Timeout) => {}
@@ -952,6 +1067,8 @@ impl Terminal {
     /// `$device` for the screens: board, firmware, network, battery and clock, read now.
     fn device_info(&mut self) -> serde_json::Value {
         log_heap();
+        // The arrows this screen shows: the loop redraws when they no longer match.
+        self.net_drawn = net::shown();
         if !self.offline {
             self.rssi = wifi::rssi().or(self.rssi);
         }
@@ -980,6 +1097,7 @@ impl Terminal {
             "site":site,
             "device":self.state.as_ref().map(|state| serde_json::json!({"id":state.device.id,"name":state.device.name})),
             "chip":{"model":"ESP32-S3","id":chip_id()},
+            "bluetooth":self.bluetooth,
             "wifi":{
                 "rssi":if self.offline { None } else { self.rssi },
                 "ssid":self.ssid,
@@ -987,6 +1105,7 @@ impl Terminal {
                 "mac":wifi::hardware_id(&self.wifi).ok()
             },
             "battery":self.supply.read(self.buzzer.quiet()).json(),
+            "net":{"up":self.net_drawn.0,"down":self.net_drawn.1},
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
             "clock":ui::device_info::clock(self.state.as_ref(), now())
         }))
@@ -1015,6 +1134,8 @@ impl Terminal {
     fn redraw_current(&mut self) -> Result<()> {
         if !self.flow.is_idle() {
             if let Some(screen) = self.last_flow_screen.clone() {
+                // The status bar as it is now: clock, battery, network arrows.
+                self.device_info();
                 return self.show(|d| ui::flow_screen(d, &screen));
             }
         }
@@ -1050,7 +1171,13 @@ impl Terminal {
 
     /// Syncs and says whether it worked. A device the site no longer knows links again.
     fn sync(&mut self, redraw: bool) -> bool {
-        match self.try_sync(redraw) {
+        // A sync holds this loop, so the arrows are drawn before it starts (the panel refreshes
+        // meanwhile); they go out a few seconds after (`net`).
+        let shown = net::transfer(true);
+        let _ = self.redraw_current();
+        let synced = self.try_sync(redraw);
+        drop(shown);
+        match synced {
             Ok(()) => {
                 if !self.confirmed {
                     if let Err(e) = ota::confirm(&self.store) {

@@ -59,17 +59,17 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
   assert.equal(settle(poll), 2);
   assert.equal(settle(poll), 0);
   assert.deepEqual(wasm.buzzerPattern("key"), [
-    [1319, 18],
-    [1568, 12],
+    [2637, 18],
+    [3136, 12],
   ]);
   assert.deepEqual(wasm.buzzerPattern("accepted"), [
-    [1047, 55],
-    [1319, 55],
-    [1568, 55],
-    [2093, 90],
+    [2093, 55],
+    [2637, 55],
+    [3136, 55],
+    [4186, 90],
     [0, 40],
-    [1568, 55],
-    [2093, 170],
+    [3136, 55],
+    [4186, 170],
   ]);
   assert.deepEqual(wasm.buzzerPattern("badge"), [
     [2093, 26],
@@ -78,15 +78,15 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
     [4186, 90],
   ]);
   assert.deepEqual(wasm.buzzerPattern("error"), [
-    [494, 70],
+    [1976, 70],
     [0, 25],
-    [466, 70],
+    [1865, 70],
     [0, 25],
-    [440, 70],
+    [1760, 70],
     [0, 25],
-    [415, 220],
+    [1661, 220],
   ]);
-  assert.equal(wasm.buzzerPattern("unknown").at(-1)?.[0], 988);
+  assert.equal(wasm.buzzerPattern("unknown").at(-1)?.[0], 3951);
   assert.equal(wasm.buzzerPattern("boot").length, 10);
 });
 

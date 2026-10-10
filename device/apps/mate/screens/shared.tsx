@@ -80,7 +80,11 @@ export function Instruction({ n, children }: { n: number; children?: TextChildre
   );
 }
 
-/** Labelled values on a sunken band, one per line; `dense` fits twice as many (17 px values). */
+/**
+ * Labelled values on a sunken band, one per line; `dense` fits twice as many (17 px values).
+ * A value too long for its line takes a smaller size rather than losing its end: a network
+ * name or an id is read, not skimmed.
+ */
 export function Facts({ rows, dense = false, ...layout }: LayoutProps & { rows: [TextChildren, TextChildren][]; dense?: boolean }) {
   return (
     <Surface variant="sunken" gap={dense ? 4 : 10} padding={dense ? [12, 20] : [16, 20]} width="fill" {...layout}>
@@ -90,9 +94,9 @@ export function Facts({ rows, dense = false, ...layout }: LayoutProps & { rows: 
             <Label>{label}</Label>
           </VStack>
           {dense ? (
-            <Styled style="strong" lines={1} width="fill">{value}</Styled>
+            <Styled style="strong" lines={1} fit width="fill">{value}</Styled>
           ) : (
-            <Large lines={1} width="fill">{value}</Large>
+            <Large lines={1} fit width="fill">{value}</Large>
           )}
         </HStack>
       ))}

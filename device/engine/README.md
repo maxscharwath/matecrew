@@ -22,7 +22,7 @@ The current 21 maté screens occupy roughly 16 KiB compressed. The nine-page Sho
 
 DUI1 uses numeric node/action opcodes, a shared UTF-8 string table, fixed-width geometry, typed literals (including packed bytes), bindings and resource descriptors. The decoder validates all lengths, enum values, route/action references and limits. Unknown opcodes are rejected. New image/chart/router/input/beep/docked-button features require the matching engine/firmware build; an older DUI1 engine cannot execute newly introduced opcodes.
 
-The native kit added: 22 text with letter spacing, 23 button with a variant (`ghost`: hit area only), 24 styled QR (module style, error correction, quiet zone, centre logo), 25 plot with weight and dithered fill, 26 image drawn in paper, 27 packed sprite (raw rows instead of one value per byte), 28 group with a flex layout, 29 panel with style and layout. Typography families 4 (grotesk, Free Universal 11–49) and 5 (numeric, Logisoso 20–92) and the `paper` theme need this engine too. A scene holds up to 512 nodes.
+The native kit added: 22 text with letter spacing, 23 button with a variant (`ghost`: hit area only), 24 styled QR (module style, error correction, quiet zone, centre logo), 25 plot with weight and dithered fill, 26 image drawn in paper, 27 packed sprite (raw rows instead of one value per byte), 28 group with a flex layout, 29 panel with style and layout. Typography families 4 (grotesk, 11–49: Montserrat, and Space Grotesk for bold from 20) and 5 (numeric, Logisoso 20–92) and the `paper` theme need this engine too. A scene holds up to 512 nodes.
 
 Later additions, all in this engine:
 
@@ -36,6 +36,17 @@ Later additions, all in this engine:
 - **DUIZ**: `"DUIZ"`, the DUI1 size (u32 LE), then a raw DEFLATE stream; `from_bytecode` inflates it (miniz_oxide) and checks the size.
 
 Optional image support currently decodes non-interlaced PNG rows through the [png decoder](https://docs.rs/png/0.18.1/png/struct.Decoder.html), avoiding a complete RGBA framebuffer. Max source 512 × 512, download 64 KiB, destination 256 × 256, eight cache entries / 16 KiB packed pixels. Transparent pixels composite onto white. The platform adapter owns HTTPS and credentials.
+
+## Fonts
+
+The `paper` and `dark` themes write in OWT's faces, as on owt.swiss: Montserrat for text, Space Grotesk for
+bold titles (`grotesk` bold from 20 px), both under the SIL Open Font License (`src/fonts/OFL-*.txt`).
+`src/fonts/*.u8g2font` are bitmap fonts in the `u8g2-fonts` format, drawn from the variable fonts in
+`../tools/fonts/` by `bun device/tools/fonts/build.ts` (`--sheet` also draws every size to
+`device/out/fonts.png`): printable ASCII, Latin-1, French punctuation, thin spaces and arrows, one bit per
+pixel with a light grid fit. Each size keeps the line box of the Free Universal font it replaced, so layouts
+keep their rhythm; Montserrat's weights (500, 650) and capital height (94 % of the size) keep the old stroke
+widths and x-height. Logisoso (figures) and the `flipper` and `macos` fonts come from the crate.
 
 ## Validate and measure
 

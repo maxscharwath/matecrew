@@ -161,6 +161,22 @@ impl Store {
         self.set("token", token)
     }
 
+    /// A link the site approved before the terminal asked (its device code, sent over Bluetooth
+    /// with the Wi-Fi): the next link polls with it instead of showing a code.
+    pub fn link_secret(&self) -> Result<Option<String>> {
+        self.get("link_secret")
+    }
+
+    pub fn set_link_secret(&self, secret: Option<&str>) -> Result<()> {
+        match secret {
+            Some(secret) => self.set("link_secret", secret),
+            None => {
+                self.0.remove("link_secret")?;
+                Ok(())
+            }
+        }
+    }
+
     /// Forgets the token and everything that came with it: the device links again.
     pub fn clear_token(&self) -> Result<()> {
         for key in ["token", "etag", "state", "queue"] {

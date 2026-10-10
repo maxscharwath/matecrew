@@ -1,19 +1,32 @@
 import { definePreviews } from "@matecrew/device-ui/preview";
 
-const stages = ["Réveil du système", "Connexion au réseau", "Chargement des apps", "Tout est prêt"];
-const progress = [12, 38, 72, 100];
+/** The log at each stage of a start, as `ui::boot::BootLog` sends it: keys and parameters. */
+const done = (key: string, params: Record<string, string> = {}) => ({ key, params, state: "done" });
+const run = (key: string, params: Record<string, string> = {}) => ({ key, params, state: "run" });
+const logs = [
+  [done("screenReady"), run("reader")],
+  [done("screenReady"), done("readerReady", { version: "1.6" }), run("wifiJoining", { ssid: "Office" })],
+  [done("screenReady"), done("readerReady", { version: "1.6" }), done("wifiJoined", { ssid: "Office", rssi: "-62" }), done("siteReady", { host: "matecrew.vercel.app" }), run("apps")],
+  [done("readerReady", { version: "1.6" }), done("wifiJoined", { ssid: "Office", rssi: "-62" }), done("siteReady", { host: "matecrew.vercel.app" }), done("mateLoaded"), done("allReady")],
+];
+const offline = [done("screenReady"), done("readerReady", { version: "1.6" }), { key: "wifiOffline", params: {}, state: "fail" }, done("siteReady", { host: "matecrew.vercel.app" }), run("apps")];
 
-/** Boot stages as `ui::boot` drives them, and the notification layer with a toast. */
+/** Boot logs as `ui::boot` drives them, and the notification layer with a toast. */
 export const previews = definePreviews({
   ...Object.fromEntries(
-    stages.map((stage, i) => [
-      `boot-${i}`,
-      {
-        screen: "boot",
-        data: { boot: { title: "matécrew", progress: progress[i], stage, step: `0${i + 1} / 04` } },
-      },
-    ]),
+    logs.map((lines, i) => {
+      const finished = lines.filter((l) => l.state !== "run").length + (i === 3 ? 1 : 0);
+      return [
+        `boot-${i}`,
+        { screen: "boot", data: { boot: { title: "matécrew", progress: Math.round((finished * 100) / 6), lines, step: `0${finished} / 06` } } },
+      ];
+    }),
   ),
+  "boot-offline": {
+    screen: "boot",
+    description: "A start without Wi-Fi",
+    data: { boot: { title: "matécrew", progress: 66, lines: offline, step: "04 / 06" } },
+  },
   notification: {
     screen: "notification",
     description: "System toast over any screen",

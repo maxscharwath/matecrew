@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { normalizeBadgeUid } from "@/lib/device/codes";
 import { toRow, type ConsoleCommand } from "@/lib/device/commands";
+import type { LiveStatus } from "@/lib/device/live";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -80,12 +81,15 @@ const consoleCommand = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("forgetWifi") }),
 ]);
 
-/** Queues a command from the console; the terminal picks it up on its next poll. */
+/**
+ * Queues a command from the console; the terminal picks it up on its next
+ * poll. Returns it as the console's monitor lists it, waiting.
+ */
 export async function sendDeviceCommand(
   officeId: string,
   deviceId: string,
   input: ConsoleCommand,
-): Promise<ActionResult> {
+): Promise<{ success: true; command: LiveStatus["commands"][number] } | { success: false; error: string }> {
   const { session } = await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations("devices");
   const parsed = consoleCommand.safeParse(input);
@@ -100,6 +104,9 @@ export async function sendDeviceCommand(
 
   const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
   if (!device) return { success: false, error: t("notFound") };
-  await prisma.deviceCommand.create({ data: { deviceId, sentById: session.user.id, ...toRow(command) } });
-  return { success: true };
+  const row = await prisma.deviceCommand.create({
+    data: { deviceId, sentById: session.user.id, ...toRow(command) },
+    select: { id: true, kind: true, arg: true, createdAt: true },
+  });
+  return { success: true, command: { ...row, createdAt: row.createdAt.toISOString(), status: "waiting" } };
 }

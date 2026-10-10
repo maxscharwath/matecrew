@@ -6,7 +6,6 @@
 import {
   HStack,
   VStack,
-  Separator,
   Label,
   H1,
   Lead,
@@ -18,7 +17,12 @@ import {
   Bar,
   Panel,
   Show,
+  Surface,
   concat,
+  and,
+  eq,
+  lt,
+  ne,
   Stat,
   StatLabel,
   StatValue,
@@ -44,20 +48,41 @@ export function badge() {
   );
 }
 
+/** Dots shown at most; past them the "2/12" above says where the list is. */
+const DOTS = 8;
+
+/** Where the list is: one dot per item, the current one filled. */
+const Pages = () => (
+  <HStack gap={10} align="center">
+    {Array.from({ length: DOTS }, (_, i) => [
+      <Show when={eq(view("index", 0), i)}>
+        <Surface variant="ink" radius={7} width={28} height={14} />
+      </Show>,
+      <Show when={and(lt(i, view("count", 0)), ne(view("index", 0), i))}>
+        <Surface variant="outline" radius={7} width={14} height={14} />
+      </Show>,
+    ])}
+  </HStack>
+);
+
 /** Choose what to take; the left key steps through the items, the right one takes this one. */
 export function pick() {
   const t = useT();
   return (
-    <Frame title={view("title")} keys primary="right">
-      <HStack gap={40} height="fill">
-        <Picture value={view("picture", [])} size={160} />
-        <VStack gap={16} width="fill">
+    <Frame title={view("title")} keys primary="right" gap={12}>
+      <HStack gap={36} height="fill" align="center">
+        <Picture value={view("picture", [])} size={168} />
+        <VStack gap={12} width="fill">
           <Label>{t("pick.label", { position: view("status") })}</Label>
-          <H1>{view("item")}</H1>
-          <Separator />
-          <Num size="md">{view("stock")}</Num>
-          <Lead>{view("stockHint")}</Lead>
+          <H1 fit lines={2}>{view("item")}</H1>
+          <HStack gap={12} align="center">
+            <Num size="md">{view("stock")}</Num>
+            <Lead>{t("pick.inStock")}</Lead>
+          </HStack>
         </VStack>
+      </HStack>
+      <HStack justify="center" width="fill">
+        <Pages />
       </HStack>
     </Frame>
   );

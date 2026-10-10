@@ -27,3 +27,18 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # back by the bootloader (src/ota.rs). Flash this build's bootloader, not
 # espflash's: `just flash` does.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Bluetooth LE for setup, control and updates from a browser nearby (src/ble.rs): NimBLE, the
+# lighter host, BLE only. Its memory goes to PSRAM; one connection at a time; no bonds kept (the
+# NVS is small, a pairing per session is fine). Wi-Fi and BLE share the radio (coexistence).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLE_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517
+CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y

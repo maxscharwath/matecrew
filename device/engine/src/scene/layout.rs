@@ -290,17 +290,38 @@ fn flex_content(children: &[Node], layout: &Layout, width: Option<u32>, env: Env
     let mut main = 0u32;
     let mut cross = 0u32;
     let mut count = 0u32;
-    for child in children.iter().filter(|c| !collapsed(c, env, item)) {
-        let rect = child.rect();
-        let (w, h) = if layout.row() {
-            let w = match Dim::of(rect.width) {
+    let shown: Vec<&Node> = children.iter().filter(|c| !collapsed(c, env, item)).collect();
+    // A row of known width: its `fill` children get the room the others leave, as `flex` gives
+    // it, and wrap their text to that width (their natural width still counts as the content's).
+    let natural: Vec<u32> = if layout.row() {
+        shown
+            .iter()
+            .map(|child| match Dim::of(child.rect().width) {
                 Dim::Px(v) => v,
                 Dim::Percent(p) => inner.unwrap_or(0) * p / 100,
                 Dim::Fill(_) | Dim::Hug => content(child, None, env, item).width,
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+    let weight = |child: &Node| if let Dim::Fill(w) = Dim::of(child.rect().width) { w } else { 0 };
+    let weights: u32 = shown.iter().map(|c| weight(c)).sum();
+    let room = inner.filter(|_| layout.row() && weights > 0).map(|inner| {
+        let others: u32 = shown.iter().zip(&natural).filter(|(c, _)| weight(c) == 0).map(|(_, w)| *w).sum();
+        inner.saturating_sub(others + u32::from(layout.gap) * (shown.len() as u32).saturating_sub(1))
+    });
+    for (index, child) in shown.iter().enumerate() {
+        let rect = child.rect();
+        let (w, h) = if layout.row() {
+            let w = natural[index];
+            let wraps_at = match room {
+                Some(room) if weight(child) > 0 => room * weight(child) / weights,
+                _ => w,
             };
             let h = match Dim::of(rect.height) {
                 Dim::Px(v) => v,
-                _ => content(child, Some(w), env, item).height,
+                _ => content(child, Some(wraps_at), env, item).height,
             };
             (w, h)
         } else {

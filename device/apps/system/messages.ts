@@ -1,0 +1,41 @@
+import { defineMessages } from "@matecrew/device-ui";
+
+/** The system screens' words. French first: the default, and the keys' reference. */
+export const messages = defineMessages({
+  fr: {
+    "boot.screen": "Écran",
+    "boot.screenReady": "Écran prêt",
+    "boot.reader": "Lecteur de badge",
+    "boot.readerReady": "Lecteur de badge PN532 {{version}}",
+    "boot.readerMissing": "Pas de lecteur de badge",
+    "boot.wifiJoining": "Wi-Fi · connexion à « {{ssid}} »",
+    "boot.wifiJoined": "Wi-Fi · {{ssid}} · {{rssi}} dBm",
+    "boot.wifiJoinedQuiet": "Wi-Fi · {{ssid}}",
+    "boot.wifiOffline": "Wi-Fi indisponible · hors ligne",
+    "boot.site": "Site",
+    "boot.siteReady": "Site · {{host}}",
+    "boot.apps": "Apps",
+    "boot.appsLoaded": "Apps chargées",
+    "boot.mateLoaded": "App maté chargée",
+    "boot.ready": "Prêt",
+    "boot.allReady": "Tout est prêt",
+  },
+  en: {
+    "boot.screen": "Screen",
+    "boot.screenReady": "Screen ready",
+    "boot.reader": "Badge reader",
+    "boot.readerReady": "Badge reader PN532 {{version}}",
+    "boot.readerMissing": "No badge reader",
+    "boot.wifiJoining": "Wi-Fi · joining “{{ssid}}”",
+    "boot.wifiJoined": "Wi-Fi · {{ssid}} · {{rssi}} dBm",
+    "boot.wifiJoinedQuiet": "Wi-Fi · {{ssid}}",
+    "boot.wifiOffline": "Wi-Fi unavailable · offline",
+    "boot.site": "Site",
+    "boot.siteReady": "Site · {{host}}",
+    "boot.apps": "Apps",
+    "boot.appsLoaded": "Apps loaded",
+    "boot.mateLoaded": "maté app loaded",
+    "boot.ready": "Ready",
+    "boot.allReady": "All set",
+  },
+});
