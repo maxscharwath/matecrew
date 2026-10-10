@@ -1,6 +1,6 @@
 /**
  * Wire format between the badge terminal and the site. The firmware mirrors
- * these shapes in `device/firmware`; change both together.
+ * these shapes in `device/core`; change both together.
  *
  * The link endpoints follow RFC 8628 and keep its snake_case names. The others
  * use camelCase like the rest of the app.
@@ -52,6 +52,25 @@ export const deviceKey = z.object({
   label: z.string(),
 });
 
+/** Versioned screen definition. The server supplies content; Rust owns layout and pixels. */
+export const deviceScreen = z.object({
+  version: z.literal(1),
+  template: z.literal("dashboard"),
+  officeName: z.string(), time: z.string(),
+  wifiBars: z.number().int().min(0).max(3).nullable(),
+  batteryPercent: z.number().int().min(0).max(100).nullable(),
+  batteryLowLabel: z.string().nullable(),
+  items: z.array(z.object({ name: z.string(), stock: z.number().int(), low: z.boolean(), image: z.string() })),
+  chart: z.object({ series: z.array(z.array(z.number().int())), max: z.number().int().positive(), days: z.number().int().positive() }).nullable(),
+  preparation: z.object({ title: z.string(), total: z.string(), items: z.array(z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string() })) }).nullable(),
+  lowLabel: z.string(), moreLabel: z.string(), chartLabel: z.string(),
+  leftLabel: z.string(), rightLabel: z.string(),
+});
+export type DeviceScreen = z.infer<typeof deviceScreen>;
+
+export const deviceTheme = z.enum(["flipper", "macos", "dark"]);
+export type DeviceTheme = z.infer<typeof deviceTheme>;
+
 export const deviceState = z.object({
   device: z.object({ id: z.string(), name: z.string() }),
   office: z.object({ name: z.string(), timezone: z.string(), locale: z.string() }),
@@ -73,6 +92,10 @@ export const deviceState = z.object({
   ),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
+  screen: deviceScreen,
+  /** Optional compiled DUI1 app; null uses the native matécrew screens. */
+  appUrl: z.string().nullable().default(null),
+  theme: deviceTheme.default("flipper"),
   /**
    * The newest firmware on the site; the terminal installs it when it is
    * newer than its own. `url` is a path on the site, fetched with the token.
@@ -117,7 +140,8 @@ export const statusRequest = z.object({
 export const deviceCommand = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("key"), side: z.enum(["left", "right"]) }),
   z.object({ id: z.string(), kind: z.literal("badge"), uid: z.string() }),
-  z.object({ id: z.string(), kind: z.literal("sync") }),
+  z.object({ id: z.string(), kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),
+  z.object({ id: z.string(), kind: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),
   z.object({ id: z.string(), kind: z.literal("restart") }),
   /** Forget the Wi-Fi and start setup again; the token stays. */
   z.object({ id: z.string(), kind: z.literal("forgetWifi") }),

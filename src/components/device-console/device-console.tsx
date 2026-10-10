@@ -1,5 +1,8 @@
 "use client";
 
+import { ScreenControl } from "./screen-control";
+import { ScreenPreview } from "./screen-preview";
+
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -128,6 +131,10 @@ export function DeviceConsole({ officeId, device, items, badges, takes, initial,
         <h1 className="text-2xl font-bold">{device.name}</h1>
         <LivePill live={live} waiting={waiting} relative={relative} />
         <div className="ml-auto flex gap-2">
+          <Select onValueChange={(app: "mate" | "showcase") => send({ kind: "sync", app })}>
+            <SelectTrigger className="w-36" aria-label={t("application")}><SelectValue placeholder={t("application")} /></SelectTrigger>
+            <SelectContent><SelectItem value="mate">maté</SelectItem><SelectItem value="showcase">Showcase</SelectItem></SelectContent>
+          </Select>
           <Button variant="outline" size="sm" onClick={() => send({ kind: "sync" })} title={t("shortcuts")}>
             <RefreshCw /> {t("sync")}
           </Button>
@@ -169,7 +176,7 @@ export function DeviceConsole({ officeId, device, items, badges, takes, initial,
         <DeviceShell
           pressed={pressed === "left" || pressed === "right" ? pressed : null}
           onKey={(side) => send({ kind: "key", side })}
-          screen={<Panel base={base} frame={live.frame} />}
+          screen={<ScreenControl label={t("tapScreen")} onTap={(x,y) => send({ kind: "tap", x, y })}><Panel base={base} frame={live.frame} /></ScreenControl>}
           badge={
             <BadgeZone
               badges={badges}
@@ -193,11 +200,11 @@ export function DeviceConsole({ officeId, device, items, badges, takes, initial,
   );
 }
 
-/** The mirrored panel, blank until the terminal has sent what it shows. */
+/** Mirror the panel; before its first upload, preview the definition with Rust/Wasm. */
 function Panel({ base, frame }: { base: string; frame: LiveStatus["frame"] }) {
   const t = useTranslations("devices.console");
   if (!frame) {
-    return <div className="grid size-full place-items-center text-sm text-zinc-500">{t("noFrame")}</div>;
+    return <ScreenPreview url={`${base}/screen`} placeholder={t("noFrame")} />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- generated per request, not a static asset

@@ -106,6 +106,14 @@ pub struct DeviceState {
     pub badges: Vec<Badge>,
     pub sync_times: Vec<String>,
     pub server_time: String,
+    /// Screen content cached with state; old caches fall back to a local stock screen.
+    #[serde(default)]
+    pub screen: Option<DeviceScreen>,
+    #[serde(default)]
+    pub app_url: Option<String>,
+    /// Host-selected monochrome theme; absent in older caches.
+    #[serde(default)]
+    pub theme: Option<String>,
     /// The latest firmware published on the site; the terminal installs it when it is newer.
     #[serde(default)]
     pub firmware: Option<FirmwareRelease>,
@@ -198,7 +206,8 @@ pub enum Command {
     Key { id: String, side: Side },
     /// Already normalized by the site.
     Badge { id: String, uid: String },
-    Sync { id: String },
+    Sync { id: String, #[serde(default)] app: Option<BuiltinApp> },
+    Tap { id: String, x: i32, y: i32 },
     Restart { id: String },
     /// Forget the Wi-Fi and start setup again; the token stays.
     ForgetWifi { id: String },
@@ -249,6 +258,19 @@ mod tests {
         assert_eq!(state.key(Side::Left).item_id.as_deref(), Some("i1"));
         assert_eq!(state.badge_holder("04A1B2C3D4E5F6"), Some("Alex"));
         assert_eq!(state.badge_holder("04A1B2C3D4E5F7"), None);
+    }
+
+    #[test]
+    fn screen_definition_survives_the_offline_state_cache() {
+        let mut state: DeviceState = serde_json::from_str(STATE).unwrap();
+        assert!(state.screen.is_none());
+        state.screen = Some(serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap());
+        let cached = serde_json::to_vec(&state).unwrap();
+        let restored: DeviceState = serde_json::from_slice(&cached).unwrap();
+        let screen = restored.screen.unwrap();
+        assert!(screen.supported());
+        assert_eq!(screen.items[0].stock, 36);
+        assert_eq!(screen.chart.unwrap().series[0][0], 48);
     }
 
     #[test]
@@ -360,3 +382,47 @@ mod base64_tests {
         assert_eq!(decode_base64("@@"), None);
     }
 }
+
+/// Server-authored content for the local dashboard renderer. No executable code or panel bitmap.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceScreen {
+    pub version: u8,
+    pub template: String,
+    pub office_name: String,
+    pub time: String,
+    pub wifi_bars: Option<u8>,
+    pub battery_percent: Option<u8>,
+    pub battery_low_label: Option<String>,
+    pub items: Vec<ScreenItem>,
+    pub chart: Option<ScreenChart>,
+    pub preparation: Option<Preparation>,
+    pub low_label: String,
+    pub more_label: String,
+    pub chart_label: String,
+    pub left_label: String,
+    pub right_label: String,
+}
+impl DeviceScreen {
+    pub fn supported(&self) -> bool { self.version == 1 && self.template == "dashboard" }
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ScreenItem {
+    pub name: String, pub stock: i64, pub low: bool, pub image: String,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ScreenChart {
+    pub series: Vec<Vec<i64>>, pub max: i64, pub days: u32,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Preparation {
+    pub title: String, pub total: String, pub items: Vec<PreparationItem>,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PreparationItem {
+    pub name: String, pub count: u32, pub names: String, pub image: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum BuiltinApp { Mate, Showcase }

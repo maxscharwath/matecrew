@@ -4,7 +4,10 @@
 
 use anyhow::Result;
 use esp_idf_svc::hal::gpio::{Gpio5, Gpio8, PinDriver, Pull};
-use matecrew_core::{contract::Side, flow::Event};
+use matecrew_core::{
+    flow::Event,
+    hardware::{TouchKeys, KEY_POLL_MS},
+};
 use std::{sync::mpsc::Sender, thread, time::Duration};
 
 use crate::Input;
@@ -14,16 +17,18 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>)
     let left = PinDriver::input(left, Pull::Down)?;
     let right = PinDriver::input(right, Pull::Down)?;
     thread::Builder::new().stack_size(3072).spawn(move || {
-        let mut was = (false, false);
+        let mut keys = TouchKeys::default();
         loop {
-            let now = (left.is_high(), right.is_high());
-            for (pressed, before, side) in [(now.0, was.0, Side::Left), (now.1, was.1, Side::Right)] {
-                if pressed && !before && inputs.send(Input::Flow(Event::Key { side })).is_err() {
+            for side in keys
+                .sample(left.is_high(), right.is_high())
+                .into_iter()
+                .flatten()
+            {
+                if inputs.send(Input::Flow(Event::Key { side })).is_err() {
                     return;
                 }
             }
-            was = now;
-            thread::sleep(Duration::from_millis(20));
+            thread::sleep(Duration::from_millis(KEY_POLL_MS));
         }
     })?;
     Ok(())

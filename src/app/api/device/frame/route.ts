@@ -4,7 +4,7 @@ import { FRAME_BYTES, frameHash } from "@/lib/device/commands";
 
 /**
  * The terminal reports what its panel now shows, in the format of
- * /api/device/screen. The console on the site mirrors it.
+ * the local Rust renderer. The console on the site mirrors it.
  */
 export async function PUT(request: Request) {
   const device = await authenticateDevice(request);

@@ -9,19 +9,27 @@ use embedded_graphics::{pixelcolor::BinaryColor, prelude::*, primitives::Rectang
 pub const BYTES: usize = (WIDTH * HEIGHT / 8) as usize;
 const ROW: usize = (WIDTH / 8) as usize;
 
-pub struct Frame {
-    pub bits: Vec<u8>,
-}
-
+/// Panel-sized allocation backed by the portable engine framebuffer.
+pub struct Frame(device_engine::frame::Frame);
 impl Default for Frame {
     fn default() -> Self {
-        Self { bits: vec![0; BYTES] }
+        Self(device_engine::frame::Frame::new(WIDTH, HEIGHT).expect("valid panel dimensions"))
     }
 }
-
 impl Frame {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+impl std::ops::Deref for Frame {
+    type Target = device_engine::frame::Frame;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for Frame {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -35,7 +43,12 @@ pub struct Window {
 }
 
 impl Window {
-    pub const FULL: Window = Window { x: 0, y: 0, width: WIDTH, height: HEIGHT };
+    pub const FULL: Window = Window {
+        x: 0,
+        y: 0,
+        width: WIDTH,
+        height: HEIGHT,
+    };
 
     pub fn area(&self) -> u32 {
         self.width * self.height
@@ -54,8 +67,16 @@ impl Window {
 pub fn changed(before: &[u8], after: &[u8]) -> Option<Window> {
     let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0, usize::MAX, 0);
     for (y, (a, b)) in before.chunks(ROW).zip(after.chunks(ROW)).enumerate() {
-        let Some(first) = a.iter().zip(b).position(|(p, q)| p != q) else { continue };
-        let last = ROW - 1 - a.iter().rev().zip(b.iter().rev()).position(|(p, q)| p != q).unwrap_or(0);
+        let Some(first) = a.iter().zip(b).position(|(p, q)| p != q) else {
+            continue;
+        };
+        let last = ROW
+            - 1
+            - a.iter()
+                .rev()
+                .zip(b.iter().rev())
+                .position(|(p, q)| p != q)
+                .unwrap_or(0);
         x0 = x0.min(first);
         x1 = x1.max(last);
         y0 = y0.min(y);
@@ -78,50 +99,17 @@ impl OriginDimensions for Frame {
 impl DrawTarget for Frame {
     type Color = BinaryColor;
     type Error = core::convert::Infallible;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        for Pixel(point, color) in pixels {
-            let (Ok(x), Ok(y)) = (u32::try_from(point.x), u32::try_from(point.y)) else { continue };
-            if x >= WIDTH || y >= HEIGHT {
-                continue;
-            }
-            let i = (y * WIDTH + x) as usize;
-            let mask = 0x80 >> (i & 7);
-            if color.is_on() {
-                self.bits[i >> 3] |= mask;
-            } else {
-                self.bits[i >> 3] &= !mask;
-            }
-        }
-        Ok(())
+    fn draw_iter<I: IntoIterator<Item = Pixel<Self::Color>>>(
+        &mut self,
+        pixels: I,
+    ) -> Result<(), Self::Error> {
+        self.0.draw_iter(pixels)
     }
-
-    /// Whole rows of bytes at once where the area allows it: most of what the
-    /// screens draw is 4 x 4 blocks of the pixel-art canvas.
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        let area = area.intersection(&self.bounding_box());
-        let Some(bottom_right) = area.bottom_right() else { return Ok(()) };
-        let (left, right) = (area.top_left.x as usize, bottom_right.x as usize);
-        for y in area.top_left.y as usize..=bottom_right.y as usize {
-            let row = &mut self.bits[y * ROW..(y + 1) * ROW];
-            for x in left..=right {
-                let mask = 0x80 >> (x & 7);
-                if color.is_on() {
-                    row[x >> 3] |= mask;
-                } else {
-                    row[x >> 3] &= !mask;
-                }
-            }
-        }
-        Ok(())
+        self.0.fill_solid(area, color)
     }
-
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.bits.fill(if color.is_on() { 0xff } else { 0 });
-        Ok(())
+        self.0.clear(color)
     }
 }
 
@@ -132,10 +120,20 @@ mod tests {
     #[test]
     fn packs_ink_msb_first() {
         let mut frame = Frame::new();
-        frame.draw_iter([Pixel(Point::new(0, 0), BinaryColor::On), Pixel(Point::new(9, 0), BinaryColor::On)]).unwrap();
+        frame
+            .draw_iter([
+                Pixel(Point::new(0, 0), BinaryColor::On),
+                Pixel(Point::new(9, 0), BinaryColor::On),
+            ])
+            .unwrap();
         assert_eq!(frame.bits[0], 0x80);
         assert_eq!(frame.bits[1], 0x40);
-        frame.draw_iter([Pixel(Point::new(0, 0), BinaryColor::Off), Pixel(Point::new(-1, 900), BinaryColor::On)]).unwrap();
+        frame
+            .draw_iter([
+                Pixel(Point::new(0, 0), BinaryColor::Off),
+                Pixel(Point::new(-1, 900), BinaryColor::On),
+            ])
+            .unwrap();
         assert_eq!(frame.bits[0], 0);
     }
 
@@ -144,8 +142,33 @@ mod tests {
         let (mut fast, mut slow) = (Frame::new(), Frame::new());
         let area = Rectangle::new(Point::new(5, 3), Size::new(13, 4));
         fast.fill_solid(&area, BinaryColor::On).unwrap();
-        slow.draw_iter(area.points().map(|p| Pixel(p, BinaryColor::On))).unwrap();
+        slow.draw_iter(area.points().map(|p| Pixel(p, BinaryColor::On)))
+            .unwrap();
         assert!(fast.bits == slow.bits);
+    }
+
+    #[test]
+    fn byte_fills_preserve_neighbour_bits_at_every_alignment_and_clip() {
+        let (mut fast, mut slow) = (Frame::new(), Frame::new());
+        // A nonuniform background reveals accidental writes outside the rectangle.
+        for (i, byte) in fast.bits.iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(37);
+        }
+        slow.bits.copy_from_slice(&fast.bits);
+        for color in [BinaryColor::On, BinaryColor::Off] {
+            for x in [-10, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 791, 798, 799, 800] {
+                for width in [0, 1, 2, 7, 8, 9, 16, 31, 800] {
+                    let area = Rectangle::new(Point::new(x, 478), Size::new(width, 5));
+                    fast.fill_solid(&area, color).unwrap();
+                    slow.draw_iter(area.points().map(|p| Pixel(p, color)))
+                        .unwrap();
+                    assert!(
+                        fast.bits == slow.bits,
+                        "x={x}, width={width}, color={color:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -153,8 +176,21 @@ mod tests {
         let before = Frame::new();
         let mut after = Frame::new();
         assert_eq!(changed(&before.bits, &after.bits), None);
-        after.draw_iter([Pixel(Point::new(13, 20), BinaryColor::On), Pixel(Point::new(30, 41), BinaryColor::On)]).unwrap();
-        assert_eq!(changed(&before.bits, &after.bits), Some(Window { x: 8, y: 20, width: 24, height: 22 }));
+        after
+            .draw_iter([
+                Pixel(Point::new(13, 20), BinaryColor::On),
+                Pixel(Point::new(30, 41), BinaryColor::On),
+            ])
+            .unwrap();
+        assert_eq!(
+            changed(&before.bits, &after.bits),
+            Some(Window {
+                x: 8,
+                y: 20,
+                width: 24,
+                height: 22
+            })
+        );
         let window = changed(&before.bits, &after.bits).unwrap();
         assert_eq!(window.bytes(&after.bits).count(), 3 * 22);
     }

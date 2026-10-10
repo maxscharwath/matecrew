@@ -94,6 +94,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-engine"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics",
+ "png",
+ "qrcodegen",
+ "serde",
+ "serde_json",
+ "u8g2-fonts",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,17 +239,19 @@ version = "0.1.0"
 dependencies = [
  "embedded-graphics",
  "embedded-graphics-simulator",
+ "matecrew-core",
  "matecrew-ui",
+ "serde_json",
 ]
 
 [[package]]
 name = "matecrew-ui"
 version = "0.1.0"
 dependencies = [
+ "device-engine",
  "embedded-graphics",
  "matecrew-core",
- "qrcodegen",
- "u8g2-fonts",
+ "serde_json",
 ]
 
 [[package]]

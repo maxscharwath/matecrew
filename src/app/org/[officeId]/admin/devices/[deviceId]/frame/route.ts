@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { adminDevice } from "@/lib/device/admin";
-import { bitsToPng } from "@/lib/device/screen";
+import { bitsToPng } from "@/lib/device/frame";
 
 /** PNG of what the terminal last reported on its panel; the console's mirror. */
 export async function GET(

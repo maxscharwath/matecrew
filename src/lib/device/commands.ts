@@ -17,7 +17,8 @@ export const FRAME_BYTES = (800 * 480) / 8;
 export type ConsoleCommand =
   | { kind: "key"; side: "left" | "right" }
   | { kind: "badge"; uid: string }
-  | { kind: "sync" }
+  | { kind: "sync"; app?: "mate" | "showcase" }
+  | { kind: "tap"; x: number; y: number }
   | { kind: "restart" }
   | { kind: "forgetWifi" };
 
@@ -25,23 +26,55 @@ const KIND_TO_ROW = {
   key: "KEY",
   badge: "BADGE",
   sync: "SYNC",
+  tap: "KEY",
   restart: "RESTART",
   forgetWifi: "FORGET_WIFI",
 } as const;
 
-export function toRow(command: ConsoleCommand): { kind: CommandRow["kind"]; arg: string | null } {
-  const arg = command.kind === "key" ? command.side : command.kind === "badge" ? command.uid : null;
+export function toRow(command: ConsoleCommand): {
+  kind: CommandRow["kind"];
+  arg: string | null;
+} {
+  const arg =
+    command.kind === "key"
+      ? command.side
+      : command.kind === "badge"
+        ? command.uid
+        : command.kind === "tap"
+          ? `tap:${command.x}:${command.y}`
+          : command.kind === "sync" && command.app
+            ? `app:${command.app}`
+            : null;
   return { kind: KIND_TO_ROW[command.kind], arg };
 }
 
-export function toWire(row: Pick<CommandRow, "id" | "kind" | "arg">): DeviceCommand | null {
+export function toWire(
+  row: Pick<CommandRow, "id" | "kind" | "arg">,
+): DeviceCommand | null {
   switch (row.kind) {
-    case "KEY":
-      return row.arg === "left" || row.arg === "right" ? { id: row.id, kind: "key", side: row.arg } : null;
+    case "KEY": {
+      const tap = /^tap:(\d{1,3}):(\d{1,3})$/.exec(row.arg ?? "");
+      if (tap && Number(tap[1]) < 200 && Number(tap[2]) < 120)
+        return {
+          id: row.id,
+          kind: "tap",
+          x: Number(tap[1]),
+          y: Number(tap[2]),
+        };
+      return row.arg === "left" || row.arg === "right"
+        ? { id: row.id, kind: "key", side: row.arg }
+        : null;
+    }
     case "BADGE":
       return row.arg ? { id: row.id, kind: "badge", uid: row.arg } : null;
     case "SYNC":
-      return { id: row.id, kind: "sync" };
+      return {
+        id: row.id,
+        kind: "sync",
+        ...(row.arg === "app:mate" || row.arg === "app:showcase"
+          ? { app: row.arg.slice(4) as "mate" | "showcase" }
+          : {}),
+      };
     case "RESTART":
       return { id: row.id, kind: "restart" };
     case "FORGET_WIFI":
@@ -53,25 +86,40 @@ export function toWire(row: Pick<CommandRow, "id" | "kind" | "arg">): DeviceComm
  * Marks every waiting command delivered and returns those still worth
  * running, oldest first. One statement, so two polls never get the same one.
  */
-export async function takeCommands(deviceId: string, now = new Date()): Promise<DeviceCommand[]> {
+export async function takeCommands(
+  deviceId: string,
+  now = new Date(),
+): Promise<DeviceCommand[]> {
   const rows = await prisma.deviceCommand.updateManyAndReturn({
     where: { deviceId, deliveredAt: null },
     data: { deliveredAt: now },
   });
   const staleBefore = now.getTime() - COMMAND_INPUT_TTL_SECONDS * 1000;
   return rows
-    .filter((row) => !((row.kind === "KEY" || row.kind === "BADGE") && row.createdAt.getTime() < staleBefore))
+    .filter(
+      (row) =>
+        !(
+          (row.kind === "KEY" || row.kind === "BADGE") &&
+          row.createdAt.getTime() < staleBefore
+        ),
+    )
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
     .map(toWire)
     .filter((command): command is DeviceCommand => command !== null);
 }
 
 export function isReachable(polledAt: Date | null, now = new Date()): boolean {
-  return polledAt !== null && now.getTime() - polledAt.getTime() < REACHABLE_SECONDS * 1000;
+  return (
+    polledAt !== null &&
+    now.getTime() - polledAt.getTime() < REACHABLE_SECONDS * 1000
+  );
 }
 
 export function isWatched(watchedAt: Date | null, now = new Date()): boolean {
-  return watchedAt !== null && now.getTime() - watchedAt.getTime() < WATCHED_SECONDS * 1000;
+  return (
+    watchedAt !== null &&
+    now.getTime() - watchedAt.getTime() < WATCHED_SECONDS * 1000
+  );
 }
 
 export function frameHash(bits: Uint8Array): string {

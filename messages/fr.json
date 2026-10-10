@@ -1144,6 +1144,7 @@
       "preparation": "Préparation",
       "preparationOf": "Préparation · {label}",
       "toPrepare": "{count, plural, one {# maté} other {# matés}}",
+      "chartTotal": "Stock total · {days} jours",
       "chart": "Stock · {days} jours",
       "more": "autres"
     },
@@ -1236,7 +1237,9 @@
       "hardwareId": "Identifiant",
       "more": "Plus d'actions",
       "waiting": "{count, plural, one {# commande en attente} other {# commandes en attente}}",
-      "noFrame": "L'appareil n'a pas encore envoyé son écran."
+      "noFrame": "L'appareil n'a pas encore envoyé son écran.",
+      "application": "Application",
+      "tapScreen": "Cliquez sur un bouton affiché pour piloter l’appareil"
     },
     "virtual": {
       "open": "Terminal virtuel",
@@ -1268,7 +1271,27 @@
       "sensorsHint": "Envoyés au site à la prochaine synchro.",
       "queue": "{count, plural, =0 {File d'attente} one {# prise en attente} other {# prises en attente}}",
       "queueEmpty": "Tout est envoyé. Coupe le Wi-Fi pour voir les prises s'accumuler.",
-      "monitor": "Moniteur"
+      "monitor": "Moniteur",
+      "theme": {
+        "label": "Thème de l’appareil",
+        "dark": "Sombre"
+      },
+      "buzzer": {
+        "title": "Piézo virtuel",
+        "mute": "Couper",
+        "enable": "Activer",
+        "muted": "Son coupé",
+        "ready": "Audio actif",
+        "activate": "Cliquez pour activer",
+        "volume": "Volume : {value} %",
+        "volumeLabel": "Volume du piézo",
+        "key": "Clic",
+        "accepted": "Succès",
+        "error": "Erreur",
+        "idle": "En attente",
+        "hint": "Signal partagé avec le firmware. Le timbre dépend de vos haut-parleurs.",
+        "notification": "Notification"
+      }
     },
     "virtualBadge": "virtuel",
     "linkDevice": "Lier un appareil",

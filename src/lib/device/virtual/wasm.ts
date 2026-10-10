@@ -3,7 +3,12 @@
  * WebAssembly (`just web` writes public/device/matecrew.wasm). Plain exports
  * and JSON, no generated bindings.
  */
-import type { DeviceState, DeviceTake } from "@/lib/device/contract";
+import type {
+  DeviceState,
+  DeviceTake,
+  DeviceScreen,
+  DeviceTheme,
+} from "@/lib/device/contract";
 
 export const WASM_URL = "/device/matecrew.wasm";
 
@@ -12,17 +17,34 @@ export type Side = "left" | "right";
 export type FlowScreen =
   | { type: "main" }
   | { type: "badge"; keyLabel: string }
-  | { type: "pick"; name: string; item: string; stock: number; image: string; index: number; count: number }
+  | {
+      type: "pick";
+      name: string;
+      item: string;
+      stock: number;
+      image: string;
+      index: number;
+      count: number;
+    }
   | { type: "leave"; name: string }
   | { type: "taken"; name: string; item: string; image: string }
-  | { type: "summary"; name: string; today: number; week: number; month: number }
+  | {
+      type: "summary";
+      name: string;
+      today: number;
+      week: number;
+      month: number;
+    }
   | { type: "unknownBadge"; uid: string; claimUrl: string | null }
   | { type: "notReady" }
   | { type: "noItems" };
 
-export type FlowEvent = { type: "key"; side: Side } | { type: "badge"; uid: string } | { type: "tick" };
+export type FlowEvent =
+  | { type: "key"; side: Side }
+  | { type: "badge"; uid: string }
+  | { type: "tick" };
 
-export type Beep = "key" | "accepted" | "error";
+export type Beep = "key" | "accepted" | "error" | "notification";
 
 export type Effect =
   | { type: "show"; screen: FlowScreen }
@@ -32,14 +54,31 @@ export type Effect =
 
 /** Screens the terminal draws itself, outside the take flow. */
 export type View =
+  | { type: "boot"; stage: number }
   | { type: "test" }
+  | { type: "main"; state: DeviceState; offline: boolean }
+  | { type: "dashboard"; data: DeviceScreen; offline: boolean }
   | { type: "connecting"; ssid: string }
   | { type: "link"; code: string; url: string; urlWithCode: string }
   | { type: "linked"; office: string; name: string }
   | { type: "error"; title: string; detail: string }
   | { type: "flow"; screen: FlowScreen };
 
+export type ImageRequest = {
+  src: string;
+  width: number;
+  height: number;
+  cover: boolean;
+};
+
+export type AppEffect =
+  | { kind: "fetch"; id: string; path: string }
+  | { kind: "emit"; name: string }
+  | { kind: "beep"; tone: "key" | "success" | "error" | "notification" };
+
 interface Exports {
+  gpio_sample(left: number, right: number): number;
+  buzzer_pattern(tone: number): number;
   memory: WebAssembly.Memory;
   alloc(len: number): number;
   render(ptr: number, len: number): number;
@@ -50,6 +89,28 @@ interface Exports {
   output_ptr(): number;
   deadline(): number;
   reset(): void;
+  set_theme(theme: number): void;
+  load_app(ptr: number, len: number): number;
+  load_showcase(): number;
+  app_device(ptr: number, len: number): number;
+  app_advance(ptr: number, len: number): number;
+  app_update(ptr: number, len: number): number;
+  app_action(ptr: number, len: number): number;
+  app_render(scale: number): number;
+  app_press(x: number, y: number): number;
+  app_tick(nowMs: number): number;
+  app_overlay_deadline(): number;
+  system_notify(ptr: number, len: number): number;
+  app_input(ptr: number, len: number): number;
+  app_cache(): number;
+  app_images(): number;
+  app_image(
+    requestPtr: number,
+    requestLen: number,
+    ptr: number,
+    len: number,
+  ): number;
+  app_restore(ptr: number, len: number): number;
 }
 
 const encoder = new TextEncoder();
@@ -59,19 +120,204 @@ export class DeviceWasm {
   private constructor(private readonly exports: Exports) {}
 
   static async load(url = WASM_URL): Promise<DeviceWasm> {
-    const { instance } = await WebAssembly.instantiateStreaming(fetch(url, { cache: "no-store" }));
+    const { instance } = await WebAssembly.instantiateStreaming(
+      fetch(url, { cache: "no-store" }),
+    );
     return new DeviceWasm(instance.exports as unknown as Exports);
+  }
+
+  /** Change typography and monochrome styling without recompiling screen definitions. */
+  setTheme(theme: DeviceTheme): void {
+    this.exports.set_theme(theme === "macos" ? 1 : theme === "dark" ? 2 : 0);
   }
 
   /** Draws a screen and returns a copy of the 48 000-byte frame. */
   render(view: View): Uint8Array {
-    if (this.call("render", view) !== 0) throw new Error(`render: bad view ${JSON.stringify(view)}`);
+    if (this.call("render", view) !== 0)
+      throw new Error(`render: bad view ${JSON.stringify(view)}`);
     const { memory, frame_ptr, frame_len } = this.exports;
     return new Uint8Array(memory.buffer, frame_ptr(), frame_len()).slice();
   }
 
+  /** Load the compact TSX compiler output; layout never travels as JSON. */
+  loadApp(bytecode: Uint8Array): void {
+    const ptr = this.exports.alloc(bytecode.length);
+    new Uint8Array(this.exports.memory.buffer, ptr, bytecode.length).set(
+      bytecode,
+    );
+    if (this.exports.load_app(ptr, bytecode.length) !== 0)
+      throw new Error("Unsupported or damaged device bytecode");
+  }
+
+  setDeviceInfo(info: unknown): void {
+    if (this.call("app_device", info) < 0)
+      throw new Error("Load an app before providing device info");
+  }
+  loadShowcase(): void {
+    if (this.exports.load_showcase() !== 0)
+      throw new Error("Invalid bundled Showcase app");
+  }
+
+  imageRequests(): ImageRequest[] {
+    const len = this.exports.app_images();
+    if (len < 0) throw new Error("Load an app before requesting images");
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    ) as ImageRequest[];
+  }
+
+  updateImage(request: ImageRequest, bytes: Uint8Array): boolean {
+    const json = encoder.encode(JSON.stringify(request));
+    const requestPtr = this.exports.alloc(json.length);
+    new Uint8Array(this.exports.memory.buffer, requestPtr, json.length).set(
+      json,
+    );
+    const ptr = this.exports.alloc(bytes.length);
+    new Uint8Array(this.exports.memory.buffer, ptr, bytes.length).set(bytes);
+    const result = this.exports.app_image(
+      requestPtr,
+      json.length,
+      ptr,
+      bytes.length,
+    );
+    if (result < 0) throw new Error("Invalid, oversized or stale PNG image");
+    return result === 1;
+  }
+
+  renderApp(scale = 0): Uint8Array {
+    if (this.exports.app_render(scale) !== 0)
+      throw new Error("Load device bytecode before rendering");
+    return new Uint8Array(
+      this.exports.memory.buffer,
+      this.exports.frame_ptr(),
+      this.exports.frame_len(),
+    ).slice();
+  }
+
+  inputApp(input: string): AppEffect[] | null {
+    const len = this.call("app_input", input);
+    if (len === -2) return null;
+    if (len < 0) throw new Error("Load an app before sending hardware input");
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    ) as AppEffect[];
+  }
+  sampleGpio(left: boolean, right: boolean): number {
+    return this.exports.gpio_sample(Number(left), Number(right));
+  }
+  buzzerPattern(beep: Beep): [hz: number, ms: number][] {
+    const len = this.exports.buzzer_pattern(
+      beep === "accepted"
+        ? 1
+        : beep === "error"
+          ? 2
+          : beep === "notification"
+            ? 3
+            : 0,
+    );
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    );
+  }
+  tickApp(nowMs: number): boolean {
+    return this.exports.app_tick(nowMs) === 1;
+  }
+  notify(message: string, durationMs: number, nowMs: number): boolean {
+    return (
+      this.call("system_notify", {
+        message,
+        durationMs,
+        nowMs: Math.floor(nowMs),
+      }) === 1
+    );
+  }
+  overlayDeadline(): number | null {
+    const deadline = this.exports.app_overlay_deadline();
+    return deadline < 0 ? null : deadline;
+  }
+
+  pressApp(x: number, y: number): AppEffect[] {
+    const len = this.exports.app_press(x, y);
+    if (len < 0) throw new Error("Load device bytecode before sending input");
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    ) as AppEffect[];
+  }
+  cacheApp(): Record<string, unknown> {
+    const len = this.exports.app_cache();
+    if (len < 0)
+      throw new Error("Load device bytecode before reading its cache");
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    ) as Record<string, unknown>;
+  }
+  restoreApp(cache: unknown): void {
+    if (this.call("app_restore", cache) !== 0)
+      throw new Error("Load device bytecode before restoring a cache");
+  }
+  advanceApp(nowMs: number, onWake = false): AppEffect[] {
+    return this.appEffects("app_advance", { nowMs, onWake });
+  }
+  updateApp(id: string, value: unknown): boolean {
+    const result = this.call("app_update", { id, value });
+    if (result < 0)
+      throw new Error("Load device bytecode before updating resources");
+    return result === 1;
+  }
+  actionApp(action: string): AppEffect[] {
+    return this.appEffects("app_action", { action });
+  }
+  private appEffects(
+    name: "app_advance" | "app_action" | "app_restore",
+    value: unknown,
+  ): AppEffect[] {
+    const len = this.call(name, value);
+    if (len < 0)
+      throw new Error("Load device bytecode before sending app events");
+    return JSON.parse(
+      decoder.decode(
+        new Uint8Array(
+          this.exports.memory.buffer,
+          this.exports.output_ptr(),
+          len,
+        ),
+      ),
+    ) as AppEffect[];
+  }
+
   setState(state: DeviceState): void {
-    if (this.call("set_state", state) !== 0) throw new Error("set_state: the state does not match device/core");
+    if (this.call("set_state", state) !== 0)
+      throw new Error("set_state: the state does not match device/core");
   }
 
   handle(
@@ -86,7 +332,11 @@ export class DeviceWasm {
   ): Effect[] {
     const len = this.call("handle", { event, ...context });
     if (len < 0) throw new Error(`handle: bad event ${JSON.stringify(event)}`);
-    const bytes = new Uint8Array(this.exports.memory.buffer, this.exports.output_ptr(), len);
+    const bytes = new Uint8Array(
+      this.exports.memory.buffer,
+      this.exports.output_ptr(),
+      len,
+    );
     return JSON.parse(decoder.decode(bytes)) as Effect[];
   }
 
@@ -100,7 +350,20 @@ export class DeviceWasm {
     this.exports.reset();
   }
 
-  private call(name: "render" | "set_state" | "handle", value: unknown): number {
+  private call(
+    name:
+      | "render"
+      | "set_state"
+      | "handle"
+      | "app_advance"
+      | "app_update"
+      | "app_action"
+      | "app_restore"
+      | "app_input"
+      | "app_device"
+      | "system_notify",
+    value: unknown,
+  ): number {
     const json = encoder.encode(JSON.stringify(value));
     const ptr = this.exports.alloc(json.length);
     new Uint8Array(this.exports.memory.buffer, ptr, json.length).set(json);

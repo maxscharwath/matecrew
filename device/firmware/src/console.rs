@@ -2,7 +2,10 @@
 //! reader: `l`, `r`, `b <uid>`, `s`. See `matecrew_core::console`.
 
 use anyhow::Result;
-use esp_idf_svc::sys::{esp, esp_vfs_usb_serial_jtag_use_driver, usb_serial_jtag_driver_config_t, usb_serial_jtag_driver_install};
+use esp_idf_svc::sys::{
+    esp, esp_vfs_usb_serial_jtag_use_driver, usb_serial_jtag_driver_config_t,
+    usb_serial_jtag_driver_install,
+};
 use matecrew_core::{
     console::{self, Command},
     flow::Event,
@@ -17,7 +20,10 @@ use crate::Input;
 
 pub fn watch(inputs: Sender<Input>) -> Result<()> {
     // Without the driver, reading the USB serial console never blocks and loses input.
-    let mut config = usb_serial_jtag_driver_config_t { tx_buffer_size: 256, rx_buffer_size: 256 };
+    let mut config = usb_serial_jtag_driver_config_t {
+        tx_buffer_size: 256,
+        rx_buffer_size: 256,
+    };
     esp!(unsafe { usb_serial_jtag_driver_install(&mut config) })?;
     unsafe { esp_vfs_usb_serial_jtag_use_driver() };
 
@@ -36,6 +42,9 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
                 Some(Command::Key(side)) => Input::Flow(Event::Key { side }),
                 Some(Command::Badge(uid)) => Input::Flow(Event::Badge { uid }),
                 Some(Command::Sync) => Input::Sync,
+                Some(Command::App(app)) => Input::SelectApp(app),
+                Some(Command::Tap(x, y)) => Input::Tap(x, y),
+                Some(Command::Notify(message)) => Input::Notify(message),
                 Some(Command::Help) => {
                     log::info!("console: {}", console::HELP);
                     continue;

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+matecrew-core = { path = "../core" }
 embedded-graphics = "0.8"
 embedded-graphics-simulator = { version = "0.8", default-features = false }
 matecrew-ui = { path = "../ui" }
+
+serde_json = "1"

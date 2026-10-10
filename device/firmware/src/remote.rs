@@ -20,38 +20,42 @@ use crate::{
 
 /// Long-polls the site for console commands and passes them on as inputs.
 pub fn poll_commands(api: Api, inputs: Sender<Input>) -> Result<()> {
-    thread::Builder::new().stack_size(10 * 1024).spawn(move || loop {
-        let reply = match api.commands() {
-            Ok(reply) => reply,
-            Err(e) => {
-                log::warn!("console commands: {e:#}");
-                // Unlinked on the site: a sync now finds out and links again,
-                // instead of at the next scheduled one.
-                if e.is::<Unauthorized>() && inputs.send(Input::Sync).is_err() {
+    thread::Builder::new()
+        .stack_size(10 * 1024)
+        .spawn(move || loop {
+            let reply = match api.commands() {
+                Ok(reply) => reply,
+                Err(e) => {
+                    log::warn!("console commands: {e:#}");
+                    // Unlinked on the site: a sync now finds out and links again,
+                    // instead of at the next scheduled one.
+                    if e.is::<Unauthorized>() && inputs.send(Input::Sync).is_err() {
+                        return;
+                    }
+                    thread::sleep(Duration::from_secs(10));
+                    continue;
+                }
+            };
+            for command in reply.commands {
+                log::info!("console: {command:?}");
+                let input = match command {
+                    Command::Key { side, .. } => Input::Flow(Event::Key { side }),
+                    Command::Badge { uid, .. } => match normalize_uid(&uid) {
+                        Some(uid) => Input::Flow(Event::Badge { uid }),
+                        None => continue,
+                    },
+                    Command::Sync { app: Some(app), .. } => Input::SelectApp(app),
+                    Command::Sync { .. } => Input::Sync,
+                    Command::Tap { x, y, .. } => Input::Tap(x, y),
+                    Command::Restart { .. } => Input::Restart,
+                    Command::ForgetWifi { .. } => Input::ForgetWifi,
+                    Command::Unknown => continue,
+                };
+                if inputs.send(input).is_err() {
                     return;
                 }
-                thread::sleep(Duration::from_secs(10));
-                continue;
             }
-        };
-        for command in reply.commands {
-            log::info!("console: {command:?}");
-            let input = match command {
-                Command::Key { side, .. } => Input::Flow(Event::Key { side }),
-                Command::Badge { uid, .. } => match normalize_uid(&uid) {
-                    Some(uid) => Input::Flow(Event::Badge { uid }),
-                    None => continue,
-                },
-                Command::Sync { .. } => Input::Sync,
-                Command::Restart { .. } => Input::Restart,
-                Command::ForgetWifi { .. } => Input::ForgetWifi,
-                Command::Unknown => continue,
-            };
-            if inputs.send(input).is_err() {
-                return;
-            }
-        }
-    })?;
+        })?;
     Ok(())
 }
 
@@ -61,16 +65,18 @@ pub struct Mirror(Sender<Vec<u8>>);
 impl Mirror {
     pub fn start(api: Api) -> Result<Self> {
         let (frames, received) = mpsc::channel::<Vec<u8>>();
-        thread::Builder::new().stack_size(10 * 1024).spawn(move || {
-            while let Ok(mut frame) = received.recv() {
-                while let Ok(newer) = received.try_recv() {
-                    frame = newer;
+        thread::Builder::new()
+            .stack_size(10 * 1024)
+            .spawn(move || {
+                while let Ok(mut frame) = received.recv() {
+                    while let Ok(newer) = received.try_recv() {
+                        frame = newer;
+                    }
+                    if let Err(e) = api.put_frame(&frame) {
+                        log::warn!("screen mirror: {e:#}");
+                    }
                 }
-                if let Err(e) = api.put_frame(&frame) {
-                    log::warn!("screen mirror: {e:#}");
-                }
-            }
-        })?;
+            })?;
         Ok(Self(frames))
     }
 

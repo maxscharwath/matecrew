@@ -16,7 +16,11 @@ pub struct Buzzer {
 }
 
 impl Buzzer {
-    pub fn new(timer: TIMER0<'static>, channel: CHANNEL0<'static>, pin: Gpio44<'static>) -> Result<Self> {
+    pub fn new(
+        timer: TIMER0<'static>,
+        channel: CHANNEL0<'static>,
+        pin: Gpio44<'static>,
+    ) -> Result<Self> {
         let timer = LedcTimerDriver::new(timer, &TimerConfig::new().frequency(4.kHz().into()))?;
         let mut channel = LedcDriver::new(channel, timer, pin)?;
         channel.set_duty(0)?;
@@ -24,12 +28,7 @@ impl Buzzer {
     }
 
     pub fn beep(&mut self, beep: Beep) {
-        let tones: &[(u32, u64)] = match beep {
-            Beep::Key => &[(4_000, 40)],
-            Beep::Accepted => &[(4_000, 60), (0, 60), (4_000, 60)],
-            Beep::Error => &[(1_000, 300)],
-        };
-        for &(hz, ms) in tones {
+        for &(hz, ms) in beep.tones() {
             if let Err(e) = self.tone(hz, ms) {
                 log::warn!("buzzer: {e}");
                 return;
@@ -41,7 +40,13 @@ impl Buzzer {
     fn tone(&mut self, hz: u32, ms: u64) -> Result<()> {
         if hz > 0 {
             // The timer belongs to the channel driver, so its frequency is set through ESP-IDF.
-            unsafe { ledc_set_freq(ledc_mode_t_LEDC_LOW_SPEED_MODE, ledc_timer_t_LEDC_TIMER_0, hz) };
+            unsafe {
+                ledc_set_freq(
+                    ledc_mode_t_LEDC_LOW_SPEED_MODE,
+                    ledc_timer_t_LEDC_TIMER_0,
+                    hz,
+                )
+            };
             self.channel.set_duty(self.channel.get_max_duty() / 2)?;
         }
         thread::sleep(Duration::from_millis(ms));

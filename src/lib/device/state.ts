@@ -3,10 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
-import { itemImage, smallImage, stockChart, toPngDataUrl, patternSample } from "@/lib/device/bitmap";
+import { itemImage, smallImage } from "@/lib/device/bitmap";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
-import type { DeviceState } from "@/lib/device/contract";
-import { CHART_HEIGHT, CHART_WIDTH, type ScreenData } from "@/lib/device/screen";
+import type { DeviceState, DeviceScreen } from "@/lib/device/contract";
 
 /** Below this the terminal and the site warn that it needs charging. */
 export const LOW_BATTERY_MV = 3500;
@@ -109,6 +108,9 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", ...stats(b.userId ?? "") })),
     syncTimes: await syncTimes(office.id, office.timezone, device.syncTimes),
     serverTime: new Date().toISOString(),
+    screen: await buildScreenData(device, { items, labels }),
+    appUrl: ["example", "kit"].includes(process.env.DEVICE_UI_APP ?? "") ? "/api/device/ui" : null,
+    theme: process.env.DEVICE_UI_THEME === "macos" ? "macos" : process.env.DEVICE_UI_THEME === "dark" ? "dark" : "flipper",
     firmware: release && {
       version: release.version,
       url: `/api/device/firmware/${encodeURIComponent(release.version)}`,
@@ -177,11 +179,14 @@ async function preparation(officeId: string, timezone: string) {
   return { label: session.label, total: requests.length, items: [...byItem.values()] };
 }
 
-export async function buildScreenData(device: AuthenticatedDevice): Promise<ScreenData> {
+export async function buildScreenData(
+  device: AuthenticatedDevice,
+  loaded?: { items: Awaited<ReturnType<typeof loadItems>>; labels: Awaited<ReturnType<typeof keyLabels>> },
+): Promise<DeviceScreen> {
   const { office } = device;
   const [items, labels, t, prep] = await Promise.all([
-    loadItems(office.id),
-    keyLabels(device),
+    loaded ? Promise.resolve(loaded.items) : loadItems(office.id),
+    loaded ? Promise.resolve(loaded.labels) : keyLabels(device),
     getTranslations({ locale: office.locale, namespace: "devices.screen" }),
     preparation(office.id, office.timezone),
   ]);
@@ -192,13 +197,18 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
   }).format(new Date());
 
   const thresholds = items.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
-  // The chart only fits next to three items or fewer: one line style each.
-  const charted = items.length <= CHART_MAX_ITEMS ? items : [];
-  const history = await stockHistory(office.id, office.timezone, charted);
-  const max = Math.max(10, ...history.flat(), ...thresholds.slice(0, charted.length));
+  // Larger catalogues use aggregate history, keeping the graph present without an unreadable legend.
+  const allHistory = items.length ? await stockHistory(office.id, office.timezone, items) : [];
+  const aggregate = items.length > CHART_MAX_ITEMS;
+  const history = aggregate
+    ? [Array.from({ length: CHART_DAYS }, (_, day) => allHistory.reduce((sum, series) => sum + series[day], 0))]
+    : allHistory;
+  const max = Math.max(10, ...history.flat());
   const chartMax = Math.ceil(max / 10) * 10;
 
   return {
+    version: 1,
+    template: "dashboard",
     officeName: office.name,
     time,
     wifiBars: wifiBars(device.wifiRssi),
@@ -209,14 +219,13 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
         name: i.name,
         stock: i.qty,
         low: i.qty <= thresholds[index],
-        image: await toPngDataUrl(await itemImage(i.imageKey, i.terminalImage)),
-        pattern: await toPngDataUrl(patternSample(index, 8)),
+        image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits),
       })),
     ),
     chart:
-      charted.length > 0
+      items.length > 0
         ? {
-            image: await toPngDataUrl(stockChart(history, chartMax, Math.min(...thresholds), CHART_WIDTH, CHART_HEIGHT)),
+            series: history,
             max: chartMax,
             days: CHART_DAYS,
           }
@@ -229,13 +238,13 @@ export async function buildScreenData(device: AuthenticatedDevice): Promise<Scre
           name: i.name,
           count: i.names.length,
           names: i.names.join(", "),
-          image: await toPngDataUrl(await itemImage(i.imageKey, i.terminalImage)),
+          image: base64(smallImage(await itemImage(i.imageKey, i.terminalImage)).bits),
         })),
       ),
     },
     lowLabel: t("lowStock"),
     moreLabel: t("more"),
-    chartLabel: t("chart", { days: CHART_DAYS }),
+    chartLabel: t(aggregate ? "chartTotal" : "chart", { days: CHART_DAYS }),
     leftLabel: labels.left,
     rightLabel: labels.right,
   };

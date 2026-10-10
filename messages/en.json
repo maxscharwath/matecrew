@@ -1144,6 +1144,7 @@
       "preparation": "Preparation",
       "preparationOf": "Preparation · {label}",
       "toPrepare": "{count, plural, one {# mate} other {# mates}}",
+      "chartTotal": "Total stock · {days} days",
       "chart": "Stock · {days} days",
       "more": "more"
     },
@@ -1236,7 +1237,9 @@
       "hardwareId": "Identifier",
       "more": "More actions",
       "waiting": "{count, plural, one {# command waiting} other {# commands waiting}}",
-      "noFrame": "The device has not sent its screen yet."
+      "noFrame": "The device has not sent its screen yet.",
+      "application": "Application",
+      "tapScreen": "Click a displayed button to control the device"
     },
     "virtual": {
       "open": "Virtual terminal",
@@ -1268,7 +1271,27 @@
       "sensorsHint": "Sent to the site with the next sync.",
       "queue": "{count, plural, =0 {Queue} one {# take waiting} other {# takes waiting}}",
       "queueEmpty": "Everything is sent. Cut the Wi-Fi to watch takes pile up.",
-      "monitor": "Monitor"
+      "monitor": "Monitor",
+      "theme": {
+        "label": "Device theme",
+        "dark": "Dark"
+      },
+      "buzzer": {
+        "title": "Virtual piezo",
+        "mute": "Mute",
+        "enable": "Enable",
+        "muted": "Muted",
+        "ready": "Audio ready",
+        "activate": "Click to activate",
+        "volume": "Volume: {value}%",
+        "volumeLabel": "Piezo volume",
+        "key": "Key",
+        "accepted": "Success",
+        "error": "Error",
+        "idle": "Idle",
+        "hint": "Signal shared with the firmware. Timbre depends on your speakers.",
+        "notification": "Notification"
+      }
     },
     "virtualBadge": "virtual",
     "linkDevice": "Link a device",

@@ -7,7 +7,7 @@
 //! ghosting partial refreshes leave: at the first screen, then on the main
 //! screen after FULL_EVERY partial ones or FULL_AFTER, with the fast waveform.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use core::convert::Infallible;
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use esp_idf_svc::hal::{
@@ -63,7 +63,13 @@ impl Screen {
             PinDriver::output(pins.dc)?,
             PinDriver::output(pins.rst)?,
         );
-        Ok(Self { epd, shown: vec![0; frame::BYTES], next: Frame::new(), partials: 0, last_full: None })
+        Ok(Self {
+            epd,
+            shown: vec![0; frame::BYTES],
+            next: Frame::new(),
+            partials: 0,
+            last_full: None,
+        })
     }
 
     /// Draws a screen from `matecrew_ui`: a partial refresh of what changed.
@@ -73,34 +79,41 @@ impl Screen {
         self.present(false)
     }
 
-    /// Draws the site's main screen: rows top to bottom, MSB first, 1 = ink.
-    /// The moment to clear the ghosting with a full refresh, when it is due.
-    pub fn show_bits(&mut self, bits: &[u8]) -> Result<()> {
-        if bits.len() != frame::BYTES {
-            bail!("screen bitmap is {} bytes", bits.len());
-        }
-        self.next.bits.copy_from_slice(bits);
-        let due = self.partials >= FULL_EVERY || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
+    /// Locally draw the idle screen, clear ghosting when due, then sleep the panel.
+    pub fn show_main(
+        &mut self,
+        draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>,
+    ) -> Result<()> {
+        let _ = self.next.clear(BinaryColor::Off);
+        let _ = draw(&mut self.next);
+        let due = self.partials >= FULL_EVERY
+            || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
         self.present(due)?;
-        // The main screen stays until the next key or sync: power the panel down.
         if self.epd.is_awake() {
             self.epd.sleep()?;
         }
         Ok(())
     }
 
-    /// The site's main screen with something drawn over it, like the offline banner.
-    pub fn show_bits_with(&mut self, bits: &[u8], over: impl FnOnce(&mut Canvas) -> Result<(), Infallible>) -> Result<()> {
-        if bits.len() != frame::BYTES {
-            bail!("screen bitmap is {} bytes", bits.len());
-        }
-        self.next.bits.copy_from_slice(bits);
-        let _ = over(&mut self.next);
-        self.present(false)?;
-        if self.epd.is_awake() {
-            self.epd.sleep()?;
-        }
-        Ok(())
+    /// Portable TSX bytecode apps use the same physical panel and changed-region refresh path.
+    pub fn show_app(&mut self, app: &matecrew_ui::engine::Runtime) -> Result<()> {
+        self.show_main(|canvas| {
+            app.scene().render(
+                canvas,
+                app.data(),
+                (matecrew_ui::WIDTH / app.scene().width)
+                    .min(matecrew_ui::HEIGHT / app.scene().height)
+                    .max(1),
+            )?;
+            let theme = matecrew_ui::Theme::from_name(
+                app.data()["local"]["theme"].as_str().unwrap_or("flipper"),
+            );
+            if app.data()["$overlay"]["dialog"]["visible"] == true {
+                Ok(())
+            } else {
+                matecrew_ui::notifications::render(canvas, theme)
+            }
+        })
     }
 
     /// What the panel shows, in the format of the site's screen: 1 = ink.
@@ -117,11 +130,22 @@ impl Screen {
             self.epd.full(&self.next.bits, fast)?;
             self.partials = 0;
             self.last_full = Some(Instant::now());
-            log::info!("display: {} refresh in {} ms", if fast { "fast" } else { "full" }, started.elapsed().as_millis());
+            log::info!(
+                "display: {} refresh in {} ms",
+                if fast { "fast" } else { "full" },
+                started.elapsed().as_millis()
+            );
         } else if let Some(window) = changed {
             self.epd.partial(window, &self.shown, &self.next.bits)?;
             self.partials += 1;
-            log::info!("display: {} x {} at {},{} in {} ms", window.width, window.height, window.x, window.y, started.elapsed().as_millis());
+            log::info!(
+                "display: {} x {} at {},{} in {} ms",
+                window.width,
+                window.height,
+                window.x,
+                window.y,
+                started.elapsed().as_millis()
+            );
         } else {
             return Ok(());
         }

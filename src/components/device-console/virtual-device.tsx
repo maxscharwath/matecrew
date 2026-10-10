@@ -1,16 +1,49 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ArrowLeft, Check, MonitorSmartphone, Power, RefreshCw, Unlink, Volume2, VolumeX, Wifi, WifiOff } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  MonitorSmartphone,
+  Power,
+  RefreshCw,
+  Unlink,
+  Volume2,
+  VolumeX,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { approveDeviceLink } from "@/app/link/actions";
-import { DeviceWasm, WASM_URL, type Beep } from "@/lib/device/virtual/wasm";
-import { VirtualDevice, type LogEntry, type Phase, type Snapshot } from "@/lib/device/virtual/runtime";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { DeviceTheme } from "@/lib/device/contract";
+import { ScreenControl } from "./screen-control";
+import { FrameCanvas } from "./frame-canvas";
+import { BuzzerEmulator, useBuzzerEmulator } from "./buzzer-emulator";
+import { DeviceWasm, WASM_URL } from "@/lib/device/virtual/wasm";
+import {
+  VirtualDevice,
+  type LogEntry,
+  type Phase,
+  type Snapshot,
+} from "@/lib/device/virtual/runtime";
 import {
   BadgeZone,
   DeviceShell,
@@ -51,24 +84,26 @@ export function VirtualDevicePanel({ officeId, officeName, badges }: Props) {
     DeviceWasm.load()
       .then((wasm) => {
         if (cancelled) return;
-        current = new VirtualDevice(wasm, `matecrew:virtual-device:${officeId}`);
+        current = new VirtualDevice(
+          wasm,
+          `matecrew:virtual-device:${officeId}`,
+        );
         current.start();
         setDevice(current);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : String(e)),
+      );
     return () => {
       cancelled = true;
       current?.dispose();
     };
   }, [officeId]);
 
-  useEffect(() => {
-    device?.setBeep(sound ? playBeep : () => {});
-  }, [device, sound]);
-
   useWasmHotReload(device);
 
-  if (error) return <p className="text-destructive">{t("loadError", { error })}</p>;
+  if (error)
+    return <p className="text-destructive">{t("loadError", { error })}</p>;
   if (!device) return <p className="text-muted-foreground">{t("loading")}</p>;
   return (
     <Running
@@ -106,18 +141,33 @@ function Running({
 }) {
   const t = useTranslations("devices.virtual");
   const tc = useTranslations("devices.console");
-  const snapshot = useSyncExternalStore(device.subscribe, device.getSnapshot, device.getSnapshot);
+  const snapshot = useSyncExternalStore(
+    device.subscribe,
+    device.getSnapshot,
+    device.getSnapshot,
+  );
   const [badgeOpen, setBadgeOpen] = useState(false);
-  const [pressed, setPressed] = useState<Side | null>(null);
+  const [pressed, setPressed] = useState<readonly Side[]>([]);
+  const buzzer = useBuzzerEmulator(device, sound);
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const shortcuts = useMemo(
     () => ({
       key: (side: Side) => {
-        setPressed(side);
+        setPressed([side]);
         clearTimeout(flashTimer.current);
-        flashTimer.current = setTimeout(() => setPressed(null), 250);
-        device.press(side);
+        flashTimer.current = setTimeout(() => setPressed([]), 250);
+        const source = "accessible-click";
+        device.setKeyLevel(side, true, source);
+        setTimeout(() => device.setKeyLevel(side, false, source), 40);
+      },
+      keyLevel: (side: Side, high: boolean, source: string) => {
+        device.setKeyLevel(side, high, source);
+        setPressed(
+          (["left", "right"] as const).filter((key) =>
+            device.gpio.read(key === "left" ? 5 : 8),
+          ),
+        );
       },
       badge: () => setBadgeOpen(true),
       sync: () => device.syncNow(),
@@ -125,30 +175,94 @@ function Running({
     [device],
   );
   useDeviceShortcuts(shortcuts, badgeOpen);
+  useEffect(() => {
+    const release = () => {
+      device.releaseKeys();
+      setPressed([]);
+    };
+    const visibility = () => {
+      if (document.hidden) release();
+    };
+    globalThis.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      release();
+      clearTimeout(flashTimer.current);
+      globalThis.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [device]);
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      onPointerDownCapture={buzzer.unlock}
+      onKeyDownCapture={buzzer.unlock}
+    >
       <div className="flex flex-wrap items-center gap-3">
         <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link href={`/org/${officeId}/admin/devices`}>
             <ArrowLeft /> {tc("back")}
           </Link>
         </Button>
-        <h1 className="text-2xl font-bold">{snapshot.linked?.deviceName ?? t("title")}</h1>
+        <h1 className="text-2xl font-bold">
+          {snapshot.linked?.deviceName ?? t("title")}
+        </h1>
         <PhasePill phase={snapshot.phase} />
         <div className="ml-auto flex flex-wrap gap-2">
+          <Select
+            value={snapshot.theme}
+            onValueChange={(theme) => device.setTheme(theme as DeviceTheme)}
+          >
+            <SelectTrigger
+              className="h-8 w-[140px]"
+              aria-label={t("theme.label")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="flipper">Flipper</SelectItem>
+              <SelectItem value="macos">macOS</SelectItem>
+              <SelectItem value="dark">{t("theme.dark")}</SelectItem>
+            </SelectContent>
+          </Select>
           {snapshot.linked && (
             <Button asChild variant="outline" size="sm">
-              <Link href={`/org/${officeId}/admin/devices/${snapshot.linked.deviceId}`} target="_blank">
+              <Link
+                href={`/org/${officeId}/admin/devices/${snapshot.linked.deviceId}`}
+                target="_blank"
+              >
                 <MonitorSmartphone /> {tc("open")}
               </Link>
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => device.syncNow()} disabled={!snapshot.linked}>
+          <Select
+            value={snapshot.app}
+            onValueChange={(app: "mate" | "showcase") => device.selectApp(app)}
+          >
+            <SelectTrigger className="w-36" aria-label={tc("application")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mate">maté</SelectItem>
+              <SelectItem value="showcase">Showcase</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => device.syncNow()}
+            disabled={!snapshot.linked}
+          >
             <RefreshCw /> {tc("sync")}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => device.setNetwork(!snapshot.network)}>
-            {snapshot.network ? <WifiOff /> : <Wifi />} {snapshot.network ? t("cutWifi") : t("restoreWifi")}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => device.setNetwork(!snapshot.network)}
+          >
+            {snapshot.network ? <WifiOff /> : <Wifi />}{" "}
+            {snapshot.network ? t("cutWifi") : t("restoreWifi")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => device.restart()}>
             <Power /> {tc("restart")}
@@ -162,7 +276,12 @@ function Running({
           >
             <Unlink /> {t("forget")}
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onSound(!sound)} aria-label={sound ? t("mute") : t("unmute")}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onSound(!sound)}
+            aria-label={sound ? t("mute") : t("unmute")}
+          >
             {sound ? <Volume2 /> : <VolumeX />}
           </Button>
         </div>
@@ -173,7 +292,19 @@ function Running({
           <DeviceShell
             pressed={pressed}
             onKey={shortcuts.key}
-            screen={<FrameCanvas bits={snapshot.bits} refreshes={snapshot.refreshes} full={snapshot.refresh === "full"} />}
+            onKeyLevel={shortcuts.keyLevel}
+            screen={
+              <ScreenControl
+                label={tc("tapScreen")}
+                onTap={(x, y) => device.tapScreen(x, y)}
+              >
+                <FrameCanvas
+                  bits={snapshot.bits}
+                  refreshes={snapshot.refreshes}
+                  full={snapshot.refresh === "full"}
+                />
+              </ScreenControl>
+            }
             badge={
               <BadgeZone
                 badges={badges}
@@ -190,7 +321,28 @@ function Running({
         </div>
 
         <div className="space-y-4">
-          {snapshot.link && <LinkCard code={snapshot.link.code} url={snapshot.link.url} officeId={officeId} officeName={officeName} />}
+          {snapshot.link && (
+            <LinkCard
+              code={snapshot.link.code}
+              url={snapshot.link.url}
+              officeId={officeId}
+              officeName={officeName}
+            />
+          )}
+          <BuzzerEmulator buzzer={buzzer} sound={sound} onSound={onSound} />
+          <Card className="gap-2 py-4">
+            <CardHeader className="px-4">
+              <CardTitle className="text-sm">GPIO · TTP223</CardTitle>
+            </CardHeader>
+            <CardContent className="flex justify-between px-4 font-mono text-xs">
+              <span>
+                D4 / GPIO 5 : {pressed.includes("left") ? "HIGH" : "LOW"}
+              </span>
+              <span>
+                D9 / GPIO 8 : {pressed.includes("right") ? "HIGH" : "LOW"}
+              </span>
+            </CardContent>
+          </Card>
           <SensorsCard device={device} />
           <QueueCard queue={snapshot.queue} />
         </div>
@@ -208,50 +360,39 @@ function PhasePill({ phase }: { phase: Phase }) {
     <span
       className={cn(
         "inline-flex items-center gap-2 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        live ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
-        phase === "linking" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        live
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          : "text-muted-foreground",
+        phase === "linking" &&
+          "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
-      <span className={cn("size-2 rounded-full", live ? "bg-emerald-500" : phase === "linking" ? "animate-pulse bg-amber-500" : "bg-zinc-400")} />
+      <span
+        className={cn(
+          "size-2 rounded-full",
+          live
+            ? "bg-emerald-500"
+            : phase === "linking"
+              ? "animate-pulse bg-amber-500"
+              : "bg-zinc-400",
+        )}
+      />
       {t(phase)}
     </span>
   );
 }
 
-const PAPER = [236, 234, 227];
-const INK = [29, 29, 31];
-
-/** Draws the 1-bit frame. A full refresh flashes black and white like the panel; a partial one does not. */
-function FrameCanvas({ bits, refreshes, full }: { bits: Uint8Array | null; refreshes: number; full: boolean }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const element = canvas.current;
-    const context = element?.getContext("2d");
-    if (!element || !context || !bits) return;
-    const image = context.createImageData(800, 480);
-    for (let i = 0; i < 800 * 480; i++) {
-      const [r, g, b] = bits[i >> 3] & (0x80 >> (i & 7)) ? INK : PAPER;
-      image.data.set([r, g, b, 255], i * 4);
-    }
-    context.putImageData(image, 0, 0);
-    if (full && refreshes > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      element.animate([{ filter: "invert(1)" }, { filter: "none" }, { filter: "invert(1)" }, { filter: "none" }], {
-        duration: 600,
-        easing: "steps(1, end)",
-      });
-    }
-  }, [bits, refreshes, full]);
-  return (
-    <canvas
-      ref={canvas}
-      width={800}
-      height={480}
-      className="size-full [@media(min-resolution:2dppx)]:[image-rendering:pixelated]"
-    />
-  );
-}
-
-function LinkCard({ code, url, officeId, officeName }: { code: string; url: string; officeId: string; officeName: string }) {
+function LinkCard({
+  code,
+  url,
+  officeId,
+  officeName,
+}: {
+  code: string;
+  url: string;
+  officeId: string;
+  officeName: string;
+}) {
   const t = useTranslations("devices.virtual");
   const [pending, setPending] = useState(false);
   return (
@@ -260,7 +401,9 @@ function LinkCard({ code, url, officeId, officeName }: { code: string; url: stri
         <CardTitle className="text-sm">{t("linkTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 px-4">
-        <div className="font-mono text-2xl font-semibold tracking-widest">{code}</div>
+        <div className="font-mono text-2xl font-semibold tracking-widest">
+          {code}
+        </div>
         <Button
           className="w-full"
           disabled={pending}
@@ -272,7 +415,8 @@ function LinkCard({ code, url, officeId, officeName }: { code: string; url: stri
             form.set("name", t("defaultName"));
             const result = await approveDeviceLink(form);
             setPending(false);
-            if (result.success) toast.success(t("approved", { office: result.officeName }));
+            if (result.success)
+              toast.success(t("approved", { office: result.officeName }));
             else toast.error(result.error);
           }}
         >
@@ -347,7 +491,9 @@ function Slider({
     <label className="block space-y-1.5 text-sm">
       <span className="flex justify-between">
         <span>{label}</span>
-        <span className="font-mono text-xs text-muted-foreground">{format(value)}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {format(value)}
+        </span>
       </span>
       <input
         type="range"
@@ -367,7 +513,9 @@ function QueueCard({ queue }: { queue: Snapshot["queue"] }) {
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
-        <CardTitle className="text-sm">{t("queue", { count: queue.length })}</CardTitle>
+        <CardTitle className="text-sm">
+          {t("queue", { count: queue.length })}
+        </CardTitle>
       </CardHeader>
       <CardContent className="px-4">
         {queue.length === 0 ? (
@@ -377,7 +525,9 @@ function QueueCard({ queue }: { queue: Snapshot["queue"] }) {
             {queue.map((take) => (
               <li key={take.id} className="flex justify-between gap-2">
                 <span>{take.action}</span>
-                <span className="truncate text-muted-foreground">{take.badgeUid}</span>
+                <span className="truncate text-muted-foreground">
+                  {take.badgeUid}
+                </span>
               </li>
             ))}
           </ul>
@@ -403,45 +553,24 @@ function Monitor({ logs }: { logs: LogEntry[] }) {
   }, [logs]);
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
-      <div className="border-b border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-400">{t("monitor")}</div>
+      <div className="border-b border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-400">
+        {t("monitor")}
+      </div>
       <div className="h-56 overflow-y-auto px-4 py-2 font-mono text-[12px] leading-5">
         {logs.map((entry) => (
           <div key={entry.id} className="flex gap-3">
-            <span className="shrink-0 text-zinc-600">{new Date(entry.at).toLocaleTimeString()}</span>
-            <span className={cn("break-all", LOG_COLORS[entry.kind])}>{entry.text}</span>
+            <span className="shrink-0 text-zinc-600">
+              {new Date(entry.at).toLocaleTimeString()}
+            </span>
+            <span className={cn("break-all", LOG_COLORS[entry.kind])}>
+              {entry.text}
+            </span>
           </div>
         ))}
         <div ref={end} />
       </div>
     </div>
   );
-}
-
-let audio: AudioContext | null = null;
-
-/** The piezo's patterns: a click for a key, two rising notes for a take, a low buzz for an error. */
-function playBeep(beep: Beep) {
-  audio ??= new AudioContext();
-  const tones: Record<Beep, [hz: number, seconds: number][]> = {
-    key: [[4000, 0.03]],
-    accepted: [
-      [3000, 0.06],
-      [4000, 0.09],
-    ],
-    error: [[440, 0.25]],
-  };
-  let at = audio.currentTime;
-  for (const [hz, seconds] of tones[beep]) {
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-    oscillator.type = "square";
-    oscillator.frequency.value = hz;
-    gain.gain.value = 0.04;
-    oscillator.connect(gain).connect(audio.destination);
-    oscillator.start(at);
-    oscillator.stop(at + seconds);
-    at += seconds + 0.05;
-  }
 }
 
 /**
@@ -453,9 +582,16 @@ function useWasmHotReload(device: VirtualDevice | null) {
     if (process.env.NODE_ENV !== "development" || !device) return;
     let version: string | null = null;
     const timer = setInterval(async () => {
-      const response = await fetch(WASM_URL, { method: "HEAD", cache: "no-store" }).catch(() => null);
-      const next = response?.headers.get("etag") ?? response?.headers.get("last-modified") ?? null;
-      if (version !== null && next !== null && next !== version) device.replaceWasm(await DeviceWasm.load());
+      const response = await fetch(WASM_URL, {
+        method: "HEAD",
+        cache: "no-store",
+      }).catch(() => null);
+      const next =
+        response?.headers.get("etag") ??
+        response?.headers.get("last-modified") ??
+        null;
+      if (version !== null && next !== null && next !== version)
+        device.replaceWasm(await DeviceWasm.load());
       version = next;
     }, 1500);
     return () => clearInterval(timer);

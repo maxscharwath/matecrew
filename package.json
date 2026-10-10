@@ -14,7 +14,10 @@
     "seed": "bun prisma/seed.ts",
     "setup:qstash": "bun scripts/setup-qstash.ts",
     "postinstall": "prisma generate",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build"
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
+    "device:ui": "bun run device:icons && bun scripts/build-terminal-ui.mjs && bun scripts/build-device-ui.mjs && bun scripts/build-device-ui.mjs device/screens/showcase.tsx && bun scripts/build-device-ui.mjs device/screens/kit-demo.tsx && bun scripts/build-device-ui.mjs device/screens/area-demo.tsx && bun scripts/build-device-ui.mjs device/apps/showcase/index.tsx device/apps/showcase/app.dui && bun scripts/build-device-ui.mjs device/screens/example.tsx device/engine/tests/fixtures/app.dui && bun scripts/build-device-ui.mjs device/screens/system.tsx && bun scripts/build-device-ui.mjs device/screens/boot.tsx",
+    "device:preview": "bun run device:ui && cargo run --manifest-path device/sim/Cargo.toml",
+    "device:icons": "bun scripts/build-device-icons.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1000.0",
@@ -65,7 +68,12 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@iconify-json/pixelarticons": "1.2.10",
+    "@iconify-json/streamline-pixel": "1.2.0",
+    "@matecrew/device-ui": "workspace:*",
+    "@react-pdf/types": "2.9.2",
     "@tailwindcss/postcss": "^4",
+    "@types/mdx": "2.0.14",
     "@types/node": "^20",
     "@types/pg": "^8.18.0",
     "@types/react": "^19",
@@ -89,5 +97,8 @@
     "prisma",
     "sharp",
     "unrs-resolver"
+  ],
+  "workspaces": [
+    "device/authoring"
   ]
 }

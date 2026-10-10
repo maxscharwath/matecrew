@@ -5,6 +5,8 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // Build-time device TSX emits binary nodes, with no DOM or React reconciliation.
+  { files: ["device/apps/**/*.tsx", "device/screens/**/*.tsx", "device/authoring/**/*.tsx"], rules: { "react/jsx-key": "off", "jsx-a11y/alt-text": "off" } },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

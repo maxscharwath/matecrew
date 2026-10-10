@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+device-engine = { path = "../engine" }
 matecrew-core = { path = "../core" }
 embedded-graphics = "0.8"
-qrcodegen = "1.8"
-u8g2-fonts = "0.8"
+
+serde_json = "1"

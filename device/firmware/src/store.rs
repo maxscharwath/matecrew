@@ -32,11 +32,46 @@ impl Store {
     }
 
     fn get_blob(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let Some(len) = self.0.blob_len(key)? else { return Ok(None) };
+        let Some(len) = self.0.blob_len(key)? else {
+            return Ok(None);
+        };
         let mut buf = vec![0u8; len];
         Ok(self.0.get_blob(key, &mut buf)?.map(<[u8]>::to_vec))
     }
 
+    pub fn app_mode(&self) -> Result<Option<matecrew_core::contract::BuiltinApp>> {
+        Ok(match self.get("app_mode")?.as_deref() {
+            Some("showcase") => Some(matecrew_core::contract::BuiltinApp::Showcase),
+            Some("mate") => Some(matecrew_core::contract::BuiltinApp::Mate),
+            _ => None,
+        })
+    }
+    pub fn set_app_mode(&self, app: matecrew_core::contract::BuiltinApp) -> Result<()> {
+        self.set(
+            "app_mode",
+            match app {
+                matecrew_core::contract::BuiltinApp::Mate => "mate",
+                matecrew_core::contract::BuiltinApp::Showcase => "showcase",
+            },
+        )
+    }
+    pub fn showcase_data(&self) -> Result<Option<serde_json::Value>> {
+        self.get_blob("showcase")?
+            .map(|b| serde_json::from_slice(&b).map_err(Into::into))
+            .transpose()
+    }
+    pub fn set_showcase_data(&self, data: &serde_json::Value) -> Result<()> {
+        let mut cache = data.clone();
+        // API state already has its own cache; keep this slot for local UI/navigation/images.
+        if let Some(object) = cache.as_object_mut() {
+            object.remove("showcase");
+        }
+        let bytes = serde_json::to_vec(&cache)?;
+        if bytes.len() <= 8192 {
+            self.0.set_blob("showcase", &bytes)?;
+        }
+        Ok(())
+    }
     pub fn wifi(&self) -> Result<Option<WifiCredentials>> {
         Ok(match (self.get("wifi_ssid")?, self.get("wifi_pass")?) {
             (Some(ssid), Some(password)) => Some(WifiCredentials { ssid, password }),
@@ -130,7 +165,9 @@ impl Store {
 
     /// Badges, keys and items from the last sync, for badging while offline.
     pub fn state(&self) -> Result<Option<DeviceState>> {
-        Ok(self.get_blob("state")?.and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+        Ok(self
+            .get_blob("state")?
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
     }
 
     pub fn set_state(&self, state: &DeviceState) -> Result<()> {
@@ -139,19 +176,41 @@ impl Store {
 
     /// Takes the site has not acknowledged yet, and badges it has not seen.
     pub fn queue(&self) -> Result<Queue> {
-        Ok(self.get_blob("queue")?.map(|bytes| Queue::from_bytes(&bytes)).unwrap_or_default())
+        Ok(self
+            .get_blob("queue")?
+            .map(|bytes| Queue::from_bytes(&bytes))
+            .unwrap_or_default())
     }
 
     pub fn set_queue(&self, queue: &Queue) -> Result<()> {
         Ok(self.0.set_blob("queue", &queue.to_bytes())?)
     }
 
-    /// ETag of the screen bitmap on the panel, so an unchanged screen is not redrawn.
-    pub fn screen_etag(&self) -> Result<Option<String>> {
-        self.get("etag")
+    pub fn app(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        if self.get("app_url")?.as_deref() != Some(url) {
+            return Ok(None);
+        }
+        self.get_blob("app")
+    }
+    pub fn set_app(&self, url: &str, bytes: &[u8]) -> Result<()> {
+        // Keep the board's small NVS partition available for badges and offline takes.
+        if bytes.len() <= 8192 {
+            self.0.set_blob("app", bytes)?;
+            self.set("app_url", url)?;
+        }
+        Ok(())
     }
 
-    pub fn set_screen_etag(&self, etag: &str) -> Result<()> {
-        self.set("etag", etag)
+    pub fn app_data(&self) -> Result<Option<serde_json::Value>> {
+        Ok(self
+            .get_blob("app_data")?
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+    }
+    pub fn set_app_data(&self, value: &serde_json::Value) -> Result<()> {
+        let bytes = serde_json::to_vec(value)?;
+        if bytes.len() <= 8192 {
+            self.0.set_blob("app_data", &bytes)?;
+        }
+        Ok(())
     }
 }

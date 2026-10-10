@@ -12,7 +12,7 @@ Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifa
 - **Prise** : on touche une action, on badge, l'écran confirme avec un bip. On a 10 s pour annuler.
 - **Badge inconnu** : l'écran le signale et le badge apparaît sur le site, où un admin l'attribue à un membre. Personne n'a besoin de connaître un UID.
 - **Hors ligne** : les prises restent en mémoire et partent à la synchro suivante.
-- **Batterie** : le niveau remonte sur le site ; alerte à l'écran et sur le site sous 3,5 V.
+- **Batterie** : le contrat et le simulateur exposent la tension ; la mesure ADC réelle et l’alerte matérielle restent à terminer.
 - **Sans interrupteur** : gestes à deux touches pour éteindre, rallumer et redémarrer (détail dans `CLAUDE.md`).
 
 ### Mise en service
@@ -53,7 +53,7 @@ Le principe est celui du « device authorization grant » (RFC 8628), le même q
 | `GET` | `/api/device/state` | jeton | Stock, libellés, badges, réglages, firmware attendu |
 | `POST` | `/api/device/takes` | jeton | Envoyer les prises en attente (idempotent) |
 | `POST` | `/api/device/status` | jeton | Batterie, version, signal Wi-Fi, badges inconnus |
-| `GET` | `/api/device/screen` | jeton | Écran principal en bitmap 1 bit, `304` s'il n'a pas changé |
+| `GET` | `/api/device/ui` | jeton | Application précompilée binaire DUI1, activée par `state.appUrl` |
 | `GET` | `/api/device/commands?wait=25` | jeton | Ce qu'un admin fait depuis la console : touche, badge, synchro, redémarrage, oubli du Wi-Fi. Tenue jusqu'à 25 s |
 | `PUT` | `/api/device/frame` | jeton | Ce que l'écran affiche, 48 000 octets, pour le miroir de la console |
 | `GET` | `/api/device/firmware/<version>` | jeton | Image du firmware annoncé dans l'état, pour la mise à jour |
@@ -74,13 +74,34 @@ Publier une version :
 2. `just release` : construit l'image applicative `release/matecrew-<version>.bin`.
 3. `just publish` : l'envoie sur la copie locale de la production (`scripts/dev-prod-copy.sh`). Pour un autre site : `bun scripts/publish-firmware.ts <image> [version]` avec la `DATABASE_URL` et le stockage de ce site. Republier une version la remplace.
 
-## L'écran principal est en React
+## Tous les écrans utilisent le moteur TSX
 
-Le site dessine l'écran principal en React (`src/lib/device/screen.tsx`) avec `next/og`, en pixel art comme les écrans de l'appareil : une toile de 200 × 120 avec des polices pixel (Silkscreen, Pixelify Sans), agrandie quatre fois en 800 × 480 pixels noir et blanc, soit 48 000 octets. L'appareil le télécharge à chaque synchro et l'affiche tel quel.
+Les 20 variantes d’écran (Wi-Fi, liaison, badge, prise, confirmation, consommation, erreurs, OTA, stock et préparation) sont réparties dans `screens/terminal/`, avec `apps/mate/index.ts` comme point d’entrée. `just ui` compile ces composants en fichiers binaires DUI1, environ 16 Ko pour l’ensemble. Il n’y a plus de mise en page Rust manuscrite ni de renderer serveur. Rust décode les nœuds, résout les bindings, calcule les textes et dessine les pixels sur l’appareil. Le même code fonctionne dans le terminal virtuel en Wasm.
 
-- Aperçu exact dans Admin > Appareils. Avec `just api`, une modification de `screen.tsx` se voit en rechargeant la page.
-- Changer le design ne demande pas de reflasher l'appareil.
-- Les écrans qui doivent apparaître tout de suite et hors ligne (badge, confirmation, Wi-Fi, code de liaison, erreurs) restent dessinés par l'appareil, dans `device/ui`.
+`ui/` adapte les événements et les données métier aux écrans compilés. `engine/` est indépendant de matécrew, ESP-IDF et du réseau : framebuffer monochrome de dimensions configurables, composants, textes, images, QR, graphiques, état local et effets. Les API fournissent les données : `state.screen` contient stocks, textes et historique numérique, jamais une mise en page ou une trame. Les anciennes copies NVS sans `screen` sont adaptées aux mêmes écrans TSX.
+
+- Les cartes gardent les noms lisibles, les stocks bas sont inversés et le graphe reste visible. Les grands catalogues affichent six articles en aperçu ; le sélecteur contient tous les articles.
+- Les polices sont intégrées au moteur. Les textes sont limités selon leur largeur réelle et chaque composant est découpé à ses limites.
+- La copie NVS permet de redessiner hors ligne. Le pilote ignore les trames identiques, rafraîchit uniquement les zones modifiées et gère la veille et les rafraîchissements complets.
+- Les définitions intégrées sont embarquées dans le firmware : changer leur TSX demande `just ui`, `just web` et une nouvelle version du firmware. Une application téléchargeable peut aussi être fournie via `state.appUrl`, sous forme de `.dui`.
+- `screens/example.tsx` montre `useDeviceData`, `useDeviceState` et les boutons. Les hooks sont compilés en déclarations de ressources et d’actions ; leur état et leurs effets s’exécutent en Rust. Le host fait les requêtes API et stocke le cache. Aucune VM JavaScript n’est nécessaire.
+- Ce DSL TSX supporte Screen, Group, Row, Column, Card, Text, Image, Qr, Chart, Progress, Button, List et When. Ce n’est pas un runtime React/DOM/CSS ; les fonctions TSX s’exécutent à la compilation, pas sur le serveur à chaque rendu.
+
+Voir `authoring/README.md` pour le SDK complet et `engine/README.md` pour l’intégration sur un autre appareil.
+
+### Showcase et contrôle sans boutons
+
+`apps/showcase/` contient une application de neuf pages : kit UI, courbes/barres/aires, icônes, PNG téléchargés, QR, thèmes, état local, API et buzzer. La navigation push/back, les caches et le rendu s’exécutent sur l’appareil. `bun run device:preview` génère les captures réelles dans `sim/out/showcase-*.png`.
+
+La console web et le terminal virtuel proposent un sélecteur **maté / Showcase** et un écran cliquable. Ces clics sont transmis comme coordonnées logiques au moteur. Les touches gauche/droite restent utilisables à distance. En USB : `app showcase`, `r`, `l`, `tap 95 85`, `app mate`. Le changement d’application attend la fin d’une interaction maté en cours. Le mode et les données locales sont conservés après redémarrage.
+
+Le SDK expose `useRouter`, `useBuzzer` et `useDeviceInfo`, plus `input="left"` sur les boutons. Les callbacks retournent une action compilée. `useDeviceInfo` fournit le profil de broches et les capteurs disponibles ; ce n’est pas une API d’écriture GPIO. La mesure ADC réelle de batterie reste à implémenter.
+
+Les thèmes `flipper`, `macos`, `dark` se choisissent dans le simulateur ou via `useDeviceTheme`. `DEVICE_UI_THEME` configure le thème initial des écrans maté. Les images web sont des PNG non entrelacés (64 KiB / 512 × 512 max), décodés et tramés dans Rust ; aucun serveur ne dessine l’écran.
+
+### Migration vers le firmware 0.3.0
+
+L’ancien endpoint `/api/device/screen` et le renderer serveur sont supprimés ; les données sont incluses dans `/api/device/state`. Les firmwares 0.2.x attendent encore une trame serveur. Préparer le firmware 0.3.0 et le Wasm avant de déployer ce changement serveur ; flasher les appareils existants, ou leur livrer 0.3.0 via OTA tant que le serveur précédent fonctionne encore. Il n’y a plus de renderer serveur de compatibilité.
 
 ## Console et terminal virtuel
 
@@ -94,7 +115,10 @@ Dans Admin > Appareils :
 ```
 device/
   core/      logique sans matériel : contrat de l'API, file de prises, trames PN532
-  ui/        écrans, compilés pour le Mac et pour l'appareil
+  authoring/ DSL et compilateur binaire TSX
+  screens/   écrans TSX et définitions DUI1 compilées
+  engine/    moteur Rust générique, indépendant du matériel
+  ui/        adaptation des données matécrew au moteur
   sim/       rend tous les écrans en PNG sur le Mac, sans carte
   web/       le terminal virtuel : core et ui en WebAssembly pour le site
   firmware/  firmware Rust (ESP-IDF) du XIAO ESP32-S3
@@ -107,7 +131,8 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 |---|---|
 | `just setup` | Installe la toolchain Rust de l'ESP32-S3, `espflash`, `ldproxy` et `cargo-watch` |
 | `just sim` | Redessine les écrans dans `sim/out/` à chaque sauvegarde, en une seconde environ |
-| `just test` | Tests des écrans et de la logique sur le Mac |
+| `just test` | Tests Rust des écrans et de la logique sur le Mac |
+| `just ui` | Compile tous les écrans TSX en binaires DUI1 |
 | `just web` | Recompile le terminal virtuel (`public/device/matecrew.wasm`) |
 | `just release` | Construit l'image d'une mise à jour par le réseau |
 | `just publish` | La publie sur le site local : les terminaux l'installent à leur synchro suivante |
@@ -117,8 +142,27 @@ Les commandes passent par [`just`](https://github.com/casey/just), depuis `devic
 
 On itère sur les écrans avec `just sim`, ou dans le terminal virtuel avec `just api` et `just web-watch`. On ne flashe que pour tester le matériel, le Wi-Fi ou la liaison.
 
+Les tests d’intégration du terminal virtuel se lancent depuis la racine avec `bun test tests/device` (après `just web`). Ils vérifient le contrat partagé, le rendu Wasm, la synchro sans téléchargement de trame et le démarrage hors ligne.
+
 Le wasm compilé est versionné dans `public/device/` : Vercel n'a pas la toolchain Rust. Après un changement dans `core`, `ui` ou `web`, lancer `just web` et commiter le fichier.
 
 Sans touches ni lecteur câblés, le moniteur série de `just flash` les remplace : `l` et `r` touchent une touche, `b 04A1B2C3D4E5F6` pose un badge, `s` lance une synchro.
 
 La première compilation du firmware prend 10 à 20 minutes : elle compile ESP-IDF. Les suivantes prennent quelques secondes.
+
+
+### Présentation du kit
+
+Les écrans maté et Showcase utilisent désormais une grille 400 × 240, dessinée à
+2× sur la dalle 800 × 480. Le moteur aligne les textes avec les métriques réelles
+des polices. La barre basse indique les deux touches physiques par des flèches
+vers le bas, des coins inférieurs carrés et un repère RFID central. L’heure est
+celle du dernier rafraîchissement, le Wi-Fi vient de l’hôte, et la batterie reste
+« ? » tant que sa mesure n’est pas disponible.
+
+Les dessins maison du SDK sont remplacés par Pixelarticons et Streamline Pixel,
+importés comme composants (`WifiIcon`, `FoodDrinkCoffeeIcon`…) et convertis au
+build en sprites monochromes. Le [catalogue local](authoring/catalog.html) permet
+de chercher et copier les imports. Les visuels monochromes des produits fournis
+par l’API restent prioritaires. Les crédits sont dans
+[authoring/art/licenses](authoring/art/licenses/README.md).

@@ -74,7 +74,8 @@ export async function assignBadge(
 const consoleCommand = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("key"), side: z.enum(["left", "right"]) }),
   z.object({ kind: z.literal("badge"), uid: z.string() }),
-  z.object({ kind: z.literal("sync") }),
+  z.object({ kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),
+  z.object({ kind: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),
   z.object({ kind: z.literal("restart") }),
   z.object({ kind: z.literal("forgetWifi") }),
 ]);

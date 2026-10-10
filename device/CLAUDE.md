@@ -99,12 +99,12 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 ## API de l'appareil (côté site)
 
-- Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `screen`, `commands`, `frame`, `firmware/<version>`).
+- Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `ui`, `commands`, `frame`, `firmware/<version>`).
 - Mise à jour par le réseau : `state.firmware` annonce la dernière `FirmwareRelease` ; `firmware/src/ota.rs` l'installe dans l'autre slot (`partitions.csv`) et la confirme après sa première synchro, sinon le bootloader revient à l'ancienne. Publier : `just release` puis `just publish`.
 - Liaison façon RFC 8628 : `/api/device/link` renvoie `device_code` (secret, gardé par l'appareil) et `user_code` (affiché) ; un admin valide sur `/link` ; l'appareil interroge `/api/device/link/token` toutes les 5 s et reçoit son jeton `mcd_…` une seule fois.
 - Ensuite : `Authorization: Bearer mcd_…`. Le serveur ne garde que le SHA-256 du jeton. Un 401 veut dire « appareil délié » : effacer le jeton et recommencer la liaison.
 - `POST /api/device/takes` est idempotent par `id` de prise : renvoyer toute la file tant qu'elle n'est pas acquittée, puis retirer les ids de `done`.
-- `GET /api/device/screen` : 48 000 octets, lignes de haut en bas, 8 pixels par octet, bit de poids fort d'abord, 1 = encre. Envoyer `If-None-Match` avec le dernier ETag pour recevoir `304`.
+- Tous les écrans sont des binaires DUI1 compilés depuis `device/screens/terminal.tsx`, rendus par `device/engine` sur l’appareil (Rust/Wasm pour le virtuel). `state.screen` contient uniquement les textes, sprites et valeurs de l’historique. L’ancien endpoint `/api/device/screen` est supprimé. Les 48 000 octets 1 bit sont uniquement envoyés par l’appareil à `/api/device/frame` pour le miroir. Voir la migration 0.3.0 dans `README.md`.
 - En local : `just api`, puis compiler le firmware avec `MATECREW_URL=http://<ip-du-mac>:3000`. Comptes de test dans `prisma/seed.ts`.
 
 ## Outils
@@ -130,3 +130,12 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 - Commande Bastelgarage reçue. Le kit est ouvert et le XIAO C3 retiré de son support ; le S3 va le remplacer.
 - La carte driver mesure environ 41 × 26 mm. La batterie est une 654060 (environ 60 × 40 × 6,5 mm).
 - Le modèle du boîtier dans `device/hardware/` doit encore être mis à jour avec la vraie batterie et la vraie carte driver.
+
+## Moteur TSX (0.3.0)
+
+Les mises en page maté sont réparties dans `screens/terminal/`, exportées par `apps/mate/index.ts`, compilées par `bun scripts/build-terminal-ui.mjs` depuis la racine. Ne pas ajouter de renderer de secours Rust ou serveur. `ui/` fournit seulement les données et services métier au moteur générique `engine/`. Les écrans compilés `screens/compiled/*.dui` et `public/device/matecrew.wasm` sont versionnés. Exécuter `just ui` avant les builds et les tests ; valider avec le simulateur et `bun test tests/device`.
+
+
+`apps/showcase/` est la démonstration interactive du SDK : navigation, kit, graphiques, images, thèmes et effets matériels. Le firmware et le Wasm l’embarquent. Contrôles USB sans boutons : `app showcase`, `l`, `r`, `tap <x> <y>`, `app mate`. Les mêmes commandes passent par la console web. Les nouveaux hooks et limites sont documentés dans `authoring/README.md`.
+
+Les layouts intégrés sont en 400 × 240, affichés à 2×. Le protocole de clic distant reste normalisé en 200 × 120 ; les hôtes le convertissent aux dimensions de l’app. Les icônes sont des imports nommés depuis `authoring/icons/`, générés par `device:icons` : ne pas réintroduire de dessins maison.
