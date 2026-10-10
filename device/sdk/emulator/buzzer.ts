@@ -4,7 +4,7 @@
 export class VirtualBuzzer {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
-  private nodes = new Set<OscillatorNode>();
+  private readonly nodes = new Set<OscillatorNode>();
   private nextAt = 0;
   private volume = 0.3;
   private enabled = true;
@@ -38,7 +38,7 @@ export class VirtualBuzzer {
   }
   play(pattern: readonly (readonly [hz: number, ms: number])[]): boolean {
     const audio = this.context;
-    if (!this.enabled || !audio || audio.state !== "running" || !this.master)
+    if (!this.enabled || audio?.state !== "running" || !this.master)
       return false;
     let at = Math.max(audio.currentTime, this.nextAt);
     for (const [hz, ms] of pattern) {

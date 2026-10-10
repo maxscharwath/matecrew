@@ -1,7 +1,8 @@
 /**
  * The device link protocol, as bytes: UUIDs, version, the JSON written to set up or control a
- * device, the events it notifies, the frames of a firmware update and their CRC-32. Pure: no
- * Bluetooth, no DOM. Mirrors `device/core/src/link.rs` on the firmware side.
+ * device, the events it notifies, the frames of a firmware update and their CRC-32 (the screen
+ * mirror is in `screen.ts`). Pure: no Bluetooth, no DOM. Mirrors `device/core/src/link.rs` on the
+ * firmware side.
  */
 
 /** Bumped when a message changes in a way an older peer would misread. */
@@ -14,6 +15,8 @@ export const UUIDS = {
   control: "d3b70003-6b0e-4e4f-8c1a-5f3a2b1c0d00",
   events: "d3b70004-6b0e-4e4f-8c1a-5f3a2b1c0d00",
   ota: "d3b70005-6b0e-4e4f-8c1a-5f3a2b1c0d00",
+  /** Optional: devices without a screen, or older ones, do not have it. */
+  screen: "d3b70006-6b0e-4e4f-8c1a-5f3a2b1c0d00",
 } as const;
 
 /** The longest attribute value (Bluetooth Core, ATT): one write at most. */
@@ -56,7 +59,9 @@ export type RemoteCommand =
   | { cmd: "badge"; uid: string }
   | { cmd: "sync" }
   | { cmd: "restart" }
-  | { cmd: "notify"; text: string };
+  | { cmd: "notify"; text: string }
+  /** A touch on the screen at (x, y) of a 200 × 120 grid, whatever the screen's size. */
+  | { cmd: "tap"; x: number; y: number };
 
 export type DeviceEvent =
   | { t: "log"; level: "E" | "W" | "I" | "D" | "V"; target: string; msg: string }
@@ -108,12 +113,18 @@ export function encodeProvisioning(setup: Provisioning): Result<Uint8Array> {
   return bytes.length <= ATTRIBUTE_MAX ? ok(bytes) : fail("invalid", "provisioning longer than one attribute");
 }
 
+/** An integer cell of a grid `size` wide. */
+const isCell = (value: number, size: number) => Number.isInteger(value) && value >= 0 && value < size;
+
 export function encodeCommand(command: RemoteCommand): Result<Uint8Array> {
   if (command.cmd === "notify" && (command.text.length === 0 || command.text.length > 256)) {
     return fail("invalid", "a notification has 1 to 256 characters");
   }
   if (command.cmd === "badge" && !/^[0-9A-Fa-f:\s-]{8,40}$/.test(command.uid)) {
     return fail("invalid", "a badge UID is hexadecimal");
+  }
+  if (command.cmd === "tap" && !(isCell(command.x, 200) && isCell(command.y, 120))) {
+    return fail("invalid", "a tap is within 200 × 120");
   }
   return ok(encoder.encode(JSON.stringify(command)));
 }

@@ -13,6 +13,7 @@ test("every committed .dui and generated registry matches its TSX source", async
     new URL("../../device", import.meta.url).pathname,
   );
   let mate = 0;
+  let screens = 0;
   for (const name of Object.keys(project.config.apps)) {
     const { artifacts, outputs } = await compileApp(project, name);
     assert.ok(artifacts.length > 0, name);
@@ -37,12 +38,14 @@ test("every committed .dui and generated registry matches its TSX source", async
         assert.equal(new TextDecoder().decode(dui1.slice(0, 4)), "DUI1");
       } else assert.equal(magic, "DUI1");
     }
-    if (name === "mate")
+    if (name === "mate") {
       mate = artifacts.reduce((sum, { bytes }) => sum + bytes.length, 0);
+      screens = artifacts.length;
+    }
   }
-  // Native 800 × 480 screens carry packed art; compressed, 21 screens (about and served
-  // included) stay under 1 KB each on average.
-  assert.ok(mate > 0 && mate < 20_000, `maté screens exceed 20 KB: ${mate}`);
+  // Native 800 × 480 screens carry packed art; compressed, they stay under 1.2 KB each on average
+  // (the account, failure and about screens carry sentences in every language).
+  assert.ok(mate > 0 && mate < screens * 1_200, `maté screens exceed 1.2 KB each on average: ${mate} B for ${screens}`);
   const scene = compileScreen(example);
   assert.ok(encodeScene(scene).length < JSON.stringify(scene).length / 2);
 });

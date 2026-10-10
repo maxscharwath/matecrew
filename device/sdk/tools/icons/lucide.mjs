@@ -3,6 +3,7 @@
  * time by ../../icons/vector.ts at the size an app uses it, so no bitmap set ships here.
  * Also draws the host's status sprites (Wi-Fi, battery, charging) for device/ui.
  */
+import { readFileSync } from "node:fs";
 import { readFile, readdir, writeFile, copyFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
@@ -16,16 +17,19 @@ const lucide = dirname(require.resolve("lucide-react/package.json"));
 const version = JSON.parse(await readFile(join(lucide, "package.json"), "utf8")).version;
 const source = join(lucide, "dist/esm/icons");
 
-const icons = [];
-for (const file of (await readdir(source)).filter((f) => f.endsWith(".js")).sort()) {
-  const text = await readFile(join(source, file), "utf8");
-  // Aliases re-export a canonical file; keep each drawing once, under its own name.
-  if (!text.includes("const __iconNode")) continue;
-  const { __iconNode } = await import(join(source, file));
-  // React keys are not drawing data.
-  const nodes = __iconNode.map(([tag, attributes]) => [tag, Object.fromEntries(Object.entries(attributes).filter(([name]) => name !== "key"))]);
-  icons.push([file.slice(0, -3), nodes]);
-}
+// Aliases re-export a canonical file; keep each drawing once, under its own name. Code-unit order.
+const drawings = (await readdir(source))
+  .filter((f) => f.endsWith(".js"))
+  .sort((a, b) => Number(a > b) - Number(a < b))
+  .filter((file) => readFileSync(join(source, file), "utf8").includes("const __iconNode"));
+const icons = await Promise.all(
+  drawings.map(async (file) => {
+    const { __iconNode } = await import(join(source, file));
+    // React keys are not drawing data.
+    const nodes = __iconNode.map(([tag, attributes]) => [tag, Object.fromEntries(Object.entries(attributes).filter(([name]) => name !== "key"))]);
+    return [file.slice(0, -3), nodes];
+  }),
+);
 const vector = await readFile(new URL("../../icons/vector.ts", import.meta.url));
 const hash = createHash("sha256")
   .update(version)

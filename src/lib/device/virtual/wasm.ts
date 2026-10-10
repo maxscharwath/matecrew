@@ -4,6 +4,7 @@
  * and JSON, no generated bindings.
  */
 import type {
+  DeviceAccount,
   DeviceState,
   DeviceTake,
   DeviceScreen,
@@ -13,6 +14,16 @@ import type {
 export const WASM_URL = "/device/matecrew.wasm";
 
 export type Side = "left" | "right";
+
+/** Why the site gave no usable answer (`flow::Failure`), as the failure screen tells it. */
+export type Failure =
+  | { kind: "offline"; cause: "wifi" | "timeout" | "connect" | "tls" | "dns" | "network" }
+  | { kind: "site"; status: number }
+  | { kind: "unreadable" }
+  | { kind: "unknownBadge" };
+
+/** A purchase as a list shows it. */
+type PurchaseRow = { item: string; when: string; price: string | null; image: string };
 
 export type FlowScreen =
   | { type: "main" }
@@ -28,26 +39,51 @@ export type FlowScreen =
     }
   | { type: "leave"; name: string }
   | { type: "taken"; name: string; item: string; image: string }
-  | {
-      type: "summary";
-      name: string;
-      today: number;
-      week: number;
-      month: number;
-    }
   | { type: "unknownBadge"; uid: string; claimUrl: string | null }
   | { type: "notReady" }
   | { type: "noItems" }
   | { type: "about" }
-  | { type: "served"; name: string; count: number };
+  | { type: "served"; name: string; count: number }
+  | { type: "accountBadge"; purchases: boolean }
+  | { type: "accountLoading"; name: string; cancelling: boolean }
+  | {
+      type: "account";
+      name: string;
+      today: number;
+      week: number;
+      month: number;
+      cost: string | null;
+      days: number[][];
+      products: string[];
+      labels: string[];
+      recent: PurchaseRow[];
+    }
+  | {
+      type: "purchases";
+      name: string;
+      rows: PurchaseRow[];
+      selected: number;
+      back: boolean;
+      page: number;
+      pages: number;
+      confirm: boolean;
+    }
+  | { type: "failed"; task: "account" | "purchases" | "cancel"; failure: Failure };
 
 export type FlowEvent =
   | { type: "key"; side: Side }
   | { type: "bothKeys" }
   | { type: "badge"; uid: string }
+  /** A key held long: the right one lists the badge holder's purchases. */
+  | { type: "longKey"; side: Side }
+  | { type: "account"; account: DeviceAccount }
+  | { type: "accountFailed"; failure: Failure }
+  | { type: "purchaseCancelled"; cancelled: boolean }
   | { type: "tick" };
 
 export type Beep = "key" | "accepted" | "error" | "notification" | "badge" | "boot" | "unknown";
+/** A beep's number for `buzzer_pattern` (device/web). */
+const BEEP_TONES: Record<Beep, number> = { key: 0, accepted: 1, error: 2, notification: 3, badge: 4, unknown: 5, boot: 6 };
 
 export type Effect =
   | { type: "show"; screen: FlowScreen }
@@ -55,7 +91,11 @@ export type Effect =
   | { type: "queue"; take: DeviceTake }
   | { type: "noteUnknownBadge"; uid: string }
   /** "Servi" and a runner's badge: serve the preparation's session now. */
-  | { type: "serve"; uid: string; name: string; sessionId: string | null };
+  | { type: "serve"; uid: string; name: string; sessionId: string | null }
+  /** The badge holder's account, "Mon compte": answer with `account` or `accountFailed`. */
+  | { type: "fetchAccount"; uid: string }
+  /** Cancel one of their purchases: answer with `purchaseCancelled` or `accountFailed`. */
+  | { type: "cancelPurchase"; uid: string; id: string };
 
 /** Screens the terminal draws itself, outside the take flow. */
 export type View =
@@ -204,9 +244,10 @@ export class DeviceWasm {
     ).slice();
   }
 
-  inputApp(input: string): AppEffect[] | null {
+  /** The effects of a hardware input; none when the screen binds nothing to it. */
+  inputApp(input: string): AppEffect[] {
     const len = this.call("app_input", input);
-    if (len === -2) return null;
+    if (len === -2) return [];
     if (len < 0) throw new Error("Load an app before sending hardware input");
     return JSON.parse(
       decoder.decode(
@@ -223,21 +264,7 @@ export class DeviceWasm {
     return this.exports.gpio_sample(Number(left), Number(right), nowMs);
   }
   buzzerPattern(beep: Beep): [hz: number, ms: number][] {
-    const len = this.exports.buzzer_pattern(
-      beep === "accepted"
-        ? 1
-        : beep === "error"
-          ? 2
-          : beep === "notification"
-            ? 3
-            : beep === "badge"
-              ? 4
-              : beep === "unknown"
-                ? 5
-                : beep === "boot"
-                  ? 6
-                  : 0,
-    );
+    const len = this.exports.buzzer_pattern(BEEP_TONES[beep]);
     return JSON.parse(
       decoder.decode(
         new Uint8Array(

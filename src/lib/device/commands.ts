@@ -34,23 +34,29 @@ const KIND_TO_ROW = {
   forgetWifi: "FORGET_WIFI",
 } as const;
 
+/** What a row stores besides its kind: the side, the UID, the point or the app. */
+function argOf(command: ConsoleCommand): string | null {
+  switch (command.kind) {
+    case "key":
+      return command.side;
+    case "both":
+      return "both";
+    case "badge":
+      return command.uid;
+    case "tap":
+      return `tap:${command.x}:${command.y}`;
+    case "sync":
+      return command.app ? `app:${command.app}` : null;
+    default:
+      return null;
+  }
+}
+
 export function toRow(command: ConsoleCommand): {
   kind: CommandRow["kind"];
   arg: string | null;
 } {
-  const arg =
-    command.kind === "key"
-      ? command.side
-      : command.kind === "both"
-        ? "both"
-        : command.kind === "badge"
-        ? command.uid
-        : command.kind === "tap"
-          ? `tap:${command.x}:${command.y}`
-          : command.kind === "sync" && command.app
-            ? `app:${command.app}`
-            : null;
-  return { kind: KIND_TO_ROW[command.kind], arg };
+  return { kind: KIND_TO_ROW[command.kind], arg: argOf(command) };
 }
 
 export function toWire(

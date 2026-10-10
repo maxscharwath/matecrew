@@ -36,5 +36,8 @@ export type SignalBand = "excellent" | "good" | "fair" | "weak";
 
 /** The bands the terminal's Wi-Fi icon uses. */
 export function signalBand(rssi: number): SignalBand {
-  return rssi >= -55 ? "excellent" : rssi >= -70 ? "good" : rssi >= -85 ? "fair" : "weak";
+  if (rssi >= -55) return "excellent";
+  if (rssi >= -70) return "good";
+  if (rssi >= -85) return "fair";
+  return "weak";
 }

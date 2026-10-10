@@ -17,6 +17,16 @@ async function requireAdmin(officeId: string) {
   return membership?.roles.includes("ADMIN") ? session.user.id : null;
 }
 
+/**
+ * A user code no other link holds. Each draw waits for the previous lookup (a clash is rare, so
+ * it is a chain of one in practice), which is why it recurses instead of looping.
+ */
+async function freeUserCode(): Promise<string> {
+  const userCode = newUserCode();
+  const taken = await prisma.deviceLink.findUnique({ where: { userCode }, select: { id: true } });
+  return taken ? freeUserCode() : userCode;
+}
+
 type Prepared = { ok: true; secret: string; expiresIn: number } | { ok: false; error: "forbidden" | "invalid" };
 
 /**
@@ -33,10 +43,7 @@ export async function prepareBluetoothLink(input: { officeId: string; hardwareId
   if (!userId) return { ok: false, error: "forbidden" };
 
   const secret = newDeviceCode();
-  let userCode = newUserCode();
-  while (await prisma.deviceLink.findUnique({ where: { userCode }, select: { id: true } })) {
-    userCode = newUserCode();
-  }
+  const userCode = await freeUserCode();
   const now = new Date();
   await prisma.deviceLink.create({
     data: {

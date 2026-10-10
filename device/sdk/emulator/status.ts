@@ -26,11 +26,13 @@ const bits = (icon: IconComponent) => {
 
 /** At or under this charge, off USB, the status bar warns (device/core/src/power.rs). */
 export const LOW_PERCENT = 10;
+/** The curve's last point: an empty cell (mV, %). */
+const EMPTY: [number, number] = [3270, 0];
 /** Open-circuit voltage of a 1S LiPo against its charge (mV, %), from full to empty. */
 const CURVE: [number, number][] = [
   [4200, 100], [4150, 95], [4110, 90], [4080, 85], [4020, 80], [3980, 75], [3950, 70],
   [3910, 65], [3870, 60], [3850, 55], [3840, 50], [3820, 45], [3800, 40], [3790, 35],
-  [3770, 30], [3750, 25], [3730, 20], [3710, 15], [3690, 10], [3610, 5], [3270, 0],
+  [3770, 30], [3750, 25], [3730, 20], [3710, 15], [3690, 10], [3610, 5], EMPTY,
 ];
 
 /** Charge in percent for a battery voltage, as the terminal computes it. */
@@ -57,10 +59,42 @@ export function batteryMillivolts(percent: number): number {
       return Math.round(loMv + ((hiMv - loMv) * (p - lo)) / (hi - lo));
     }
   }
-  return CURVE[CURVE.length - 1][0];
+  return EMPTY[0];
 }
 
 type Battery = { millivolts?: number | null; percent?: number | null; usb?: boolean; charging?: boolean };
+
+/** The charge the host reports when it is a percentage, else the one its voltage gives. */
+function chargeOf({ percent }: Battery, millivolts: number | null): number | null {
+  if (typeof percent === "number" && percent >= 0 && percent <= 100) return Math.round(percent);
+  return millivolts === null ? null : batteryPercent(millivolts);
+}
+
+/** The Wi-Fi sprite for a signal in dBm; none without a connection. */
+function wifiIcon(rssi: number | null | undefined): IconComponent {
+  if (typeof rssi !== "number") return WifiOffIcon;
+  if (rssi >= -55) return WifiIcon;
+  if (rssi >= -70) return WifiHighIcon;
+  if (rssi >= -85) return WifiLowIcon;
+  return WifiZeroIcon;
+}
+
+/** The battery sprite: the plug first, then the charge in thirds, a warning when low. */
+function batteryIcon(percent: number | null, usb: boolean, charging: boolean): IconComponent {
+  if (charging) return BatteryChargingIcon;
+  if (usb) return PlugZapIcon;
+  if (percent === null) return BatteryIcon;
+  if (percent <= LOW_PERCENT) return BatteryWarningIcon;
+  if (percent > 66) return BatteryFullIcon;
+  if (percent > 33) return BatteryMediumIcon;
+  return BatteryLowIcon;
+}
+
+/** The charge as text; nothing on USB when it is unknown. */
+function batteryText(percent: number | null, usb: boolean): string {
+  if (percent !== null) return `${percent}%`;
+  return usb ? "" : "--";
+}
 
 /** Raw host readings plus the `status` the kit's status bar binds to. */
 export function decorate(info: Record<string, unknown>): Record<string, unknown> {
@@ -68,32 +102,18 @@ export function decorate(info: Record<string, unknown>): Record<string, unknown>
   const reading = (info.battery ?? {}) as Battery;
   const millivolts = typeof reading.millivolts === "number" ? reading.millivolts : null;
   const usb = reading.usb === true || reading.charging === true;
-  const given = typeof reading.percent === "number" && reading.percent >= 0 && reading.percent <= 100 ? Math.round(reading.percent) : null;
-  const percent = given ?? (millivolts === null ? null : batteryPercent(millivolts));
-  const charging = usb && (percent === null || percent < 100);
+  const percent = chargeOf(reading, millivolts);
+  // Charging only when the charge is known; otherwise the plug alone, as on the terminal.
+  const charging = usb && percent !== null && percent < 100;
   const low = !usb && percent !== null && percent <= LOW_PERCENT;
-  const wifi =
-    typeof rssi !== "number" ? WifiOffIcon
-    : rssi >= -55 ? WifiIcon
-    : rssi >= -70 ? WifiHighIcon
-    : rssi >= -85 ? WifiLowIcon
-    : WifiZeroIcon;
-  const battery =
-    charging ? BatteryChargingIcon
-    : usb ? PlugZapIcon
-    : percent === null ? BatteryIcon
-    : percent <= LOW_PERCENT ? BatteryWarningIcon
-    : percent > 66 ? BatteryFullIcon
-    : percent > 33 ? BatteryMediumIcon
-    : BatteryLowIcon;
   return {
     ...info,
     battery: { millivolts, percent, usb, charging, low },
     status: {
-      wifi: bits(wifi),
-      battery: bits(battery),
+      wifi: bits(wifiIcon(rssi)),
+      battery: bits(batteryIcon(percent, usb, charging)),
       batteryUnknown: percent === null ? "?" : "",
-      batteryText: percent !== null ? `${percent}%` : usb ? "USB" : "--",
+      batteryText: batteryText(percent, usb),
       charging,
       low,
     },

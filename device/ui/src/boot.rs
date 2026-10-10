@@ -102,31 +102,6 @@ impl BootLog {
     }
 }
 
-/// The start as four stages, for hosts that only know a stage number (the site's virtual
-/// terminal, the simulator): the log a terminal shows at each.
-pub fn render<D: DrawTarget<Color = BinaryColor>>(target: &mut D, stage: u8) -> Result<(), D::Error> {
-    let mut log = BootLog::new(6);
-    log.start("screen", &[]);
-    log.done("screenReady", &[]);
-    log.start("reader", &[]);
-    log.done("readerReady", &[("version", "1.6")]);
-    if stage >= 1 {
-        log.start("wifiJoining", &[("ssid", "Wi-Fi")]);
-    }
-    if stage >= 2 {
-        log.done("wifiJoinedQuiet", &[("ssid", "Wi-Fi")]);
-        log.start("site", &[]);
-        log.done("site", &[]);
-        log.start("apps", &[]);
-    }
-    if stage >= 3 {
-        log.done("appsLoaded", &[]);
-        log.start("ready", &[]);
-        log.done("allReady", &[]);
-    }
-    log.render(target)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

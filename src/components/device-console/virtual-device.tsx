@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -133,14 +133,14 @@ function Running({
   badges,
   sound,
   onSound,
-}: {
+}: Readonly<{
   device: VirtualDevice;
   officeId: string;
   officeName: string;
   badges: BadgeOption[];
   sound: boolean;
   onSound: (on: boolean) => void;
-}) {
+}>) {
   const t = useTranslations("devices.virtual");
   const tc = useTranslations("devices.console");
   const snapshot = useSyncExternalStore(
@@ -356,9 +356,12 @@ function Running({
   );
 }
 
-function PhasePill({ phase }: { phase: Phase }) {
+function PhasePill({ phase }: Readonly<{ phase: Phase }>) {
   const t = useTranslations("devices.virtual.phase");
   const live = phase === "online";
+  let dot = "bg-zinc-400";
+  if (live) dot = "bg-emerald-500";
+  else if (phase === "linking") dot = "animate-pulse bg-amber-500";
   return (
     <span
       className={cn(
@@ -370,16 +373,7 @@ function PhasePill({ phase }: { phase: Phase }) {
           "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
-      <span
-        className={cn(
-          "size-2 rounded-full",
-          live
-            ? "bg-emerald-500"
-            : phase === "linking"
-              ? "animate-pulse bg-amber-500"
-              : "bg-zinc-400",
-        )}
-      />
+      <span className={cn("size-2 rounded-full", dot)} />
       {t(phase)}
     </span>
   );
@@ -390,12 +384,12 @@ function LinkCard({
   url,
   officeId,
   officeName,
-}: {
+}: Readonly<{
   code: string;
   url: string;
   officeId: string;
   officeName: string;
-}) {
+}>) {
   const t = useTranslations("devices.virtual");
   const [pending, setPending] = useState(false);
   return (
@@ -438,7 +432,7 @@ function LinkCard({
   );
 }
 
-function SensorsCard({ device }: { device: VirtualDevice }) {
+function SensorsCard({ device }: Readonly<{ device: VirtualDevice }>) {
   const t = useTranslations("devices.virtual");
   const [sensors, setSensors] = useState(() => device.getSensors());
   const change = (patch: Partial<typeof sensors>) => {
@@ -487,7 +481,7 @@ function Slider({
   step,
   format,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   value: number;
   min: number;
@@ -495,11 +489,11 @@ function Slider({
   step: number;
   format: (value: number) => string;
   onChange: (value: number) => void;
-}) {
+}>) {
   return (
     <label className="block space-y-1.5 text-sm">
       <span className="flex justify-between">
-        <span>{label}</span>
+        {label}
         <span className="font-mono text-xs text-muted-foreground">
           {format(value)}
         </span>
@@ -517,8 +511,9 @@ function Slider({
   );
 }
 
-function QueueCard({ queue }: { queue: Snapshot["queue"] }) {
+function QueueCard({ queue }: Readonly<{ queue: Snapshot["queue"] }>) {
   const t = useTranslations("devices.virtual");
+  const format = useFormatter();
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
@@ -533,7 +528,7 @@ function QueueCard({ queue }: { queue: Snapshot["queue"] }) {
           <ul className="space-y-1 font-mono text-xs">
             {queue.map((take) => (
               <li key={take.id} className="flex justify-between gap-2">
-                <span>{take.action}</span>
+                <span>{format.dateTime(new Date(take.at), { timeStyle: "medium" })}</span>
                 <span className="truncate text-muted-foreground">
                   {take.badgeUid}
                 </span>
@@ -554,7 +549,7 @@ const LOG_COLORS: Record<LogEntry["kind"], string> = {
 };
 
 /** What the serial monitor shows for the real one. */
-function Monitor({ logs }: { logs: LogEntry[] }) {
+function Monitor({ logs }: Readonly<{ logs: LogEntry[] }>) {
   const t = useTranslations("devices.virtual");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {

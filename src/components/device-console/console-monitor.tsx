@@ -32,11 +32,11 @@ export function ConsoleMonitor({
   lines,
   timeZone,
   onClear,
-}: {
+}: Readonly<{
   lines: MonitorLine[];
   timeZone: string;
   onClear: () => void;
-}) {
+}>) {
   const t = useTranslations("devices.console.monitor");
   const format = useFormatter();
   return (
@@ -92,7 +92,7 @@ export function ConsoleMonitor({
   );
 }
 
-function Delivery({ status }: { status: NonNullable<MonitorLine["status"]> }) {
+function Delivery({ status }: Readonly<{ status: NonNullable<MonitorLine["status"]> }>) {
   const t = useTranslations("devices.console.status");
   return (
     <span

@@ -43,7 +43,8 @@ const TEXT_CAPS = (size: number) => Math.round(size * 0.94);
  */
 const FACES = [
   { name: "montserrat_regular", file: "montserrat/Montserrat[wght].ttf", wght: 500, box: REGULAR_BOX, caps: TEXT_CAPS },
-  { name: "montserrat_bold", file: "montserrat/Montserrat[wght].ttf", wght: 650, box: BOLD_BOX, caps: TEXT_CAPS },
+  // Bold text from 20 px up is Space Grotesk (`HEADING_FROM` in engine/src/scene/typography.rs).
+  { name: "montserrat_bold", file: "montserrat/Montserrat[wght].ttf", wght: 650, box: BOLD_BOX, caps: TEXT_CAPS, sizes: [11, 14, 17] },
   { name: "space_grotesk_bold", file: "spacegrotesk/SpaceGrotesk[wght].ttf", wght: 700, box: BOLD_BOX, caps: FULL },
 ];
 
@@ -96,7 +97,7 @@ function gridFit(font: Font, size: number) {
   knots.sort((a, b) => a[0] - b[0]);
   const y = (u: number) => {
     if (u <= knots[0][0]) return knots[0][1] + (u - knots[0][0]) * scale;
-    const last = knots[knots.length - 1];
+    const last = knots.at(-1)!;
     if (u >= last[0]) return last[1] + (u - last[0]) * scale;
     let i = 1;
     while (u > knots[i][0]) i++;
@@ -116,7 +117,7 @@ function polylines(contours: Point[][], map: (p: Pt) => Pt): Pt[][] {
       const first = points.findIndex((p) => p.on);
       if (first < 0) {
         const a = points[0];
-        const b = points[points.length - 1];
+        const b = points.at(-1)!;
         points = [{ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, on: true }, ...points];
       } else points = [...points.slice(first), ...points.slice(0, first)];
       const out: Pt[] = [map(points[0])];
@@ -129,7 +130,7 @@ function polylines(contours: Point[][], map: (p: Pt) => Pt): Pt[][] {
         }
         const next = points[(i + 1) % n];
         const end = next.on ? next : { x: (p.x + next.x) / 2, y: (p.y + next.y) / 2, on: true };
-        const [a, c, b] = [out[out.length - 1], map(p), map(end)];
+        const [a, c, b] = [out.at(-1)!, map(p), map(end)];
         const steps = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 1.5));
         for (let k = 1; k <= steps; k++) {
           const t = k / steps;
@@ -152,7 +153,22 @@ function coverage(lines: Pt[][]) {
   const width = right - left;
   const height = top - bottom;
   const cells = new Float64Array(width * height);
-  // Edges by the pixel rows they cross, so each sample row looks at its own few.
+  const rows = edgeRows(lines, bottom, height);
+  for (let row = 0; row < height * ROWS; row++) {
+    const y = bottom + (row + 0.5) / ROWS;
+    const j = Math.floor(row / ROWS);
+    const crossings = crossingsAt(rows[j], y);
+    let winding = 0;
+    for (let k = 0; k < crossings.length - 1; k++) {
+      winding += crossings[k][1];
+      if (winding) addSpan(cells, j * width, width, crossings[k][0] - left, crossings[k + 1][0] - left);
+    }
+  }
+  return { left, bottom, width, height, cells };
+}
+
+/** Edges by the pixel rows they cross, so each sample row looks at its own few. */
+function edgeRows(lines: Pt[][], bottom: number, height: number): [Pt, Pt][][] {
   const rows: [Pt, Pt][][] = Array.from({ length: height }, () => []);
   for (const line of lines) {
     for (let i = 0; i < line.length; i++) {
@@ -162,53 +178,42 @@ function coverage(lines: Pt[][]) {
       for (let j = Math.max(0, from); j < Math.min(height, to); j++) rows[j].push([a, b]);
     }
   }
-  for (let row = 0; row < height * ROWS; row++) {
-    const y = bottom + (row + 0.5) / ROWS;
-    const crossings: [number, number][] = [];
-    for (const [a, b] of rows[Math.floor(row / ROWS)]) {
-      if (y < Math.min(a.y, b.y) || y >= Math.max(a.y, b.y)) continue;
-      crossings.push([a.x + ((y - a.y) * (b.x - a.x)) / (b.y - a.y), b.y > a.y ? 1 : -1]);
-    }
-    crossings.sort((p, q) => p[0] - q[0]);
-    const j = Math.floor(row / ROWS);
-    let winding = 0;
-    for (let k = 0; k < crossings.length - 1; k++) {
-      winding += crossings[k][1];
-      if (!winding) continue;
-      const [from, to] = [crossings[k][0] - left, crossings[k + 1][0] - left];
-      for (let i = Math.floor(from); i < to && i < width; i++) {
-        const overlap = Math.min(to, i + 1) - Math.max(from, i);
-        if (overlap > 0) cells[j * width + i] += overlap / ROWS;
-      }
-    }
-  }
-  return { left, bottom, width, height, cells };
+  return rows;
 }
 
-/** One glyph at one size: the sideways offset (eighths of a pixel) that leaves the fewest grey pixels. */
+/** Where the edges cross the line at height `y`, left to right, each with its direction (1 up, -1 down). */
+function crossingsAt(edges: [Pt, Pt][], y: number): [number, number][] {
+  const crossings: [number, number][] = [];
+  for (const [a, b] of edges) {
+    if (y < Math.min(a.y, b.y) || y >= Math.max(a.y, b.y)) continue;
+    crossings.push([a.x + ((y - a.y) * (b.x - a.x)) / (b.y - a.y), b.y > a.y ? 1 : -1]);
+  }
+  crossings.sort((p, q) => p[0] - q[0]);
+  return crossings;
+}
+
+/** One sample row's share of the ink between `from` and `to` (pixels from the left edge), on the pixel row at `start`. */
+function addSpan(cells: Float64Array, start: number, width: number, from: number, to: number): void {
+  for (let i = Math.floor(from); i < to && i < width; i++) {
+    const overlap = Math.min(to, i + 1) - Math.max(from, i);
+    if (overlap > 0) cells[start + i] += overlap / ROWS;
+  }
+}
+
+/** One glyph at one size, cropped to its ink; rows go top first. */
 function draw(font: Font, code: number, fit: ReturnType<typeof gridFit>): Glyph | undefined {
-  const index = font.glyphOf(code) ?? (STAND_INS[code] === undefined ? undefined : font.glyphOf(STAND_INS[code]));
+  const index = font.glyphOf(code) ?? font.glyphOf(STAND_INS[code] ?? code);
   if (index === undefined) return undefined;
   const outline = font.outline(index);
   const advance = Math.round(outline.advance * fit.scale);
-  if (!outline.contours.some((c) => c.length > 1)) return { code, width: 0, height: 0, x: 0, y: 0, advance, bits: new Uint8Array() };
-  let best: { grey: number; shift: number; drawn: ReturnType<typeof coverage> } | undefined;
-  for (const shift of [0, 1, -1, 2, -2, 3, -3, 4].map((n) => n / 8)) {
-    const drawn = coverage(polylines(outline.contours, (p) => ({ x: p.x * fit.scale + shift, y: fit.y(p.y) })));
-    const grey = drawn.cells.reduce((sum, c) => sum + Math.min(c, 1 - Math.min(c, 1)), 0);
-    if (!best || grey < best.grey - 1e-9) best = { grey, shift, drawn };
-  }
-  const { left, bottom, width, height, cells } = best!.drawn;
-  // Crop to the ink; rows go top first.
-  let [x0, x1, y0, y1] = [width, -1, height, -1];
-  for (let j = 0; j < height; j++) {
-    for (let i = 0; i < width; i++) {
-      if (cells[j * width + i] < THRESHOLD) continue;
-      [x0, x1, y0, y1] = [Math.min(x0, i), Math.max(x1, i), Math.min(y0, j), Math.max(y1, j)];
-    }
-  }
-  if (x1 < 0) return { code, width: 0, height: 0, x: 0, y: 0, advance, bits: new Uint8Array() };
-  const w = x1 - x0 + 1;
+  const blank = { code, width: 0, height: 0, x: 0, y: 0, advance, bits: new Uint8Array() };
+  if (!outline.contours.some((c) => c.length > 1)) return blank;
+  const drawn = sharpest(outline.contours, fit);
+  const ink = inkBox(drawn);
+  if (!ink) return blank;
+  const { left, bottom, width, cells } = drawn;
+  const { x0, y0, y1 } = ink;
+  const w = ink.x1 - x0 + 1;
   const h = y1 - y0 + 1;
   const bits = new Uint8Array(w * h);
   for (let r = 0; r < h; r++) {
@@ -217,41 +222,67 @@ function draw(font: Font, code: number, fit: ReturnType<typeof gridFit>): Glyph 
   return { code, width: w, height: h, x: left + x0, y: bottom + y0, advance, bits };
 }
 
-const sheet: { name: string; glyphs: Glyph[]; box: Header["box"] }[] = [];
-await mkdir(target, { recursive: true });
-let total = 0;
-for (const face of FACES) {
-  const font = new Font(new Uint8Array(await readFile(new URL(face.file, here))));
-  font.setVariation({ wght: face.wght });
-  for (const size of SIZES) {
-    const fit = gridFit(font, face.caps(size));
-    const codes = size === 49 ? FIGURES : TEXT;
-    const glyphs = codes.map((code) => draw(font, code, fit)).filter((g): g is Glyph => !!g);
-    const inked = glyphs.filter((g) => g.width);
-    const x = Math.min(...inked.map((g) => g.x));
-    const bottom = Math.min(...inked.map((g) => g.y));
-    const [height, y] = face.box[size] ?? [Math.max(...inked.map((g) => g.y + g.height)) - bottom, bottom];
-    const box = { width: Math.max(...inked.map((g) => g.x + g.width)) - x, height, x, y };
-    const data = encode(glyphs, box);
-    // The engine's reader must give back every pixel.
-    const back = decode(data).glyphs;
-    for (const g of glyphs) {
-      const b = back.find((d) => d.code === g.code);
-      if (!b || b.advance !== g.advance || b.x !== g.x || b.y !== g.y || b.bits.join("") !== g.bits.join("")) {
-        throw new Error(`${face.name}_${size}: U+${g.code.toString(16)} does not survive encoding`);
-      }
-    }
-    const out = inked.filter((g) => g.y < y || g.y + g.height > y + height).map((g) => String.fromCodePoint(g.code));
-    if (out.length) console.warn(`${face.name}_${size}: outside the line box: ${out.join("")}`);
-    await writeFile(new URL(`${face.name}_${size}.u8g2font`, target), data);
-    total += data.length;
-    sheet.push({ name: `${face.name}_${size}`, glyphs, box });
+/** The contours' coverage at the sideways shift (in eighths of a pixel) that leaves the fewest grey pixels. */
+function sharpest(contours: Point[][], fit: ReturnType<typeof gridFit>): ReturnType<typeof coverage> {
+  let best: { grey: number; drawn: ReturnType<typeof coverage> } | undefined;
+  for (const shift of [0, 1, -1, 2, -2, 3, -3, 4].map((n) => n / 8)) {
+    const drawn = coverage(polylines(contours, (p) => ({ x: p.x * fit.scale + shift, y: fit.y(p.y) })));
+    const grey = drawn.cells.reduce((sum, c) => sum + Math.min(c, 1 - Math.min(c, 1)), 0);
+    if (!best || grey < best.grey - 1e-9) best = { grey, drawn };
   }
+  return best!.drawn;
 }
+
+/** The inked pixels' bounds, rows counted from the bottom; undefined when nothing takes ink. */
+function inkBox({ width, height, cells }: ReturnType<typeof coverage>) {
+  let [x0, x1, y0, y1] = [width, -1, height, -1];
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      if (cells[j * width + i] < THRESHOLD) continue;
+      [x0, x1, y0, y1] = [Math.min(x0, i), Math.max(x1, i), Math.min(y0, j), Math.max(y1, j)];
+    }
+  }
+  return x1 < 0 ? undefined : { x0, x1, y0, y1 };
+}
+
+/** A face at one size: its glyphs, encoded, in the line box the engine places them by. */
+function buildFont(face: (typeof FACES)[number], font: Font, size: number) {
+  const name = `${face.name}_${size}`;
+  const fit = gridFit(font, face.caps(size));
+  const codes = size === 49 ? FIGURES : TEXT;
+  const glyphs = codes.map((code) => draw(font, code, fit)).filter((g): g is Glyph => !!g);
+  const inked = glyphs.filter((g) => g.width);
+  const x = Math.min(...inked.map((g) => g.x));
+  const bottom = Math.min(...inked.map((g) => g.y));
+  const [height, y] = face.box[size] ?? [Math.max(...inked.map((g) => g.y + g.height)) - bottom, bottom];
+  const box: Header["box"] = { width: Math.max(...inked.map((g) => g.x + g.width)) - x, height, x, y };
+  const data = encode(glyphs, box);
+  // The engine's reader must give back every pixel.
+  const back = decode(data).glyphs;
+  for (const g of glyphs) {
+    const b = back.find((d) => d.code === g.code);
+    if (b?.advance !== g.advance || b.x !== g.x || b.y !== g.y || b.bits.join("") !== g.bits.join("")) {
+      throw new Error(`${name}: U+${g.code.toString(16)} does not survive encoding`);
+    }
+  }
+  const out = inked.filter((g) => g.y < y || g.y + g.height > y + height).map((g) => String.fromCodePoint(g.code));
+  if (out.length) console.warn(`${name}: outside the line box: ${out.join("")}`);
+  return { name, glyphs, box, data };
+}
+
+// Every face file is read first; the fonts then build in order, so warnings come out in order.
+const files = await Promise.all(FACES.map((face) => readFile(new URL(face.file, here))));
+const sheet = FACES.flatMap((face, i) => {
+  const font = new Font(new Uint8Array(files[i]));
+  font.setVariation({ wght: face.wght });
+  return (face.sizes ?? SIZES).map((size) => buildFont(face, font, size));
+});
+await mkdir(target, { recursive: true });
+await Promise.all(sheet.map(({ name, data }) => writeFile(new URL(`${name}.u8g2font`, target), data)));
+const total = sheet.reduce((sum, { data }) => sum + data.length, 0);
 console.log(`${sheet.length} fonts, ${total} bytes, in ${target.pathname}`);
-for (const [from, to] of [["montserrat/OFL.txt", "OFL-Montserrat.txt"], ["spacegrotesk/OFL.txt", "OFL-SpaceGrotesk.txt"]]) {
-  await writeFile(new URL(to, target), await readFile(new URL(from, here)));
-}
+const LICENSES = [["montserrat/OFL.txt", "OFL-Montserrat.txt"], ["spacegrotesk/OFL.txt", "OFL-SpaceGrotesk.txt"]];
+await Promise.all(LICENSES.map(async ([from, to]) => writeFile(new URL(to, target), await readFile(new URL(from, here)))));
 
 if (process.argv.includes("--sheet")) {
   // Every font on a line: its name's glyphs then a pangram, black on white.

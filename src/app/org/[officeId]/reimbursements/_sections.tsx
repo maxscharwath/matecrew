@@ -21,6 +21,30 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const PAGE_SIZE = 20;
 
+type Sign = -1 | 0 | 1;
+
+/** A balance within a centime of zero counts as settled. */
+function balanceSign(amount: number): Sign {
+  if (amount > 0.01) return 1;
+  if (amount < -0.01) return -1;
+  return 0;
+}
+
+/** Net balance seen from the member: positive is owed to them. */
+const NET_BALANCE_COLOR: Record<Sign, string> = {
+  1: "text-emerald-600 dark:text-emerald-400",
+  [-1]: "text-red-600 dark:text-red-400",
+  0: "text-muted-foreground",
+};
+const NET_BALANCE_PREFIX: Record<Sign, string> = { 1: "+", [-1]: "-", 0: "" };
+
+/** Preview balance seen from the period: positive is what the member still owes. */
+const PREVIEW_BALANCE_COLOR: Record<Sign, string> = {
+  1: "text-red-600 dark:text-red-400",
+  [-1]: "text-green-600 dark:text-green-400",
+  0: "text-muted-foreground",
+};
+
 function formatPeriodLabel(startDate: Date, endDate: Date) {
   const isFullMonth =
     startDate.getDate() === 1 &&
@@ -60,38 +84,34 @@ const getPeriodsData = cache(async (officeId: string, userId: string) => {
   // One replay for every period on the screen — see `sliceLedger`.
   const ledger = await buildCostingLedger(officeId);
 
-  const periodsWithData = await Promise.all(
-    periods.map(async (period) => {
-      const result = sliceLedger(ledger, period.startDate, period.endDate);
+  const periodsWithData = periods.map((period) => {
+    const result = sliceLedger(ledger, period.startDate, period.endDate);
 
-      const userShare = result.shares.find((s) => s.userId === userId);
+    const userShare = result.shares.find((s) => s.userId === userId);
 
-      const userLines = await Promise.all(
-        period.lines.map(async (l) => {
-          const other = l.fromUserId === userId ? l.toUser : l.fromUser;
-          return {
-            lineId: l.id,
-            direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
-            otherUserName: other.name,
-            otherUserImage: resolveAvatarUrl(other.image),
-            amount: l.amount.toNumber(),
-            status: l.status,
-          };
-        }),
-      );
-
+    const userLines = period.lines.map((l) => {
+      const other = l.fromUserId === userId ? l.toUser : l.fromUser;
       return {
-        id: period.id,
-        label: formatPeriodLabel(period.startDate, period.endDate),
-        qty: userShare?.qty ?? 0,
-        costShare: userShare?.costShare ?? 0,
-        lossShare: userShare?.lossShare ?? 0,
-        amountPaid: userShare?.amountPaid ?? 0,
-        netOwed: userShare?.netOwed ?? 0,
-        lines: userLines,
+        lineId: l.id,
+        direction: l.fromUserId === userId ? "pay" as const : "receive" as const,
+        otherUserName: other.name,
+        otherUserImage: resolveAvatarUrl(other.image),
+        amount: l.amount.toNumber(),
+        status: l.status,
       };
-    }),
-  );
+    });
+
+    return {
+      id: period.id,
+      label: formatPeriodLabel(period.startDate, period.endDate),
+      qty: userShare?.qty ?? 0,
+      costShare: userShare?.costShare ?? 0,
+      lossShare: userShare?.lossShare ?? 0,
+      amountPaid: userShare?.amountPaid ?? 0,
+      netOwed: userShare?.netOwed ?? 0,
+      lines: userLines,
+    };
+  });
 
   const totalOwed = periodsWithData
     .flatMap((p) => p.lines)
@@ -267,16 +287,8 @@ export async function PendingPaymentsSection({ officeId, userId }: SectionProps)
             <p className="text-xs text-muted-foreground">
               {t("netBalanceLabel")}
             </p>
-            <p
-              className={`text-xl font-bold tabular-nums ${
-                netBalance > 0.01
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : netBalance < -0.01
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-muted-foreground"
-              }`}
-            >
-              {netBalance < -0.01 ? "-" : netBalance > 0.01 ? "+" : ""}CHF{" "}
+            <p className={`text-xl font-bold tabular-nums ${NET_BALANCE_COLOR[balanceSign(netBalance)]}`}>
+              {NET_BALANCE_PREFIX[balanceSign(netBalance)]}CHF{" "}
               {Math.abs(netBalance).toFixed(2)}
             </p>
           </div>
@@ -335,6 +347,11 @@ export async function PreviewSection({ officeId, userId }: SectionProps) {
     currentMonthEnd,
   );
   const previewShare = preview.shares.find((s) => s.userId === userId);
+  const netOwed = previewShare?.netOwed ?? 0;
+  const previewSign = balanceSign(netOwed);
+  let previewBalance = "CHF 0.00";
+  if (previewSign === 1) previewBalance = `CHF ${netOwed.toFixed(2)}`;
+  else if (previewSign === -1) previewBalance = `-CHF ${Math.abs(netOwed).toFixed(2)}`;
   const hasPreviewData = preview.totalConsumption > 0 || preview.totalCost > 0;
 
   if (!hasPreviewData) return null;
@@ -388,20 +405,8 @@ export async function PreviewSection({ officeId, userId }: SectionProps) {
           </div>
           <div className="rounded-lg bg-muted/50 p-3">
             <p className="text-xs text-muted-foreground">{t('reimbursements.balance')}</p>
-            <p
-              className={`mt-1 text-base font-semibold ${
-                (previewShare?.netOwed ?? 0) > 0.01
-                  ? "text-red-600 dark:text-red-400"
-                  : (previewShare?.netOwed ?? 0) < -0.01
-                    ? "text-green-600 dark:text-green-400"
-                    : "text-muted-foreground"
-              }`}
-            >
-              {(previewShare?.netOwed ?? 0) > 0.01
-                ? `CHF ${previewShare!.netOwed.toFixed(2)}`
-                : (previewShare?.netOwed ?? 0) < -0.01
-                  ? `-CHF ${Math.abs(previewShare!.netOwed).toFixed(2)}`
-                  : "CHF 0.00"}
+            <p className={`mt-1 text-base font-semibold ${PREVIEW_BALANCE_COLOR[previewSign]}`}>
+              {previewBalance}
             </p>
           </div>
         </div>

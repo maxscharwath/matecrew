@@ -27,7 +27,7 @@ type Pixels = boolean[];
 function unpack(base64: string | null): Pixels {
   const pixels: Pixels = new Array(SIZE * SIZE).fill(false);
   if (!base64) return pixels;
-  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0);
   for (let i = 0; i < pixels.length; i++) pixels[i] = (bytes[i >> 3] & (0x80 >> (i & 7))) !== 0;
   return pixels;
 }
@@ -37,7 +37,7 @@ function pack(pixels: Pixels): string {
   pixels.forEach((ink, i) => {
     if (ink) bytes[i >> 3] |= 0x80 >> (i & 7);
   });
-  return btoa(String.fromCharCode(...bytes));
+  return btoa(String.fromCodePoint(...bytes));
 }
 
 /** Draws the picture at `scale` pixels per pixel, with a grid when it is the editor. */
@@ -80,10 +80,10 @@ function Picture({
 export function TerminalImageEditor({
   officeId,
   item,
-}: {
+}: Readonly<{
   officeId: string;
   item: { id: string; name: string; hasPhoto: boolean; terminalBits: string; custom: boolean };
-}) {
+}>) {
   const t = useTranslations("items.terminalImage");
   const [open, setOpen] = useState(false);
   const [pixels, setPixels] = useState(() => unpack(item.terminalBits));
@@ -131,7 +131,10 @@ export function TerminalImageEditor({
   const save = (bits: string | null) =>
     startTransition(async () => {
       const result = await setTerminalImage(officeId, item.id, bits);
-      if (!result.success) return void toast.error(result.error);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
       toast.success(t("saved"));
       setOpen(false);
     });

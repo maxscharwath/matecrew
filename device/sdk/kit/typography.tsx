@@ -7,7 +7,7 @@
  *   <Num size="xl">{stock}</Num>
  */
 import { Text, textOf, type Content, type TextChildren } from "../runtime/jsx-runtime";
-import type { Binding, Element, Node, Typography } from "../runtime/types";
+import type { Binding, Node, Typography } from "../runtime/types";
 import type { Dimension } from "../runtime/layout";
 import { upper } from "../runtime/expr";
 import { TYPE, type TypeName, type TypeStyle } from "./tokens";
@@ -66,7 +66,7 @@ export const Muted = styled("caption", 2);
 export const Footnote = styled("footnote", 2);
 
 /** Spaced capitals above a value or a section; the text is capitalised for you. */
-export function Label(props: TextProps) {
+export function Label(props: Readonly<TextProps>) {
   const text = textOf(props.children ?? "");
   const value = "literal" in text ? { literal: String(text.literal ?? "").toUpperCase() } : upper(text);
   return <Styled style="label" {...props} value={value} />;
@@ -78,6 +78,14 @@ export function Num({ size = "md", ...props }: TextProps & { size?: keyof typeof
   return <Styled style={FIGURES[size]} {...props} />;
 }
 
+/** A run's outer edges trimmed: the start of its first part, else the end of its last. */
+function trimEdge(part: TextChildren, i: number, last: number): TextChildren {
+  if (typeof part !== "string") return part;
+  if (i === 0) return part.trimStart();
+  if (i === last) return part.trimEnd();
+  return part;
+}
+
 /**
  * Children that mix text and elements (`<WifiIcon /> Connecter`): each run of text becomes one
  * text node in `style`, trimmed at the edges (the layout's gap spaces them).
@@ -87,9 +95,7 @@ export function inline(children: Content, style: TypeName, align: "left" | "cent
   let run: TextChildren[] = [];
   const flush = () => {
     if (!run.length) return;
-    const parts = run.map((part, i) =>
-      typeof part === "string" ? (i === 0 ? part.trimStart() : i === run.length - 1 ? part.trimEnd() : part) : part,
-    );
+    const parts = run.map((part, i) => trimEdge(part, i, run.length - 1));
     run = [];
     const text = textOf(parts);
     if ("literal" in text && !String(text.literal ?? "")) return;
@@ -109,4 +115,3 @@ export function inline(children: Content, style: TypeName, align: "left" | "cent
   flush();
   return out;
 }
-export type { Element };

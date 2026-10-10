@@ -1,7 +1,6 @@
 /** @jsxImportSource @matecrew/device-ui */
-import { HStack, VStack, Spacer, Label, H2, Num, Media, Progress, Alert, AlertDescription } from "@matecrew/device-ui";
+import { HStack, VStack, Spacer, Label, H2, Num, Media, Progress, Alert, AlertDescription, concat } from "@matecrew/device-ui";
 import { DownloadIcon, PlugZapIcon } from "@matecrew/device-ui/icons/lucide";
-import { concat } from "@matecrew/device-ui";
 import { Frame, useT, view } from "./shared";
 
 /** A firmware update: what is installing, how far, and the one thing not to do. */

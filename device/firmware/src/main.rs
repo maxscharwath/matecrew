@@ -4,7 +4,9 @@
 
 mod api;
 mod ble;
+mod memory;
 mod buzzer;
+mod cache;
 mod cores;
 mod fetch;
 mod console;
@@ -88,6 +90,8 @@ pub enum Input {
     Pressed(Event),
     /// A transfer with the site started or ended: the status bar's arrows may change.
     Net,
+    /// A browser connected, paired or left over Bluetooth, or a pairing waits for the passkey.
+    Bluetooth,
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -322,6 +326,7 @@ fn app() -> Result<()> {
         badge_on_reader: None,
         pressed: false,
         net_drawn: (false, false),
+        ble_drawn: (false, false),
         pending: VecDeque::new(),
         dirty: false,
         api,
@@ -562,6 +567,8 @@ struct Terminal {
     pressed: bool,
     /// The network arrows (up, down) the last drawn screen shows.
     net_drawn: (bool, bool),
+    /// The Bluetooth link the status bar shows: connected, paired.
+    ble_drawn: (bool, bool),
     /// Inputs taken off the channel early, to see whether more are waiting.
     pending: VecDeque<Input>,
     /// A screen was skipped because more inputs were waiting: drawn once they are handled.
@@ -633,6 +640,21 @@ impl Terminal {
                 Next::Input(Input::Fetched(fetched)) => self.fetched(fetched)?,
                 Next::Input(Input::Net) => {
                     if net::shown() != self.net_drawn {
+                        let late = net::lit_ago();
+                        let started = Instant::now();
+                        self.redraw_current()?;
+                        log::info!(
+                            "net: arrows {:?} drawn {} ms after the exchange, in {} ms",
+                            net::shown(),
+                            late.as_millis(),
+                            started.elapsed().as_millis()
+                        );
+                    }
+                }
+                Next::Input(Input::Bluetooth) => {
+                    // The passkey shows over any screen while the computer asks for it.
+                    let pairing = ui::notifications::pairing(ble::pairing());
+                    if pairing || ble::linked() != self.ble_drawn {
                         self.redraw_current()?;
                     }
                 }
@@ -837,22 +859,21 @@ impl Terminal {
     }
 
     fn step(&mut self, event: Event) -> Result<()> {
-        // Both keys belong to the terminal (its about page), whatever app runs.
+        // A long left press is the short one for an app; the right one is the badge holder's
+        // purchases, like both keys (its about page), whatever app runs.
+        let event = match event {
+            Event::LongKey { side: matecrew_core::contract::Side::Left } if self.app.is_some() => {
+                Event::Key { side: matecrew_core::contract::Side::Left }
+            }
+            event => event,
+        };
         if self.flow.is_idle() && event != Event::BothKeys {
             if let Event::Key { side } = &event {
                 if let Some(app) = &mut self.app {
                     app.tick(self.started.elapsed().as_millis() as u64);
-                    let (name, x) = if *side == matecrew_core::contract::Side::Left {
-                        ("left", ui::KEY_LEFT_X)
-                    } else {
-                        ("right", ui::KEY_RIGHT_X)
-                    };
-                    let effects = app.input(name).unwrap_or_else(|| {
-                        app.press(ui::engine::Point::new(
-                            x * app.scene().width as i32 / 200,
-                            113 * app.scene().height as i32 / 120,
-                        ))
-                    });
+                    let name = if *side == matecrew_core::contract::Side::Left { "left" } else { "right" };
+                    // A key the screen binds nothing to does nothing.
+                    let effects = app.input(name).unwrap_or_default();
                     return self.app_effects(effects);
                 }
             }
@@ -922,8 +943,28 @@ impl Terminal {
     /// An app's data or image arrived: shown at once on the app's screen.
     fn fetched(&mut self, fetched: fetch::Fetched) -> Result<()> {
         self.fetcher.arrived(&fetched);
+        // The account's answers go to the flow, which waits for them (failures logged by fetch).
+        let fetched = match fetched {
+            fetch::Fetched::Account(reply) => {
+                return self.step_domain(match reply {
+                    Ok(account) => Event::Account { account },
+                    Err(failure) => Event::AccountFailed { failure },
+                });
+            }
+            fetch::Fetched::Cancelled(reply) => {
+                return self.step_domain(match reply {
+                    Ok(reply) => {
+                        log::info!("purchase cancelled: {} ({:?})", reply.cancelled, reply.reason);
+                        Event::PurchaseCancelled { cancelled: reply.cancelled }
+                    }
+                    Err(failure) => Event::AccountFailed { failure },
+                });
+            }
+            fetched => fetched,
+        };
         let Some(app) = &mut self.app else { return Ok(()) };
         match fetched {
+            fetch::Fetched::Account(_) | fetch::Fetched::Cancelled(_) => return Ok(()),
             fetch::Fetched::Data { id, value: Ok(value), .. } => {
                 app.update(&id, value);
             }
@@ -963,6 +1004,11 @@ impl Terminal {
         };
         for effect in self.flow.handle(event, cx) {
             match effect {
+                // On the network thread: the keys never wait for the site.
+                Effect::FetchAccount { uid } => self.fetcher.request(fetch::Job::Account { uid }),
+                Effect::CancelPurchase { uid, id } => {
+                    self.fetcher.request(fetch::Job::CancelPurchase { uid, id })
+                }
                 Effect::Beep { beep } => self.beep(beep),
                 Effect::Queue { take } => {
                     log::info!("take {} queued for {}", take.id, take.badge_uid);
@@ -1069,6 +1115,7 @@ impl Terminal {
         log_heap();
         // The arrows this screen shows: the loop redraws when they no longer match.
         self.net_drawn = net::shown();
+        self.ble_drawn = ble::linked();
         if !self.offline {
             self.rssi = wifi::rssi().or(self.rssi);
         }
@@ -1106,6 +1153,8 @@ impl Terminal {
             },
             "battery":self.supply.read(self.buzzer.quiet()).json(),
             "net":{"up":self.net_drawn.0,"down":self.net_drawn.1},
+            "ble":{"connected":self.ble_drawn.0,"paired":self.ble_drawn.1},
+            "memory":memory::json(),
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
             "clock":ui::device_info::clock(self.state.as_ref(), now())
         }))
@@ -1116,7 +1165,9 @@ impl Terminal {
             self.dirty = true;
             return Ok(());
         }
+        let gathered = Instant::now();
         let info = self.device_info();
+        log::info!("draw: device info in {} ms", gathered.elapsed().as_millis());
         if let Some(app) = &mut self.app {
             app.update_device(info);
         }

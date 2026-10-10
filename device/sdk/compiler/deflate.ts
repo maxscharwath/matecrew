@@ -75,28 +75,35 @@ function tokenize(input: Uint8Array): Token[] {
   return tokens;
 }
 
+type Tree = { f: number; order: number; symbols: number[] };
+
+/** Huffman code lengths for `counts`, unlimited. Ties go to the subtree made first. */
+function huffmanLengths(counts: number[]): number[] {
+  const lengths = new Array<number>(counts.length).fill(0);
+  const used = counts.map((f, symbol) => ({ f, symbol })).filter((s) => s.f > 0);
+  // A lone symbol still gets a complete code: pair it with an unused one.
+  if (used.length === 1) {
+    lengths[used[0].symbol] = 1;
+    lengths[used[0].symbol === 0 ? 1 : 0] = 1;
+  }
+  if (used.length > 1) {
+    let order = 0;
+    let queue: Tree[] = used.map((s) => ({ f: s.f, order: order++, symbols: [s.symbol] }));
+    while (queue.length > 1) {
+      queue.sort((a, b) => a.f - b.f || a.order - b.order);
+      const [a, b] = queue;
+      for (const s of [...a.symbols, ...b.symbols]) lengths[s]++;
+      queue = [{ f: a.f + b.f, order: order++, symbols: [...a.symbols, ...b.symbols] }, ...queue.slice(2)];
+    }
+  }
+  return lengths;
+}
+
 /** Huffman code lengths for `frequencies`, none longer than `limit`. Deterministic tie-breaks. */
 function codeLengths(frequencies: number[], limit: number): number[] {
   let counts = frequencies.slice();
   for (;;) {
-    const lengths = new Array<number>(counts.length).fill(0);
-    const used = counts.map((f, symbol) => ({ f, symbol })).filter((s) => s.f > 0);
-    // A lone symbol still gets a complete code: pair it with an unused one.
-    if (used.length === 1) {
-      lengths[used[0].symbol] = 1;
-      lengths[used[0].symbol === 0 ? 1 : 0] = 1;
-    }
-    if (used.length > 1) {
-      type Tree = { f: number; order: number; symbols: number[] };
-      let order = 0;
-      let queue: Tree[] = used.map((s) => ({ f: s.f, order: order++, symbols: [s.symbol] }));
-      while (queue.length > 1) {
-        queue.sort((a, b) => a.f - b.f || a.order - b.order);
-        const [a, b] = queue;
-        for (const s of [...a.symbols, ...b.symbols]) lengths[s]++;
-        queue = [{ f: a.f + b.f, order: order++, symbols: [...a.symbols, ...b.symbols] }, ...queue.slice(2)];
-      }
-    }
+    const lengths = huffmanLengths(counts);
     if (Math.max(...lengths) <= limit) return lengths;
     // Flatten the distribution and retry: rare symbols get shorter codes, common ones longer.
     counts = counts.map((f) => (f ? Math.max(1, f >> 1) : 0));
@@ -141,41 +148,53 @@ class Bits {
   }
 }
 
-/** Raw DEFLATE stream (no zlib header) of `input`, in one dynamic-Huffman block. */
-export function deflate(input: Uint8Array): Uint8Array {
-  const tokens = tokenize(input);
-  const literalFrequency = new Array<number>(286).fill(0);
-  const distanceFrequency = new Array<number>(30).fill(0);
+/** An alphabet's code lengths and canonical codes. */
+type Alphabet = { lengths: number[]; codes: number[] };
+/** A code-length symbol, its extra value and extra bit count. */
+type Run = [number, number, number];
+
+function alphabet(frequencies: number[], limit: number): Alphabet {
+  const lengths = codeLengths(frequencies, limit);
+  return { lengths, codes: canonical(lengths) };
+}
+
+/** Symbol frequencies of the literal/length and distance alphabets, end of block included. */
+function frequencies(tokens: Token[]): { literals: number[]; distances: number[] } {
+  const literals = new Array<number>(286).fill(0);
+  const distances = new Array<number>(30).fill(0);
   for (const token of tokens) {
-    if ("literal" in token) literalFrequency[token.literal]++;
+    if ("literal" in token) literals[token.literal]++;
     else {
-      literalFrequency[257 + bucket(token.length, LENGTH_BASE)]++;
-      distanceFrequency[bucket(token.distance, DIST_BASE)]++;
+      literals[257 + bucket(token.length, LENGTH_BASE)]++;
+      distances[bucket(token.distance, DIST_BASE)]++;
     }
   }
-  literalFrequency[256] = 1;
+  literals[256] = 1;
   // At least one distance code, as some inflaters expect.
-  if (!distanceFrequency.some(Boolean)) distanceFrequency[0] = 1;
-  const literalLengths = codeLengths(literalFrequency, 15);
-  const distanceLengths = codeLengths(distanceFrequency, 15);
-  const literalCodes = canonical(literalLengths);
-  const distanceCodes = canonical(distanceLengths);
+  if (!distances.some(Boolean)) distances[0] = 1;
+  return { literals, distances };
+}
 
-  let hlit = 286;
-  while (hlit > 257 && !literalLengths[hlit - 1]) hlit--;
-  let hdist = 30;
-  while (hdist > 1 && !distanceLengths[hdist - 1]) hdist--;
+/** How many leading code lengths to send: trailing unused symbols are left out, down to `min`. */
+function sentLength(lengths: number[], min: number): number {
+  let n = lengths.length;
+  while (n > min && !lengths[n - 1]) n--;
+  return n;
+}
 
-  // Code lengths of both alphabets, run-length encoded with symbols 16, 17 and 18.
-  const sequence = [...literalLengths.slice(0, hlit), ...distanceLengths.slice(0, hdist)];
-  const runs: [number, number, number][] = []; // symbol, extra value, extra bits
+/** A run of `n` zero lengths (3 to 138). */
+const zeros = (n: number): Run => (n >= 11 ? [18, n - 11, 7] : [17, n - 3, 3]);
+
+/** Code lengths run-length encoded with symbols 16 (repeat), 17 and 18 (zeros). */
+function runLengths(sequence: number[]): Run[] {
+  const runs: Run[] = [];
   for (let i = 0; i < sequence.length; ) {
     const value = sequence[i];
     let run = 1;
     while (i + run < sequence.length && sequence[i + run] === value) run++;
     if (value === 0 && run >= 3) {
       const n = Math.min(run, 138);
-      runs.push(n >= 11 ? [18, n - 11, 7] : [17, n - 3, 3]);
+      runs.push(zeros(n));
       i += n;
     } else if (value !== 0 && run >= 4) {
       runs.push([value, 0, 0]);
@@ -187,12 +206,38 @@ export function deflate(input: Uint8Array): Uint8Array {
       i++;
     }
   }
+  return runs;
+}
+
+function writeToken(out: Bits, token: Token, literal: Alphabet, distance: Alphabet): void {
+  if ("literal" in token) {
+    out.code(literal.codes[token.literal], literal.lengths[token.literal]);
+    return;
+  }
+  const l = bucket(token.length, LENGTH_BASE);
+  out.code(literal.codes[257 + l], literal.lengths[257 + l]);
+  out.write(token.length - LENGTH_BASE[l], LENGTH_EXTRA[l]);
+  const d = bucket(token.distance, DIST_BASE);
+  out.code(distance.codes[d], distance.lengths[d]);
+  out.write(token.distance - DIST_BASE[d], DIST_EXTRA[d]);
+}
+
+/** Raw DEFLATE stream (no zlib header) of `input`, in one dynamic-Huffman block. */
+export function deflate(input: Uint8Array): Uint8Array {
+  const tokens = tokenize(input);
+  const { literals, distances } = frequencies(tokens);
+  const literal = alphabet(literals, 15);
+  const distance = alphabet(distances, 15);
+  const hlit = sentLength(literal.lengths, 257);
+  const hdist = sentLength(distance.lengths, 1);
+
+  // Code lengths of both alphabets, run-length encoded.
+  const runs = runLengths([...literal.lengths.slice(0, hlit), ...distance.lengths.slice(0, hdist)]);
   const lengthFrequency = new Array<number>(19).fill(0);
   for (const [symbol] of runs) lengthFrequency[symbol]++;
-  const lengthLengths = codeLengths(lengthFrequency, 7);
-  const lengthCodes = canonical(lengthLengths);
+  const lengths = alphabet(lengthFrequency, 7);
   let hclen = 19;
-  while (hclen > 4 && !lengthLengths[CODE_LENGTH_ORDER[hclen - 1]]) hclen--;
+  while (hclen > 4 && !lengths.lengths[CODE_LENGTH_ORDER[hclen - 1]]) hclen--;
 
   const out = new Bits();
   out.write(1, 1); // final block
@@ -200,23 +245,12 @@ export function deflate(input: Uint8Array): Uint8Array {
   out.write(hlit - 257, 5);
   out.write(hdist - 1, 5);
   out.write(hclen - 4, 4);
-  for (let i = 0; i < hclen; i++) out.write(lengthLengths[CODE_LENGTH_ORDER[i]], 3);
+  for (let i = 0; i < hclen; i++) out.write(lengths.lengths[CODE_LENGTH_ORDER[i]], 3);
   for (const [symbol, extra, bits] of runs) {
-    out.code(lengthCodes[symbol], lengthLengths[symbol]);
+    out.code(lengths.codes[symbol], lengths.lengths[symbol]);
     if (bits) out.write(extra, bits);
   }
-  for (const token of tokens) {
-    if ("literal" in token) {
-      out.code(literalCodes[token.literal], literalLengths[token.literal]);
-      continue;
-    }
-    const l = bucket(token.length, LENGTH_BASE);
-    out.code(literalCodes[257 + l], literalLengths[257 + l]);
-    out.write(token.length - LENGTH_BASE[l], LENGTH_EXTRA[l]);
-    const d = bucket(token.distance, DIST_BASE);
-    out.code(distanceCodes[d], distanceLengths[d]);
-    out.write(token.distance - DIST_BASE[d], DIST_EXTRA[d]);
-  }
-  out.code(literalCodes[256], literalLengths[256]);
+  for (const token of tokens) writeToken(out, token, literal, distance);
+  out.code(literal.codes[256], literal.lengths[256]);
   return out.finish();
 }

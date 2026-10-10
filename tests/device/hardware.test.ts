@@ -18,27 +18,37 @@ test("virtual GPIO levels pass through the firmware's Rust key detector", async 
     })) as typeof fetch;
   const wasm = await DeviceWasm.load();
   const gpio = new VirtualGpio();
-  // The runtime polls every 20 ms: 1 left, 2 right, 4 both keys, 0 nothing (yet).
+  // The runtime polls every 20 ms: 1 left, 2 right, 4 both keys, 8 left held, 16 right held,
+  // 0 nothing (yet).
   let now = 0;
   const sample = () => wasm.sampleGpio(gpio.read(5), gpio.read(8), (now += 20));
-  /** What the next polls report, within the 120 ms the other key has to join. */
-  const settle = (poll = sample) => {
-    for (let i = 0; i < 8; i++) {
+  /** What the next polls report: `polls` × 20 ms (8: past the 120 ms the other key has to join). */
+  const settle = (poll = sample, polls = 8) => {
+    for (let i = 0; i < polls; i++) {
       const mask = poll();
       if (mask) return mask;
     }
     return 0;
   };
   assert.equal(sample(), 0);
+  // A tap is the key, when it is released.
   gpio.drive(5, true, "pointer:1");
-  assert.equal(sample(), 0); // the right key may still join
-  assert.equal(settle(), 1);
+  assert.equal(settle(), 0);
+  gpio.release();
+  assert.equal(sample(), 1);
+  // Held: the long press once 700 ms have passed, then nothing, released or not.
+  gpio.drive(5, true, "pointer:1");
   gpio.drive(5, true, "keyboard");
   gpio.drive(5, false, "pointer:1");
   assert.equal(settle(), 0); // keyboard still holds GPIO high
+  assert.equal(settle(sample, 40), 8);
   for (let i = 0; i < 100; i++) assert.equal(sample(), 0);
   gpio.release();
-  assert.equal(sample(), 0);
+  assert.equal(settle(), 0);
+  gpio.drive(8, true, "keyboard");
+  assert.equal(settle(sample, 40), 16); // the right key held: the purchases list
+  gpio.release();
+  assert.equal(settle(), 0);
   gpio.drive(5, true, "pointer:1");
   gpio.drive(8, true, "pointer:2");
   assert.equal(sample(), 4); // both keys together: the about page

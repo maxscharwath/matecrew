@@ -73,7 +73,6 @@ export type Node = Cell &
         routes: { name: string; root: Node }[];
       }
     | { kind: "group"; children: Node[]; layout?: Layout }
-    | { kind: "row" | "column"; gap: number; children: Node[] }
     | { kind: "panel"; inverted: boolean; style?: SurfaceStyle; children: Node[]; layout?: Layout }
     | {
         kind: "text";

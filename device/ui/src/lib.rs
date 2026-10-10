@@ -1,6 +1,9 @@
 //! Terminal host adapter. All layouts are compiled from apps/mate (see device.config.ts).
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
-use matecrew_core::{contract::decode_base64, flow::Screen};
+use matecrew_core::{
+    contract::decode_base64,
+    flow::{Cause, Failure, PurchaseRow, Screen, Task},
+};
 use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
 pub mod apps;
@@ -52,8 +55,6 @@ fn theme() -> Theme {
 pub use frame::Frame;
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 480;
-pub const KEY_LEFT_X: i32 = 32;
-pub const KEY_RIGHT_X: i32 = 168;
 
 type CachedScreen = Option<(&'static str, engine::Scene)>;
 fn screen_cache() -> &'static Mutex<CachedScreen> {
@@ -165,8 +166,8 @@ pub struct PickInfo<'a> {
     pub name: &'a str,
     pub item: &'a str,
     pub stock: i64,
-    /// 24 x 24, packed 1-bit, as `contract::Item::image` decodes; None draws a frame.
-    pub image: Option<&'a [u8]>,
+    /// As `contract::Item::picture` decodes: 96 x 96 and its opacity plane.
+    pub picture: &'a [u8],
     pub index: u32,
     pub count: u32,
 }
@@ -250,7 +251,7 @@ pub fn pick_screen<D: DrawTarget<Color = BinaryColor>>(
     render(
         d,
         "pick",
-        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"index":info.index,"count":info.count,"item":info.item,"stock":info.stock,"image":info.image.unwrap_or(&[]),"picture":picture::pictures(info.image.unwrap_or(&[])).0,"left":"Suivant","right":"Prendre"}),
+        json!({"title":info.name,"status":format!("{}/{}",info.index.saturating_add(1),info.count),"index":info.index,"count":info.count,"item":info.item,"stock":info.stock,"picture":picture::pictures(info.picture).0,"left":"Suivant","right":"Prendre"}),
     )
 }
 pub fn leave_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -267,17 +268,12 @@ pub fn taken_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     name: &str,
     item: &str,
-    image: Option<&[u8]>,
 ) -> Result<(), D::Error> {
-    render(
-        d,
-        "taken",
-        json!({"name":name,"item":item,"image":image.unwrap_or(&[])}),
-    )
+    render(d, "taken", json!({"name":name,"item":item}))
 }
-/// What a person drank, from their badge as of the last sync: counts, the last days and the
-/// month's cost.
-pub struct SummaryInfo<'a> {
+/// "Mon compte", as the site counts it now (`flow::Screen::Account`): counts, the last days, the
+/// month's cost and the latest purchases.
+pub struct AccountInfo<'a> {
     pub name: &'a str,
     pub today: u32,
     pub week: u32,
@@ -287,11 +283,12 @@ pub struct SummaryInfo<'a> {
     pub products: &'a [String],
     pub labels: &'a [String],
     pub cost: Option<&'a str>,
+    pub recent: &'a [PurchaseRow],
 }
 
-pub fn summary_screen<D: DrawTarget<Color = BinaryColor>>(
+pub fn account_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
-    info: &SummaryInfo,
+    info: &AccountInfo,
 ) -> Result<(), D::Error> {
     // One row per day, `p0`…`p3` per product: the chart's stacked bars.
     let days: Vec<Value> = info
@@ -310,7 +307,7 @@ pub fn summary_screen<D: DrawTarget<Color = BinaryColor>>(
     let max = info.days.iter().map(|d| d.iter().sum::<u32>()).max().unwrap_or(0).max(4);
     render(
         d,
-        "summary",
+        "account",
         json!({
             "name": info.name,
             "today": info.today,
@@ -320,9 +317,67 @@ pub fn summary_screen<D: DrawTarget<Color = BinaryColor>>(
             "products": info.products.iter().take(4).collect::<Vec<_>>(),
             "max": max,
             "cost": info.cost,
+            "recent": info.recent.iter().map(purchase_row).collect::<Vec<_>>(),
+            "recentCount": info.recent.len(),
         }),
     )
 }
+
+/// A purchase for a list: its picture at half (`picture48`).
+fn purchase_row(row: &PurchaseRow) -> Value {
+    json!({
+        "item": row.item,
+        "when": row.when,
+        "price": row.price.clone().unwrap_or_default(),
+        "picture": picture::pictures(&decode_base64(&row.picture).unwrap_or_default()).1,
+    })
+}
+
+/// The site gave no usable answer to `task` (`flow::Screen::Failed`). The screen gets English
+/// keys: what failed (`kind`), what the technical line names (`detail`, with `status`) and the
+/// request (`path`); the words are in apps/mate/messages.ts.
+pub fn failure_screen<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    task: Task,
+    failure: Failure,
+) -> Result<(), D::Error> {
+    let (kind, detail, status) = match failure {
+        Failure::Offline { cause } => (
+            "offline",
+            match cause {
+                Cause::Wifi => "wifi",
+                Cause::Timeout => "timeout",
+                Cause::Connect => "connect",
+                Cause::Tls => "tls",
+                Cause::Dns => "dns",
+                Cause::Network => "network",
+            },
+            None,
+        ),
+        Failure::Site { status } => ("site", "http", Some(status)),
+        Failure::Unreadable => ("unreadable", "unreadable", None),
+        // The site's 404 `unknown_badge`.
+        Failure::UnknownBadge => ("unknownBadge", "http", Some(404)),
+    };
+    let task_key = match task {
+        Task::Account => "account",
+        Task::Purchases => "purchases",
+        Task::Cancel => "cancel",
+    };
+    render(
+        d,
+        "failure",
+        json!({
+            "task": task_key,
+            "kind": kind,
+            "detail": detail,
+            "status": status,
+            "path": task.path(),
+            "retry": failure.retry(),
+        }),
+    )
+}
+
 pub fn update_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     version: &str,
@@ -355,48 +410,69 @@ pub fn unknown_badge_screen<D: DrawTarget<Color = BinaryColor>>(
         ),
     }
 }
+
+/// A page of the badge holder's purchases (`flow::Screen::Purchases`): rows with their pictures
+/// at half, and the selected one at full size for the confirmation.
+#[allow(clippy::too_many_arguments)]
+fn purchases_screen<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    name: &str,
+    rows: &[PurchaseRow],
+    selected: u32,
+    back: bool,
+    page: u32,
+    pages: u32,
+    confirm: bool,
+) -> Result<(), D::Error> {
+    let chosen = rows.get(selected as usize);
+    render(
+        d,
+        "purchases",
+        json!({
+            "name": name,
+            "rows": rows.iter().map(purchase_row).collect::<Vec<_>>(),
+            "rowCount": rows.len(),
+            "selected": selected,
+            "back": back,
+            "page": page,
+            "pages": pages,
+            "confirm": confirm,
+            "selectedItem": chosen.map(|row| row.item.as_str()).unwrap_or_default(),
+            "selectedWhen": chosen.map(|row| row.when.as_str()).unwrap_or_default(),
+            "selectedPicture": chosen
+                .map(|row| picture::pictures(&decode_base64(&row.picture).unwrap_or_default()).0)
+                .unwrap_or_default(),
+        }),
+    )
+}
+
 pub fn flow_screen<D>(d: &mut D, screen: &Screen) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     match screen {
         Screen::Main => Ok(()),
-        Screen::Badge { key_label } => badge_screen(d, key_label),
-        Screen::Pick {
-            name,
-            item,
-            stock,
-            image,
-            index,
-            count,
-        } => {
-            let image = decode_base64(image);
-            let info = PickInfo {
-                name,
-                item,
-                stock: *stock,
-                image: image.as_deref(),
-                index: *index,
-                count: *count,
-            };
-            pick_screen(d, &info)
+        Screen::AccountBadge { purchases } => {
+            render(d, "badge", json!({"account": !purchases, "purchases": purchases}))
         }
-        Screen::Leave { name } => leave_screen(d, name),
-        Screen::Taken { name, item, image } => {
-            taken_screen(d, name, item, decode_base64(image).as_deref())
-        }
-        Screen::Summary {
+        Screen::AccountLoading { name, cancelling } => render(
+            d,
+            "accountLoading",
+            json!({"name": name, "step": if *cancelling { "cancel" } else { "" }}),
+        ),
+        Screen::Account {
             name,
             today,
             week,
             month,
+            cost,
             days,
             products,
             labels,
-            cost,
-        } => summary_screen(
+            recent,
+        } => account_screen(
             d,
-            &SummaryInfo {
+            &AccountInfo {
                 name,
                 today: *today,
                 week: *week,
@@ -405,8 +481,41 @@ where
                 products,
                 labels,
                 cost: cost.as_deref(),
+                recent,
             },
         ),
+        Screen::Failed { task, failure } => failure_screen(d, *task, *failure),
+        Screen::Purchases {
+            name,
+            rows,
+            selected,
+            back,
+            page,
+            pages,
+            confirm,
+        } => purchases_screen(d, name, rows, *selected, *back, *page, *pages, *confirm),
+        Screen::Badge { key_label } => badge_screen(d, key_label),
+        Screen::Pick {
+            name,
+            item,
+            stock,
+            picture,
+            index,
+            count,
+        } => {
+            let picture = decode_base64(picture).unwrap_or_default();
+            let info = PickInfo {
+                name,
+                item,
+                stock: *stock,
+                picture: &picture,
+                index: *index,
+                count: *count,
+            };
+            pick_screen(d, &info)
+        }
+        Screen::Leave { name } => leave_screen(d, name),
+        Screen::Taken { name, item } => taken_screen(d, name, item),
         Screen::UnknownBadge { uid, claim_url } => {
             unknown_badge_screen(d, uid, claim_url.as_deref())
         }

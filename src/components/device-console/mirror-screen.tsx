@@ -10,10 +10,11 @@ import { PANEL_HEIGHT, PANEL_WIDTH, type Box, type MirrorFrame } from "./frame-b
 import { ScreenControl } from "./screen-control";
 import { ScreenPreview } from "./screen-preview";
 
-/** The last frame the console drew, and how it changed from the one before. */
+/** The last frame the console drew, how it changed from the one before, and how it came. */
 export type Mirror = {
   frame: MirrorFrame;
   change: { box: Box; percent: number; passes: 1 | 2; at: number } | null;
+  via: "wifi" | "bluetooth";
 };
 
 /**
@@ -28,14 +29,14 @@ export function MirrorScreen({
   previewUrl,
   onPreview,
   onTap,
-}: {
+}: Readonly<{
   mirror: Mirror | null;
   reachable: boolean;
   preview: boolean;
   previewUrl: string;
   onPreview: () => void;
   onTap: (x: number, y: number) => void;
-}) {
+}>) {
   const t = useTranslations("devices.console");
   if (!mirror) {
     if (preview) return <ScreenPreview url={previewUrl} placeholder={t("noScreen.previewLoading")} />;
@@ -70,7 +71,7 @@ export function MirrorScreen({
 }
 
 /** Outlines the window the last refresh redrew, then fades, like the studio's refresh log made visible. */
-function ChangedWindow({ box }: { box: Box }) {
+function ChangedWindow({ box }: Readonly<{ box: Box }>) {
   const element = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const current = element.current;

@@ -13,6 +13,7 @@
     "./preview": "./preview/index.ts",
     "./emulator": "./emulator/index.ts",
     "./link": "./link/index.ts",
+    "./cache": "./cache/index.ts",
     "./types": "./runtime/types.ts",
     "./icons/pixelarticons": "./icons/pixelarticons.ts",
     "./icons/streamline-pixel": "./icons/streamline-pixel.ts",

@@ -51,10 +51,7 @@ impl Scene {
                         (input.as_deref() == Some(name)).then(|| action.clone())
                     }
                 },
-                Node::Group { children, .. }
-                | Node::Panel { children, .. }
-                | Node::Row { children, .. }
-                | Node::Column { children, .. } => {
+                Node::Group { children, .. } | Node::Panel { children, .. } => {
                     // The last match wins: later siblings draw on top.
                     let mut found = None;
                     for (child, placed) in children.iter().zip(layout::place(node, area, env, item)) {

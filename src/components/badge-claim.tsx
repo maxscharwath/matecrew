@@ -70,7 +70,7 @@ export function BadgeClaim({ params, state }: Props) {
   );
 }
 
-function Outcome({ icon, title, detail }: { icon: "ok" | "error" | "expired"; title: string; detail: string }) {
+function Outcome({ icon, title, detail }: Readonly<{ icon: "ok" | "error" | "expired"; title: string; detail: string }>) {
   const Icon = { ok: CheckCircle2, error: XCircle, expired: Clock }[icon];
   return (
     <Card>

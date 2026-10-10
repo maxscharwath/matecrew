@@ -57,12 +57,10 @@ const TEXT_REGULAR: [FontRenderer; 9] = [
     FontRenderer::new::<montserrat_regular_35>(), FontRenderer::new::<montserrat_regular_42>(),
     FontRenderer::new::<montserrat_regular_49>(),
 ];
-const TEXT_BOLD: [FontRenderer; 9] = [
+/// Montserrat bold, below `HEADING_FROM` only: bold text from there up is Space Grotesk.
+const TEXT_BOLD: [FontRenderer; 3] = [
     FontRenderer::new::<montserrat_bold_11>(), FontRenderer::new::<montserrat_bold_14>(),
-    FontRenderer::new::<montserrat_bold_17>(), FontRenderer::new::<montserrat_bold_20>(),
-    FontRenderer::new::<montserrat_bold_25>(), FontRenderer::new::<montserrat_bold_30>(),
-    FontRenderer::new::<montserrat_bold_35>(), FontRenderer::new::<montserrat_bold_42>(),
-    FontRenderer::new::<montserrat_bold_49>(),
+    FontRenderer::new::<montserrat_bold_17>(),
 ];
 /// Space Grotesk bold, OWT's heading face.
 const HEADING: [FontRenderer; 9] = [
@@ -149,7 +147,9 @@ impl Typography {
             GROTESK => {
                 let default = match role { Font::Caption => 14, Font::Body => 17, Font::Title => 25, Font::Display => 42 };
                 let i = pick(&GROTESK_SIZES, default);
-                let face = if !bold { &TEXT_REGULAR } else if own(default) >= HEADING_FROM { &HEADING } else { &TEXT_BOLD };
+                // Small bold text only shrinks: `fitted` measures the larger sizes to skip them,
+                // and Space Grotesk, as tall, stands in for those.
+                let face: &[FontRenderer] = if !bold { &TEXT_REGULAR } else if own(default) >= HEADING_FROM || i >= TEXT_BOLD.len() { &HEADING } else { &TEXT_BOLD };
                 (&face[i], false)
             }
             // Logisoso has one weight, already heavy.
@@ -205,5 +205,14 @@ mod tests {
         // A heading that only fits at 14 px keeps Space Grotesk.
         let shrunk = style(30, 2).fitted(Theme::Paper, Font::Body, |r| crate::text::width(r.font, "Maté Classic") < 130);
         assert!(same(shrunk.font, &HEADING[1]));
+    }
+    #[test]
+    fn small_bold_text_skips_every_size_space_grotesk_stands_in_for() {
+        let height = |f: &FontRenderer| f.get_font_bounding_box(u8g2_fonts::types::VerticalPosition::Baseline).size.height;
+        let largest = height(&TEXT_BOLD[TEXT_BOLD.len() - 1]);
+        assert!(HEADING[TEXT_BOLD.len()..].iter().all(|f| height(f) >= largest));
+        let style = Typography { family: GROTESK, size: 17, weight: 2, italic: false, tracking: 0, fit: true };
+        let shrunk = style.fitted(Theme::Paper, Font::Body, |r| crate::text::width(r.font, "Maté Classic") < 100);
+        assert!(same(shrunk.font, &TEXT_BOLD[1]) || same(shrunk.font, &TEXT_BOLD[0]));
     }
 }

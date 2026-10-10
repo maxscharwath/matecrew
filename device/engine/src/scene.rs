@@ -208,20 +208,6 @@ pub enum Node {
         #[serde(default)]
         layout: Option<Layout>,
     },
-    Row {
-        rect: Rect,
-        #[serde(default)]
-        gap: u32,
-        #[serde(default)]
-        children: Vec<Node>,
-    },
-    Column {
-        rect: Rect,
-        #[serde(default)]
-        gap: u32,
-        #[serde(default)]
-        children: Vec<Node>,
-    },
     Panel {
         rect: Rect,
         #[serde(default)]

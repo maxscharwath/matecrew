@@ -16,23 +16,23 @@ type Parsed =
   | { kind: "composite"; components: Component[]; xMin: number };
 
 export class Font {
-  private view: DataView;
-  private tables: Tables = {};
+  private readonly view: DataView;
+  private readonly tables: Tables = {};
   readonly unitsPerEm: number;
-  private numGlyphs: number;
-  private longLoca: boolean;
-  private metrics: number;
-  private cmap = new Map<number, number>();
+  private readonly numGlyphs: number;
+  private readonly longLoca: boolean;
+  private readonly metrics: number;
+  private readonly cmap = new Map<number, number>();
   /** Normalised axis coordinates of the instance, by axis order. */
   private coords: number[] = [];
-  private axes: { tag: string; min: number; def: number; max: number }[] = [];
+  private readonly axes: { tag: string; min: number; def: number; max: number }[] = [];
 
   constructor(bytes: Uint8Array) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const count = this.u16(4);
     for (let i = 0; i < count; i++) {
       const at = 12 + i * 16;
-      const tag = String.fromCharCode(...bytes.subarray(at, at + 4));
+      const tag = String.fromCodePoint(...bytes.subarray(at, at + 4));
       this.tables[tag] = { offset: this.u32(at + 8), length: this.u32(at + 12) };
     }
     for (const tag of ["head", "maxp", "hhea", "hmtx", "cmap", "loca", "glyf"]) {
@@ -51,7 +51,7 @@ export class Font {
       for (let i = 0; i < axisCount; i++) {
         const at = axesAt + i * axisSize;
         this.axes.push({
-          tag: String.fromCharCode(...bytes.subarray(at, at + 4)),
+          tag: String.fromCodePoint(...bytes.subarray(at, at + 4)),
           min: this.fixed(at + 4),
           def: this.fixed(at + 8),
           max: this.fixed(at + 12),
@@ -61,17 +61,24 @@ export class Font {
     }
   }
 
-  private u8 = (at: number) => this.view.getUint8(at);
-  private u16 = (at: number) => this.view.getUint16(at);
-  private i16 = (at: number) => this.view.getInt16(at);
-  private u32 = (at: number) => this.view.getUint32(at);
-  private fixed = (at: number) => this.view.getInt32(at) / 65536;
-  private f2dot14 = (at: number) => this.view.getInt16(at) / 16384;
+  private readonly u8 = (at: number) => this.view.getUint8(at);
+  private readonly u16 = (at: number) => this.view.getUint16(at);
+  private readonly i16 = (at: number) => this.view.getInt16(at);
+  private readonly u32 = (at: number) => this.view.getUint32(at);
+  private readonly fixed = (at: number) => this.view.getInt32(at) / 65536;
+  private readonly f2dot14 = (at: number) => this.view.getInt16(at) / 16384;
   private at(tag: string) {
     return this.tables[tag].offset;
   }
 
   private readCmap() {
+    const { at, format } = this.unicodeSubtable();
+    if (format === 12) this.readCmap12(at);
+    else this.readCmap4(at);
+  }
+
+  /** The Unicode subtable to read: format 12 (all planes) over format 4 (the BMP). */
+  private unicodeSubtable(): { at: number; format: number } {
     const cmap = this.at("cmap");
     const count = this.u16(cmap + 2);
     let best = -1;
@@ -88,17 +95,23 @@ export class Font {
       }
     }
     if (best < 0) throw new Error("no Unicode cmap");
-    if (bestFormat === 12) {
-      const groups = this.u32(best + 12);
-      for (let i = 0; i < groups; i++) {
-        const at = best + 16 + i * 12;
-        const [start, end, glyph] = [this.u32(at), this.u32(at + 4), this.u32(at + 8)];
-        for (let c = start; c <= end; c++) this.cmap.set(c, glyph + c - start);
-      }
-      return;
+    return { at: best, format: bestFormat };
+  }
+
+  /** Format 12: groups of consecutive codes on consecutive glyphs. */
+  private readCmap12(table: number) {
+    const groups = this.u32(table + 12);
+    for (let i = 0; i < groups; i++) {
+      const at = table + 16 + i * 12;
+      const [start, end, glyph] = [this.u32(at), this.u32(at + 4), this.u32(at + 8)];
+      for (let c = start; c <= end; c++) this.cmap.set(c, glyph + c - start);
     }
-    const segments = this.u16(best + 6) / 2;
-    const ends = best + 14;
+  }
+
+  /** Format 4: segments of codes, each mapped by a delta or through the glyph id array. */
+  private readCmap4(table: number) {
+    const segments = this.u16(table + 6) / 2;
+    const ends = table + 14;
     const starts = ends + segments * 2 + 2;
     const deltas = starts + segments * 2;
     const ranges = deltas + segments * 2;
@@ -107,16 +120,16 @@ export class Font {
       const delta = this.i16(deltas + s * 2);
       const range = this.u16(ranges + s * 2);
       for (let c = start; c <= end && c !== 0xffff; c++) {
-        let glyph = 0;
-        if (range === 0) glyph = (c + delta) & 0xffff;
-        else {
-          const at = ranges + s * 2 + range + (c - start) * 2;
-          glyph = this.u16(at);
-          if (glyph) glyph = (glyph + delta) & 0xffff;
-        }
+        const glyph = range === 0 ? (c + delta) & 0xffff : this.rangedGlyph(ranges + s * 2 + range + (c - start) * 2, delta);
         if (glyph) this.cmap.set(c, glyph);
       }
     }
+  }
+
+  /** A glyph from format 4's id array: 0 (missing) stays 0, the others take the segment's delta. */
+  private rangedGlyph(at: number, delta: number): number {
+    const glyph = this.u16(at);
+    return glyph ? (glyph + delta) & 0xffff : 0;
   }
 
   /** Picks the instance, in user units (`{ wght: 700 }`), through avar's mapping. */
@@ -150,74 +163,85 @@ export class Font {
   }
 
   private parse(glyph: number): Parsed {
-    const loca = this.at("loca");
-    const [start, end] = this.longLoca
-      ? [this.u32(loca + glyph * 4), this.u32(loca + glyph * 4 + 4)]
-      : [this.u16(loca + glyph * 2) * 2, this.u16(loca + glyph * 2 + 2) * 2];
+    const [start, end] = this.glyphRange(glyph);
     if (end <= start) return { kind: "empty" };
-    let at = this.at("glyf") + start;
+    const at = this.at("glyf") + start;
     const contours = this.i16(at);
     const xMin = this.i16(at + 2);
-    at += 10;
-    if (contours >= 0) {
-      const ends: number[] = [];
-      for (let i = 0; i < contours; i++) ends.push(this.u16(at + i * 2));
-      at += contours * 2;
-      at += 2 + this.u16(at);
-      const count = contours ? ends[contours - 1] + 1 : 0;
-      const flags: number[] = [];
-      while (flags.length < count) {
-        const flag = this.u8(at++);
-        flags.push(flag);
-        if (flag & 8) for (let r = this.u8(at++); r > 0; r--) flags.push(flag);
-      }
-      const coordinates = (short: number, same: number) => {
-        const out: number[] = [];
-        let value = 0;
-        for (const flag of flags) {
-          if (flag & short) value += flag & same ? this.u8(at++) : -this.u8(at++);
-          else if (!(flag & same)) {
-            value += this.i16(at);
-            at += 2;
-          }
-          out.push(value);
-        }
-        return out;
-      };
-      const xs = coordinates(2, 16);
-      const ys = coordinates(4, 32);
-      return { kind: "simple", points: flags.map((flag, i) => ({ x: xs[i], y: ys[i], on: (flag & 1) === 1 })), ends, xMin };
+    if (contours >= 0) return this.parseSimple(at + 10, contours, xMin);
+    return { kind: "composite", components: this.parseComponents(at + 10, glyph), xMin };
+  }
+
+  /** The glyph's byte range in glyf, from loca. */
+  private glyphRange(glyph: number): [number, number] {
+    const loca = this.at("loca");
+    return this.longLoca
+      ? [this.u32(loca + glyph * 4), this.u32(loca + glyph * 4 + 4)]
+      : [this.u16(loca + glyph * 2) * 2, this.u16(loca + glyph * 2 + 2) * 2];
+  }
+
+  /** A simple glyph's points, read from `from`, just past its header. */
+  private parseSimple(from: number, contours: number, xMin: number): Parsed {
+    let at = from;
+    const ends: number[] = [];
+    for (let i = 0; i < contours; i++) ends.push(this.u16(at + i * 2));
+    at += contours * 2;
+    at += 2 + this.u16(at);
+    const count = contours ? ends[contours - 1] + 1 : 0;
+    const flags: number[] = [];
+    while (flags.length < count) {
+      const flag = this.u8(at++);
+      flags.push(flag);
+      if (flag & 8) for (let r = this.u8(at++); r > 0; r--) flags.push(flag);
     }
+    const coordinates = (short: number, same: number) => {
+      const out: number[] = [];
+      let value = 0;
+      for (const flag of flags) {
+        if (flag & short) value += flag & same ? this.u8(at++) : -this.u8(at++);
+        else if (!(flag & same)) {
+          value += this.i16(at);
+          at += 2;
+        }
+        out.push(value);
+      }
+      return out;
+    };
+    const xs = coordinates(2, 16);
+    const ys = coordinates(4, 32);
+    return { kind: "simple", points: flags.map((flag, i) => ({ x: xs[i], y: ys[i], on: (flag & 1) === 1 })), ends, xMin };
+  }
+
+  /** A composite glyph's components, read from `from`, just past its header. */
+  private parseComponents(from: number, glyph: number): Component[] {
     const components: Component[] = [];
+    let at = from;
     for (let more = true; more; ) {
       const flags = this.u16(at);
       const index = this.u16(at + 2);
       at += 4;
-      let dx: number, dy: number;
-      if (flags & 1) {
-        [dx, dy] = [this.i16(at), this.i16(at + 2)];
-        at += 4;
-      } else {
-        [dx, dy] = [(this.u8(at) << 24) >> 24, (this.u8(at + 1) << 24) >> 24];
-        at += 2;
-      }
+      // Bit 0: the offsets are words, not bytes.
+      const words = (flags & 1) !== 0;
+      const [dx, dy] = words ? [this.i16(at), this.i16(at + 2)] : [(this.u8(at) << 24) >> 24, (this.u8(at + 1) << 24) >> 24];
+      at += words ? 4 : 2;
       if (!(flags & 2)) throw new Error(`glyph ${glyph}: components placed by point numbers are not supported`);
-      let matrix: Component["matrix"] = [1, 0, 0, 1];
-      if (flags & 8) {
-        const s = this.f2dot14(at);
-        matrix = [s, 0, 0, s];
-        at += 2;
-      } else if (flags & 0x40) {
-        matrix = [this.f2dot14(at), 0, 0, this.f2dot14(at + 2)];
-        at += 4;
-      } else if (flags & 0x80) {
-        matrix = [this.f2dot14(at), this.f2dot14(at + 2), this.f2dot14(at + 4), this.f2dot14(at + 6)];
-        at += 8;
-      }
+      const { matrix, size } = this.componentMatrix(flags, at);
+      at += size;
       components.push({ glyph: index, dx, dy, matrix });
       more = (flags & 0x20) !== 0;
     }
-    return { kind: "composite", components, xMin };
+    return components;
+  }
+
+  /** A component's transform (one scale with bit 3, x and y scales with bit 6, a 2 × 2 matrix with bit 7) and its size in bytes. */
+  private componentMatrix(flags: number, at: number): { matrix: Component["matrix"]; size: number } {
+    if (flags & 8) {
+      const s = this.f2dot14(at);
+      return { matrix: [s, 0, 0, s], size: 2 };
+    }
+    if (flags & 0x40) return { matrix: [this.f2dot14(at), 0, 0, this.f2dot14(at + 2)], size: 4 };
+    if (flags & 0x80) return { matrix: [this.f2dot14(at), this.f2dot14(at + 2), this.f2dot14(at + 4), this.f2dot14(at + 6)], size: 8 };
+    return { matrix: [1, 0, 0, 1], size: 0 };
   }
 
   private advanceOf(glyph: number): [number, number] {
@@ -231,101 +255,119 @@ export class Font {
   /** Summed gvar deltas for each of `points` (outline points or component offsets, then the four phantom points). */
   private deltas(glyph: number, points: { x: number; y: number }[], ends: number[]): { x: number; y: number }[] {
     const out = points.map(() => ({ x: 0, y: 0 }));
-    if (!this.tables.gvar || this.coords.every((c) => c === 0)) return out;
-    const gvar = this.at("gvar");
-    const axisCount = this.u16(gvar + 4);
-    const sharedCount = this.u16(gvar + 6);
-    const sharedAt = gvar + this.u32(gvar + 8);
-    const longOffsets = (this.u16(gvar + 14) & 1) === 1;
-    const arrayAt = gvar + this.u32(gvar + 16);
-    const offset = (g: number) => (longOffsets ? this.u32(gvar + 20 + g * 4) : this.u16(gvar + 20 + g * 2) * 2);
-    const [start, end] = [offset(glyph), offset(glyph + 1)];
-    if (end <= start) return out;
-    const data = arrayAt + start;
+    const variations = this.glyphVariations(glyph);
+    if (!variations) return out;
+    const { axisCount, sharedAt, data } = variations;
     const tupleCount = this.u16(data);
-    let serial = data + this.u16(data + 2);
+    // Serialized data: the shared point numbers, then each tuple's own points and deltas.
+    const serial = { at: data + this.u16(data + 2) };
+    const shared = tupleCount & 0x8000 ? this.packedPoints(serial) : null;
     let header = data + 4;
-    const tuple = (at: number) => Array.from({ length: axisCount }, (_, i) => this.f2dot14(at + i * 2));
-    const readPoints = (): number[] | null => {
-      let count = this.u8(serial++);
-      if (count === 0) return null;
-      if (count & 0x80) count = ((count & 0x7f) << 8) | this.u8(serial++);
-      const list: number[] = [];
-      let last = 0;
-      while (list.length < count) {
-        const control = this.u8(serial++);
-        const words = (control & 0x80) !== 0;
-        for (let run = (control & 0x7f) + 1; run > 0 && list.length < count; run--) {
-          last += words ? this.u16(serial) : this.u8(serial);
-          serial += words ? 2 : 1;
-          list.push(last);
-        }
-      }
-      return list;
-    };
-    const readDeltas = (count: number) => {
-      const list: number[] = [];
-      while (list.length < count) {
-        const control = this.u8(serial++);
-        const run = (control & 0x3f) + 1;
-        for (let i = 0; i < run && list.length < count; i++) {
-          if ((control & 0xc0) === 0xc0) {
-            list.push(this.view.getInt32(serial));
-            serial += 4;
-          } else if (control & 0x80) list.push(0);
-          else if (control & 0x40) {
-            list.push(this.i16(serial));
-            serial += 2;
-          } else list.push((this.u8(serial++) << 24) >> 24);
-        }
-      }
-      return list;
-    };
-    const shared = tupleCount & 0x8000 ? readPoints() : null;
     for (let t = 0; t < (tupleCount & 0x0fff); t++) {
-      const size = this.u16(header);
-      const index = this.u16(header + 2);
-      header += 4;
-      let peak: number[];
-      if (index & 0x8000) {
-        peak = tuple(header);
-        header += axisCount * 2;
-      } else peak = tuple(sharedAt + (index & 0x0fff) * axisCount * 2);
-      void sharedCount;
-      let lower: number[] | undefined, upper: number[] | undefined;
-      if (index & 0x4000) {
-        lower = tuple(header);
-        upper = tuple(header + axisCount * 2);
-        header += axisCount * 4;
-      }
-      const next = serial + size;
-      let scalar = 1;
-      for (let a = 0; a < axisCount && scalar; a++) {
-        const [v, p] = [this.coords[a], peak[a]];
-        if (p === 0) continue;
-        if (v === 0) scalar = 0;
-        else if (lower && upper) {
-          if (v < lower[a] || v > upper[a]) scalar = 0;
-          else if (v < p) scalar *= (v - lower[a]) / (p - lower[a]);
-          else if (v > p) scalar *= (upper[a] - v) / (upper[a] - p);
-        } else if (v < Math.min(0, p) || v > Math.max(0, p)) scalar = 0;
-        else scalar *= v / p;
-      }
+      const { size, index, peak, region, next } = this.tupleHeader(header, axisCount, sharedAt);
+      header = next;
+      const end = serial.at + size;
+      const scalar = this.tupleScalar(peak, region);
       if (scalar) {
-        const own = index & 0x2000 ? readPoints() : shared;
+        const own = index & 0x2000 ? this.packedPoints(serial) : shared;
         const indices = own ?? points.map((_, i) => i);
-        const dx = readDeltas(indices.length);
-        const dy = readDeltas(indices.length);
-        const tupleDeltas = interpolate(points, ends, indices, dx, dy);
-        tupleDeltas.forEach((d, i) => {
+        const dx = this.packedDeltas(serial, indices.length);
+        const dy = this.packedDeltas(serial, indices.length);
+        interpolate(points, ends, indices, dx, dy).forEach((d, i) => {
           if (!d) return;
           out[i].x += d.x * scalar;
           out[i].y += d.y * scalar;
         });
       }
-      serial = next;
+      serial.at = end;
     }
     return out;
+  }
+
+  /** Where gvar keeps the glyph's variations; undefined when it has none or the instance is the default. */
+  private glyphVariations(glyph: number): { axisCount: number; sharedAt: number; data: number } | undefined {
+    if (!this.tables.gvar || this.coords.every((c) => c === 0)) return undefined;
+    const gvar = this.at("gvar");
+    const longOffsets = (this.u16(gvar + 14) & 1) === 1;
+    const offset = (g: number) => (longOffsets ? this.u32(gvar + 20 + g * 4) : this.u16(gvar + 20 + g * 2) * 2);
+    const [start, end] = [offset(glyph), offset(glyph + 1)];
+    if (end <= start) return undefined;
+    return { axisCount: this.u16(gvar + 4), sharedAt: gvar + this.u32(gvar + 8), data: gvar + this.u32(gvar + 16) + start };
+  }
+
+  /** The tuple variation header at `at`: its data size, flags, peak and intermediate region, and where the next one starts. */
+  private tupleHeader(at: number, axisCount: number, sharedAt: number) {
+    const tuple = (from: number) => Array.from({ length: axisCount }, (_, i) => this.f2dot14(from + i * 2));
+    const size = this.u16(at);
+    const index = this.u16(at + 2);
+    let next = at + 4;
+    // The peak is embedded (bit 15) or one of the shared tuples; an intermediate region (bit 14) follows.
+    let peak: number[];
+    if (index & 0x8000) {
+      peak = tuple(next);
+      next += axisCount * 2;
+    } else peak = tuple(sharedAt + (index & 0x0fff) * axisCount * 2);
+    let region: [number[], number[]] | undefined;
+    if (index & 0x4000) {
+      region = [tuple(next), tuple(next + axisCount * 2)];
+      next += axisCount * 4;
+    }
+    return { size, index, peak, region, next };
+  }
+
+  /** How much of a tuple applies at the instance: the product of its axes' shares. */
+  private tupleScalar(peak: number[], region: [number[], number[]] | undefined): number {
+    let scalar = 1;
+    for (let a = 0; a < peak.length && scalar; a++) {
+      scalar *= axisScalar(this.coords[a], peak[a], region && [region[0][a], region[1][a]]);
+    }
+    return scalar;
+  }
+
+  /** Packed point numbers at `serial`, or null for all of the glyph's points. */
+  private packedPoints(serial: { at: number }): number[] | null {
+    let count = this.u8(serial.at++);
+    if (count === 0) return null;
+    if (count & 0x80) count = ((count & 0x7f) << 8) | this.u8(serial.at++);
+    const list: number[] = [];
+    let last = 0;
+    while (list.length < count) {
+      const control = this.u8(serial.at++);
+      const words = (control & 0x80) !== 0;
+      for (let run = (control & 0x7f) + 1; run > 0 && list.length < count; run--) {
+        last += words ? this.u16(serial.at) : this.u8(serial.at);
+        serial.at += words ? 2 : 1;
+        list.push(last);
+      }
+    }
+    return list;
+  }
+
+  /** `count` packed deltas at `serial`. */
+  private packedDeltas(serial: { at: number }, count: number): number[] {
+    const list: number[] = [];
+    while (list.length < count) {
+      const control = this.u8(serial.at++);
+      const run = (control & 0x3f) + 1;
+      for (let i = 0; i < run && list.length < count; i++) list.push(this.packedDelta(serial, control));
+    }
+    return list;
+  }
+
+  /** One delta of a run: 32-bit (both top bits of `control`), zero (bit 7), 16-bit (bit 6) or a byte. */
+  private packedDelta(serial: { at: number }, control: number): number {
+    if ((control & 0xc0) === 0xc0) {
+      const value = this.view.getInt32(serial.at);
+      serial.at += 4;
+      return value;
+    }
+    if (control & 0x80) return 0;
+    if (control & 0x40) {
+      const value = this.i16(serial.at);
+      serial.at += 2;
+      return value;
+    }
+    return (this.u8(serial.at++) << 24) >> 24;
   }
 
   /** The glyph's contours and advance at the current instance, in font units. */
@@ -371,6 +413,23 @@ export class Font {
 }
 
 /**
+ * One axis's share of a tuple at instance coordinate `v`: 1 at the peak `p`, fading to 0 at the
+ * default or at the edges of the intermediate `region`.
+ */
+function axisScalar(v: number, p: number, region: [number, number] | undefined): number {
+  if (p === 0) return 1;
+  if (v === 0) return 0;
+  if (region) {
+    const [lower, upper] = region;
+    if (v < lower || v > upper) return 0;
+    if (v < p) return (v - lower) / (p - lower);
+    return v > p ? (upper - v) / (upper - p) : 1;
+  }
+  if (v < Math.min(0, p) || v > Math.max(0, p)) return 0;
+  return v / p;
+}
+
+/**
  * Deltas for every point from the ones a tuple names: points it leaves out take theirs from the
  * named neighbours on the same contour (gvar's "interpolate untouched points").
  */
@@ -385,32 +444,42 @@ function interpolate(points: { x: number; y: number }[], ends: number[], indices
   for (const end of ends) {
     const contour = Array.from({ length: end - from + 1 }, (_, k) => from + k);
     from = end + 1;
-    const touched = contour.filter((p) => named[p]);
-    if (!touched.length) continue;
-    if (touched.length === 1) {
-      for (const p of contour) out[p] ??= { ...out[touched[0]]! };
-      continue;
-    }
-    const n = contour.length;
-    for (let k = 0; k < n; k++) {
-      const p = contour[k];
-      if (named[p]) continue;
-      let before = k;
-      while (!named[contour[before]]) before = (before - 1 + n) % n;
-      let after = k;
-      while (!named[contour[after]]) after = (after + 1) % n;
-      const [a, b] = [contour[before], contour[after]];
-      const axis = (key: "x" | "y") => {
-        const [ca, cb, v] = [points[a][key], points[b][key], points[p][key]];
-        const [da, db] = [out[a]![key], out[b]![key]];
-        if (ca === cb) return da === db ? da : 0;
-        const [lo, hi, dlo, dhi] = ca < cb ? [ca, cb, da, db] : [cb, ca, db, da];
-        if (v <= lo) return dlo;
-        if (v >= hi) return dhi;
-        return dlo + ((v - lo) * (dhi - dlo)) / (hi - lo);
-      };
-      out[p] = { x: axis("x"), y: axis("y") };
-    }
+    interpolateContour(points, out, named, contour);
   }
   return out;
+}
+
+/** The untouched points of one contour, between the named points on either side of each. */
+function interpolateContour(
+  points: { x: number; y: number }[],
+  out: ({ x: number; y: number } | undefined)[],
+  named: boolean[],
+  contour: number[],
+) {
+  const touched = contour.filter((p) => named[p]);
+  if (!touched.length) return;
+  if (touched.length === 1) {
+    for (const p of contour) out[p] ??= { ...out[touched[0]]! };
+    return;
+  }
+  const n = contour.length;
+  for (let k = 0; k < n; k++) {
+    const p = contour[k];
+    if (named[p]) continue;
+    let before = k;
+    while (!named[contour[before]]) before = (before - 1 + n) % n;
+    let after = k;
+    while (!named[contour[after]]) after = (after + 1) % n;
+    const [a, b] = [contour[before], contour[after]];
+    const axis = (key: "x" | "y") => {
+      const [ca, cb, v] = [points[a][key], points[b][key], points[p][key]];
+      const [da, db] = [out[a]![key], out[b]![key]];
+      if (ca === cb) return da === db ? da : 0;
+      const [lo, hi, dlo, dhi] = ca < cb ? [ca, cb, da, db] : [cb, ca, db, da];
+      if (v <= lo) return dlo;
+      if (v >= hi) return dhi;
+      return dlo + ((v - lo) * (dhi - dlo)) / (hi - lo);
+    };
+    out[p] = { x: axis("x"), y: axis("y") };
+  }
 }

@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition, type SubmitEvent } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Bluetooth, BluetoothOff, Cpu, Loader2, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { Bluetooth, BluetoothOff, Cpu, Loader2, MonitorOff, RefreshCw, RotateCcw, Upload } from "lucide-react";
 import {
   BleDevice,
   commands,
@@ -22,6 +22,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { bluetoothLinkStatus, prepareBluetoothLink } from "@/app/org/[officeId]/admin/devices/bluetooth/actions";
+import { useBleScreen } from "@/components/device-console/ble-link";
+import { FrameCanvas } from "@/components/device-console/frame-canvas";
+import { PAPER_HEX } from "@/components/device-console/frame-bits";
+import { ScreenControl } from "@/components/device-console/screen-control";
 
 const OTHER = "__other__";
 const LOG_MAX = 200;
@@ -29,7 +33,7 @@ const LOG_MAX = 200;
 const LINK_POLL_MS = 3000;
 const LINK_WAIT_MS = 10 * 60 * 1000;
 
-/** A thin React layer over `@matecrew/device-link`: connect, set up, control, log, update. */
+/** A thin React layer over `@matecrew/device-link`: connect, watch, set up, control, log, update. */
 export function BluetoothPanel({ officeId }: { readonly officeId: string }) {
   const t = useTranslations("deviceBluetooth");
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -117,7 +121,7 @@ export function BluetoothPanel({ officeId }: { readonly officeId: string }) {
             <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <Fact label={t("info.firmware")} value={`${info.firmware.version} · ${info.firmware.build}`} />
               <Fact label={t("info.hardwareId")} value={info.hardwareId} mono />
-              <Fact label={t("info.wifi")} value={info.wifi ? `${info.wifi.ssid}${info.wifi.rssi != null ? ` · ${info.wifi.rssi} dBm` : ""}` : "—"} />
+              <Fact label={t("info.wifi")} value={wifiLabel(info.wifi)} />
               <Fact label={t("info.site")} value={info.site ?? "—"} />
               <div className="flex items-center gap-2 sm:col-span-2">
                 <Badge variant={info.linked ? "default" : "outline"}>{info.linked ? t("info.linked") : t("info.notLinked")}</Badge>
@@ -128,6 +132,8 @@ export function BluetoothPanel({ officeId }: { readonly officeId: string }) {
         )}
       </Card>
 
+      <ScreenCard device={device} onError={report} />
+
       {info && (info.setupOpen ? <SetupCard officeId={officeId} device={device} info={info} onError={report} /> : (
         <p className="text-sm text-muted-foreground">{t("setup.alreadyLinked")}</p>
       ))}
@@ -137,7 +143,20 @@ export function BluetoothPanel({ officeId }: { readonly officeId: string }) {
   );
 }
 
-function Fact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+/** The network the terminal joined and its signal, when it reports one. */
+function wifiLabel(wifi: DeviceInfo["wifi"]): string {
+  if (!wifi) return "—";
+  const signal = wifi.rssi == null ? "" : ` · ${wifi.rssi} dBm`;
+  return `${wifi.ssid}${signal}`;
+}
+
+/** A text field of a submitted form; empty when absent. */
+function textField(form: FormData, name: string): string {
+  const value = form.get(name);
+  return typeof value === "string" ? value : "";
+}
+
+function Fact({ label, value, mono = false }: Readonly<{ label: string; value: string; mono?: boolean }>) {
   return (
     <div className="flex justify-between gap-4 sm:block">
       <dt className="text-muted-foreground">{label}</dt>
@@ -149,20 +168,30 @@ function Fact({ label, value, mono = false }: { label: string; value: string; mo
 type SetupState = { step: "form" } | { step: "sending" } | { step: "waiting" } | { step: "linked"; deviceId: string } | { step: "timeout" };
 
 /** Wi-Fi, this site's address and a pre-approved link in one write, then wait for the link. */
-function SetupCard({ officeId, device, info, onError }: { officeId: string; device: BleDevice; info: DeviceInfo; onError: (error: LinkError) => void }) {
+function SetupCard({
+  officeId,
+  device,
+  info,
+  onError,
+}: Readonly<{ officeId: string; device: BleDevice; info: DeviceInfo; onError: (error: LinkError) => void }>) {
   const t = useTranslations("deviceBluetooth");
   const [network, setNetwork] = useState(info.networks[0] ?? OTHER);
   const [state, setState] = useState<SetupState>({ step: "form" });
   const stopped = useRef(false);
 
-  useEffect(() => () => void (stopped.current = true), []);
+  useEffect(
+    () => () => {
+      stopped.current = true;
+    },
+    [],
+  );
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const ssid = network === OTHER ? String(form.get("ssid") ?? "").trim() : network;
-    const password = String(form.get("password") ?? "");
-    const name = String(form.get("name") ?? "").trim() || t("setup.defaultName");
+    const ssid = network === OTHER ? textField(form, "ssid").trim() : network;
+    const password = textField(form, "password");
+    const name = textField(form, "name").trim() || t("setup.defaultName");
     setState({ step: "sending" });
 
     const since = new Date().toISOString();
@@ -252,8 +281,46 @@ function SetupCard({ officeId, device, info, onError }: { officeId: string; devi
   );
 }
 
+/** The terminal's screen, live over Bluetooth; a click taps it. */
+function ScreenCard({ device, onError }: Readonly<{ device: BleDevice; onError: (error: LinkError) => void }>) {
+  const t = useTranslations("deviceBluetooth.screen");
+  const { frame, error } = useBleScreen(device);
+  let message: string | null = null;
+  if (error?.code === "unsupported") message = t("unsupported");
+  else if (error && error.code !== "disconnected") message = t("failed", { message: error.message });
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("title")}</CardTitle>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="aspect-[5/3] w-full max-w-3xl overflow-hidden rounded-md border" style={{ background: PAPER_HEX }}>
+          {frame ? (
+            <ScreenControl
+              label={t("tap")}
+              onTap={(x, y) =>
+                void commands.tap(device, x, y).then((sent) => {
+                  if (!sent.ok) onError(sent.error);
+                })
+              }
+            >
+              <FrameCanvas bits={frame.bits} />
+            </ScreenControl>
+          ) : (
+            <p className="flex size-full items-center justify-center gap-2 p-4 text-center text-sm text-zinc-600">
+              {message ? <MonitorOff className="size-4 shrink-0" /> : <Loader2 className="size-4 shrink-0 animate-spin" />}
+              {message ?? t("waiting")}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Keys, badge, sync, restart, the live log, and a firmware upload. */
-function ControlCard({ device, onError }: { device: BleDevice; onError: (error: LinkError) => void }) {
+function ControlCard({ device, onError }: Readonly<{ device: BleDevice; onError: (error: LinkError) => void }>) {
   const t = useTranslations("deviceBluetooth");
   const [log, setLog] = useState<Extract<DeviceEvent, { t: "log" }>[]>([]);
   const [progress, setProgress] = useState<number | null>(null);
@@ -275,9 +342,9 @@ function ControlCard({ device, onError }: { device: BleDevice; onError: (error: 
       if (!done.ok && done.error) onError(done.error);
     });
 
-  function sendBadge(event: FormEvent<HTMLFormElement>) {
+  function sendBadge(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    const uid = String(new FormData(event.currentTarget).get("uid") ?? "").trim();
+    const uid = textField(new FormData(event.currentTarget), "uid").trim();
     if (uid) run(() => commands.badge(device, uid));
   }
 

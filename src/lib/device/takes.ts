@@ -8,6 +8,11 @@ import type { DeviceTake, TakesResponse } from "@/lib/device/contract";
 
 type Outcome = { consumptionEntryId: string | null; rejectedReason: string | null };
 
+/** `step` on each item, one after the other: the next starts once the previous one is done. */
+function inSequence<T>(items: readonly T[], step: (item: T) => Promise<void>): Promise<void> {
+  return items.reduce<Promise<void>>((previous, item) => previous.then(() => step(item)), Promise.resolve());
+}
+
 /**
  * Applies a terminal's queued takes in order. Each take is recorded once in
  * `DeviceTake`, applied or rejected, so a resent queue changes nothing and the
@@ -21,7 +26,7 @@ export async function applyTakes(
   const rejected: TakesResponse["rejected"] = [];
   const touchedItems = new Set<string>();
 
-  for (const take of takes) {
+  await inSequence(takes, async (take) => {
     const known = await prisma.deviceTake.findUnique({
       where: { deviceId_takeId: { deviceId: device.id, takeId: take.id } },
       select: { rejectedReason: true },
@@ -32,7 +37,7 @@ export async function applyTakes(
         data: {
           deviceId: device.id,
           takeId: take.id,
-          action: take.action,
+          action: "TAKE",
           badgeUid: take.badgeUid,
           itemId: take.itemId,
           takenAt: new Date(take.at),
@@ -46,7 +51,7 @@ export async function applyTakes(
       rejected.push({ id: take.id, reason: known.rejectedReason });
     }
     done.push(take.id);
-  }
+  });
 
   for (const itemId of touchedItems) {
     checkAndAlertLowStock(device.officeId, itemId).catch(() => {});
@@ -74,36 +79,19 @@ async function applyTake(device: AuthenticatedDevice, take: DeviceTake): Promise
   const item = await prisma.item.findFirst({ where: { id: take.itemId, officeId }, select: { id: true } });
   if (!item) return reject("unknown_item");
 
-  const at = new Date(take.at);
-  const date = getDateInTimezone(at, device.office.timezone);
+  const date = getDateInTimezone(new Date(take.at), device.office.timezone);
   const note = `Terminal ${device.name}`;
-
-  if (take.action === "TAKE") {
-    // The can is already out of the fridge: record it even if the books say
-    // the stock is empty, so a count later shows the gap instead of hiding it.
-    const [entry] = await prisma.$transaction([
-      prisma.consumptionEntry.create({
-        data: { officeId, userId, itemId: item.id, date, qty: 1, source: "DEVICE", deviceId: device.id },
-      }),
-      ...stockDeltaOps({ officeId, itemId: item.id, delta: -1, reason: "SERVED", note, userId }),
-    ]);
-    return { consumptionEntryId: entry.id, rejectedReason: null };
-  }
-
-  const latest = await prisma.consumptionEntry.findFirst({
-    where: { officeId, userId, itemId: item.id, date, cancelledAt: null },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (!latest) return reject("nothing_to_return");
-  await prisma.$transaction([
-    prisma.consumptionEntry.update({ where: { id: latest.id }, data: { cancelledAt: new Date() } }),
-    ...stockDeltaOps({ officeId, itemId: item.id, delta: 1, reason: "UNSERVED", note, userId }),
+  // The can is already out of the fridge: record it even if the books say
+  // the stock is empty, so a count later shows the gap instead of hiding it.
+  const [entry] = await prisma.$transaction([
+    prisma.consumptionEntry.create({
+      data: { officeId, userId, itemId: item.id, date, qty: 1, source: "DEVICE", deviceId: device.id },
+    }),
+    ...stockDeltaOps({ officeId, itemId: item.id, delta: -1, reason: "SERVED", note, userId }),
   ]);
-  return { consumptionEntryId: latest.id, rejectedReason: null };
+  return { consumptionEntryId: entry.id, rejectedReason: null };
 }
 
-/** Remembers badges a terminal saw so an admin can give them to members. */
 /** A known badge was tapped: its last pass moves forward, never back (takes can arrive late). */
 async function markBadgeSeen(officeId: string, rawUid: string, at: Date) {
   const uid = normalizeBadgeUid(rawUid);
@@ -111,13 +99,14 @@ async function markBadgeSeen(officeId: string, rawUid: string, at: Date) {
   await prisma.badge.updateMany({ where: { officeId, uid, lastSeenAt: { lt: at } }, data: { lastSeenAt: at } });
 }
 
+/** Remembers badges a terminal saw so an admin can give them to members. */
 export async function recordBadges(officeId: string, uids: string[]) {
   const now = new Date();
-  for (const uid of uids) {
+  await inSequence(uids, async (uid) => {
     await prisma.badge.upsert({
       where: { officeId_uid: { officeId, uid } },
       create: { officeId, uid },
       update: { lastSeenAt: now },
     });
-  }
+  });
 }

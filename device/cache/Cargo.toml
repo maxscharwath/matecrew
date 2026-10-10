@@ -1,0 +1,15 @@
+[package]
+name = "matecrew-cache"
+version = "0.1.0"
+edition = "2021"
+description = "Typed keys for what a device keeps between restarts: how long, how big, checked on read"
+license = "MIT"
+
+# Storage stays outside: the firmware implements `Backend` over NVS, tests and wasm use
+# `MemoryBackend`. Nothing here needs ESP-IDF, so `cargo test` runs on the Mac.
+[dependencies]
+serde = "1"
+serde_json = "1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }

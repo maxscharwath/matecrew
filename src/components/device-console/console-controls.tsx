@@ -24,7 +24,7 @@ export function ControlsCard({
   onSync,
   onRestart,
   onForgetWifi,
-}: {
+}: Readonly<{
   deviceName: string;
   reachable: boolean;
   onKey: (side: Side) => void;
@@ -34,7 +34,7 @@ export function ControlsCard({
   onSync: (app?: "mate" | "showcase") => void;
   onRestart: () => void;
   onForgetWifi: () => void;
-}) {
+}>) {
   const t = useTranslations("devices.console");
   const [uid, setUid] = useState("");
   const [invalid, setInvalid] = useState(false);
@@ -152,7 +152,7 @@ export function ControlsCard({
   );
 }
 
-function Group({ label, children }: { label: string; children: ReactNode }) {
+function Group({ label, children }: Readonly<{ label: string; children: ReactNode }>) {
   return (
     <div className="space-y-2">
       <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{label}</div>
@@ -184,11 +184,11 @@ export function BoardCard({
   hardwareId,
   firmwareVersion,
   active,
-}: {
+}: Readonly<{
   hardwareId: string;
   firmwareVersion: string | null;
   active: ReadonlySet<number>;
-}) {
+}>) {
   const t = useTranslations("devices.console");
   return (
     <Card className="gap-3 py-4">
@@ -208,7 +208,9 @@ export function BoardCard({
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b text-left text-muted-foreground">
-              <th className="w-4 py-1 font-normal" aria-hidden />
+              <th className="w-4 py-1 font-normal">
+                <span className="sr-only">{t("board.activity")}</span>
+              </th>
               <th className="py-1 font-normal">{t("board.pad")}</th>
               <th className="py-1 font-normal">GPIO</th>
               <th className="py-1 font-normal">{t("board.function")}</th>

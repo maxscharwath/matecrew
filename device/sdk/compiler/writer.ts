@@ -1,10 +1,10 @@
 import { LIMITS } from "../runtime/limits";
 export class Writer {
   readonly bytes: number[] = [];
-  append(bytes: ArrayLike<number>): void {
+  append(bytes: ArrayLike<number> & Iterable<number>): void {
     if (this.bytes.length + bytes.length > LIMITS.bytes)
       throw new Error("Bytecode exceeds device size limit");
-    for (let i = 0; i < bytes.length; i++) this.bytes.push(bytes[i]);
+    for (const byte of bytes) this.bytes.push(byte);
   }
   u8(value: number): void {
     integer(value, 0, 255, "u8");

@@ -63,13 +63,11 @@ impl Queue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::Action;
 
     fn take(id: &str) -> Take {
         Take {
             id: id.into(),
             badge_uid: "04A1B2C3".into(),
-            action: Action::Take,
             item_id: Some("i1".into()),
             at: "2026-10-09T18:25:00Z".into(),
         }

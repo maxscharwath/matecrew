@@ -34,8 +34,8 @@ export type BoardHost = {
   log(entry: LogEntry): void;
   /** An app event (`emit`): the host's business logic, or the studio's preview flow. */
   emit?(name: string): void;
-  /** Answer an app's resource fetch; `undefined` leaves the resource as cached. */
-  fetch(id: string, path: string): Promise<unknown> | unknown;
+  /** Answer an app's resource fetch, or a promise of it; `undefined` leaves the resource as cached. */
+  fetch(id: string, path: string): unknown;
   /** PNG bytes (base64) for a web image, if the host has one. */
   image?(src: string): Promise<string | undefined> | string | undefined;
 };
@@ -100,7 +100,11 @@ export class EmulatedBoard {
 
   /** Host binding roots drawn over the app's data (`view`, `$device` of host-driven screens). */
   hostData(data: Record<string, unknown>): void {
-    if (this.loaded) this.run(() => (this.engine.session.data(data), []));
+    if (!this.loaded) return;
+    this.run(() => {
+      this.engine.session.data(data);
+      return [];
+    });
   }
 
   /** An app is running. */
@@ -197,34 +201,42 @@ export class EmulatedBoard {
     this.run(() => [...this.engine.session.gpio(left, right, now - this.started), ...this.engine.session.tick(now - this.started)]);
   }
 
+  /** The effects in order (a fetch holds the next ones back), then the web images, then the panel. */
   private async settle(effects: Effect[]): Promise<void> {
-    for (const effect of effects) {
-      if (effect.kind === "beep") this.beep(effect.tone);
-      else if (effect.kind === "emit") {
-        this.log("emit", effect.name);
-        this.host.emit?.(effect.name);
-      }
-      else if (effect.kind === "fetch") {
-        const value = await this.host.fetch(effect.id, effect.path);
-        if (value === undefined) this.log("fetch", `${effect.path} → pas de données simulées`);
-        else {
-          this.engine.session.update(effect.id, value);
-          this.log("fetch", `${effect.path} → ${effect.id}`);
-        }
-      }
-    }
-    for (const request of this.engine.session.images()) {
-      const png = await this.host.image?.(request.src);
-      if (png) this.engine.session.image(request.src, png);
-    }
+    const applied = inOrder(effects, (effect) => this.apply(effect));
+    if (applied) await applied;
+    const pictures = inOrder(this.engine.session.images(), (request) => this.picture(request.src));
+    if (pictures) await pictures;
     this.present();
+  }
+  private apply(effect: Effect): Promise<void> | undefined {
+    if (effect.kind === "fetch") return this.answer(effect.id, effect.path);
+    if (effect.kind === "beep") this.beep(effect.tone);
+    else if (effect.kind === "emit") {
+      this.log("emit", effect.name);
+      this.host.emit?.(effect.name);
+    }
+    return undefined;
+  }
+  private async answer(id: string, path: string): Promise<void> {
+    const value = await this.host.fetch(id, path);
+    if (value === undefined) this.log("fetch", `${path} → pas de données simulées`);
+    else {
+      this.engine.session.update(id, value);
+      this.log("fetch", `${path} → ${id}`);
+    }
+  }
+  private async picture(src: string): Promise<void> {
+    const png = await this.host.image?.(src);
+    if (png) this.engine.session.image(src, png);
   }
 
   private beep(tone: Tone): void {
     const program = this.engine.tone(tone);
     this.gpio.playPwm(program, performance.now());
     this.buzzer.play(program);
-    this.log("beep", `${tone} · ${program.filter(([hz]) => hz).map(([hz, ms]) => `${hz} Hz ${ms} ms`).join(", ")}`);
+    const notes = program.filter(([hz]) => hz).map(([hz, ms]) => `${hz} Hz ${ms} ms`);
+    this.log("beep", `${tone} · ${notes.join(", ")}`);
   }
 
   private present(): void {
@@ -247,6 +259,16 @@ export class EmulatedBoard {
   private log(kind: LogEntry["kind"], text: string): void {
     this.host.log({ at: performance.now(), kind, text });
   }
+}
+
+/**
+ * Each item in turn: a step that returns a promise holds the next ones back until it settles, as
+ * a `for … await` loop would; steps that return nothing run at once.
+ */
+function inOrder<T>(items: readonly T[], step: (item: T) => Promise<void> | undefined): Promise<void> | undefined {
+  let pending: Promise<void> | undefined;
+  for (const item of items) pending = pending ? pending.then(() => step(item)) : step(item);
+  return pending;
 }
 
 function full(frame: Frame): Refresh["box"] {

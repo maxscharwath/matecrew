@@ -212,7 +212,7 @@ impl Runtime {
 }
 
 impl Runtime {
-    /// None means unbound, allowing hosts to support legacy pointer-mapped apps.
+    /// None when the screen binds no action to this input.
     pub fn input(&mut self, name: &str) -> Option<Vec<Effect>> {
         self.scene
             .action_for_input(name, &self.data)

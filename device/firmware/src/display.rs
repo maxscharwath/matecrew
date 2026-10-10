@@ -107,6 +107,8 @@ impl Screen {
         let drawn = started.elapsed();
         if self.next.bits != self.sent {
             self.sent.copy_from_slice(&self.next.bits);
+            // Every screen, setup and linking included, for a browser watching over Bluetooth.
+            crate::ble::show_screen(&self.sent);
             self.order(Order::Show { bits: self.next.bits.clone(), drawn });
         }
         Ok(())

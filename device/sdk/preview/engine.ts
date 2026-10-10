@@ -104,14 +104,19 @@ export class Engine {
   /** The emulator's running app (one per engine instance). */
   readonly session = {
     load: (bytecode: Uint8Array) =>
-      this.guard(() => void this.check(this.wasm.session_load(this.write(bytecode), bytecode.length))),
+      this.guard(() => {
+        this.check(this.wasm.session_load(this.write(bytecode), bytecode.length));
+      }),
     restore: (cache: unknown) => this.json("session_restore", cache),
     device: (info: Record<string, unknown>) => this.json("session_device", info),
     update: (id: string, value: unknown) => this.json("session_update", { id, value }),
     /** Binding roots drawn over the app's own data, e.g. `view` for host-driven screens. */
     data: (data: Record<string, unknown>) => this.json("session_data", data),
-    /** Sample the key pins (GPIO 5, GPIO 8) through the board's edge detector. */
-    /** Key levels at `nowMs`; a lone key comes out 120 ms later, both keys as `emit("both")`. */
+    /**
+     * Sample the key pins (GPIO 5, GPIO 8) through the board's edge detector: key levels at
+     * `nowMs`; a key comes out when released, `leftLong` / `rightLong` once held 700 ms (the
+     * short one, its emit renamed, where the app has no such input), both keys as `emit("both")`.
+     */
     gpio: (left: boolean, right: boolean, nowMs: number) =>
       this.guard(() => this.effects(this.wasm.session_gpio(Number(left), Number(right), nowMs))),
     /** A tap in panel pixels. */

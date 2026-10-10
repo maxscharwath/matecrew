@@ -10,9 +10,24 @@ use std::{fs, path::Path};
 fn main() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("out");
     fs::create_dir_all(&out).expect("create out/");
-    for stage in 0..4 {
-        save(&out, &format!("boot-{stage}"), |d| ui::boot::render(d, stage));
-    }
+    // The start as the terminal logs it (`firmware/src/main.rs`), saved after each step.
+    let mut boot = ui::boot::BootLog::new(6);
+    boot.start("screen", &[]);
+    boot.done("screenReady", &[]);
+    boot.start("reader", &[]);
+    boot.done("readerReady", &[("version", "1.6")]);
+    save(&out, "boot-0", |d| boot.render(d));
+    boot.start("wifiJoining", &[("ssid", "OWT-Office")]);
+    save(&out, "boot-1", |d| boot.render(d));
+    boot.done("wifiJoined", &[("ssid", "OWT-Office"), ("rssi", "-55")]);
+    boot.start("site", &[]);
+    boot.done("siteReady", &[("host", "matecrew.vercel.app")]);
+    boot.start("apps", &[]);
+    save(&out, "boot-2", |d| boot.render(d));
+    boot.done("mateLoaded", &[]);
+    boot.start("ready", &[]);
+    boot.done("allReady", &[]);
+    save(&out, "boot-3", |d| boot.render(d));
 
     let info = ui::device_info::set(
         serde_json::json!({"board":{"name":"Simulateur XIAO","simulated":true},"pins":{"left":5,"right":8,"buzzer":6},"wifi":{"rssi":-55},"battery":{"percent":78},"clock":"10:42"}),
@@ -100,7 +115,7 @@ fn main() {
             ui::dashboard_screen(d, &layout, false)
         });
     }
-    dashboard.preparation = serde_json::from_str(r#"{"title":"À préparer · Après-midi","total":"8 à préparer","items":[{"name":"Maté Classic","count":5,"names":"Alex, Sam, Chris, Jo, Max","image":""},{"name":"Maté Zero","count":3,"names":"Pat, Robin, Mika","image":""}]}"#).unwrap();
+    dashboard.preparation = serde_json::from_str(r#"{"title":"À préparer · Après-midi","total":"8 à préparer","serveLabel":"Servi","items":[{"name":"Maté Classic","count":5,"names":"Alex, Sam, Chris, Jo, Max","picture":""},{"name":"Maté Zero","count":3,"names":"Pat, Robin, Mika","picture":""}]}"#).unwrap();
     save(&out, "preparation", |d| {
         ui::dashboard_screen(d, &dashboard, false)
     });
@@ -137,25 +152,25 @@ fn main() {
         ui::connected_screen(d, "OWT-Office", "10.0.4.27")
     });
     save(&out, "badge", |d| ui::badge_screen(d, "Prendre"));
-    let image = matecrew_core::contract::decode_base64(&dashboard.items[0].image).unwrap();
+    let picture = matecrew_core::contract::decode_base64(&dashboard.items[0].picture).unwrap();
     let info = ui::PickInfo {
         name: "Alex",
         item: "Maté Classic",
         stock: 36,
-        image: Some(&image),
+        picture: &picture,
         index: 0,
         count: 3,
     };
     save(&out, "pick", |d| ui::pick_screen(d, &info));
     save(&out, "leave", |d| ui::leave_screen(d, "Alex"));
     save(&out, "taken", |d| {
-        ui::taken_screen(d, "Alex", "Maté Classic", Some(&image))
+        ui::taken_screen(d, "Alex", "Maté Classic")
     });
     let labels = ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from);
-    save(&out, "summary", |d| {
-        ui::summary_screen(
+    save(&out, "account", |d| {
+        ui::account_screen(
             d,
-            &ui::SummaryInfo {
+            &ui::AccountInfo {
                 name: "Alex Martin",
                 today: 1,
                 week: 4,
@@ -164,6 +179,7 @@ fn main() {
                 products: &["Maté Classic".to_owned()],
                 labels: &labels,
                 cost: Some("CHF 12.40"),
+                recent: &[],
             },
         )
     });

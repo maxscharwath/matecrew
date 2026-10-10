@@ -4,10 +4,13 @@ use anyhow::{anyhow, Context, Result};
 use embedded_svc::http::{client::Client, Method};
 use embedded_svc::io::Write;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
+use esp_idf_svc::io::EspIOError;
 use matecrew_core::contract::{
-    CommandsResponse, DeviceState, LinkError, LinkGranted, LinkStart, ServeRequest,
-    ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
+    Account, AccountRequest, CancelPurchaseRequest, CancelPurchaseResponse, CommandsResponse, DeviceState, LinkError,
+    LinkGranted, LinkStart, ServeRequest, ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
+    ACCOUNT_PATH, CANCEL_PURCHASE_PATH,
 };
+use matecrew_core::flow::Cause;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cell::RefCell, time::Duration};
 
@@ -61,6 +64,35 @@ impl std::fmt::Display for Unauthorized {
 }
 
 impl std::error::Error for Unauthorized {}
+
+/// The site answered with an error status. `error` is the JSON body's `"error"`, when it has one
+/// ("unknown_badge").
+#[derive(Debug)]
+pub struct Status {
+    pub status: u16,
+    pub error: Option<String>,
+    body: String,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "server answered {}: {}", self.status, self.body)
+    }
+}
+
+impl std::error::Error for Status {}
+
+/// No answer from the site, and why (`Cause`), for the screens that say so.
+#[derive(Debug)]
+pub struct Unreachable(pub Cause);
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "site out of reach ({:?})", self.0)
+    }
+}
+
+impl std::error::Error for Unreachable {}
 
 struct Reply {
     status: u16,
@@ -219,6 +251,16 @@ impl Api {
         )?)
     }
 
+    /// The badge holder's account, live ("Mon compte"). Errors tell apart a site out of reach
+    /// (`Unreachable`), an error status (`Status`) and an answer that does not parse.
+    pub fn account(&self, request: &AccountRequest) -> Result<Account> {
+        expect_json(self.send(Method::Post, ACCOUNT_PATH, Body::json(request)?, TIMEOUT)?)
+    }
+
+    pub fn cancel_purchase(&self, request: &CancelPurchaseRequest) -> Result<CancelPurchaseResponse> {
+        expect_json(self.send(Method::Post, CANCEL_PURCHASE_PATH, Body::json(request)?, TIMEOUT)?)
+    }
+
     /// "Servi" on the preparation screen: the site serves the session for this badge.
     pub fn serve(&self, request: &ServeRequest) -> Result<ServeResponse> {
         expect_json(self.send(
@@ -304,15 +346,39 @@ impl Api {
             let at = kept.iter().position(|(t, _)| *t == timeout)?;
             Some(kept.swap_remove(at).1)
         });
+        let started = std::time::Instant::now();
         let reused = kept.is_some();
         let mut client = match kept {
             Some(client) => client,
             None => Self::connect(timeout)?,
         };
         let mut sent = self.send_on(&mut client, method, path, &body);
-        if sent.is_err() && reused {
+        let retried = sent.is_err() && reused;
+        if retried {
             client = Self::connect(timeout)?;
             sent = self.send_on(&mut client, method, path, &body);
+        }
+        let sent = sent.map_err(|e| unreachable(&mut client, e));
+        // One line per exchange, to see where the time goes: a new connection costs a TLS
+        // handshake, a retry a dead kept-alive one.
+        let connection = match (reused, retried) {
+            (true, false) => "kept connection",
+            (true, true) => "kept connection closed, new one",
+            (false, _) => "new connection",
+        };
+        match &sent {
+            Ok(reply) => log::info!(
+                "net: {} {path} -> {} ({} B) in {} ms, {connection}",
+                method_name(method),
+                reply.status,
+                reply.body.len(),
+                started.elapsed().as_millis()
+            ),
+            Err(e) => log::warn!(
+                "net: {} {path} failed in {} ms, {connection}: {e:#}",
+                method_name(method),
+                started.elapsed().as_millis()
+            ),
         }
         if sent.is_ok() {
             CONNECTIONS.with(|kept| kept.borrow_mut().push((timeout, client)));
@@ -374,11 +440,6 @@ impl Api {
             }
             body.extend_from_slice(&chunk[..read]);
         }
-        log::info!(
-            "{} {path} -> {status} ({} bytes)",
-            method_name(method),
-            body.len()
-        );
         if status == 401 {
             return Err(Unauthorized.into());
         }
@@ -395,16 +456,50 @@ fn method_name(method: Method) -> &'static str {
     }
 }
 
+/// Why a request got no answer: the Wi-Fi, then the connection's last TLS error, then the
+/// request's own. A 401 is an answer and stays as it is.
+fn unreachable(client: &mut Client<EspHttpConnection>, error: anyhow::Error) -> anyhow::Error {
+    use esp_idf_svc::{handle::RawHandle, sys};
+    if error.is::<Unauthorized>() {
+        return error;
+    }
+    let (mut tls, mut flags) = (0, 0);
+    // SAFETY: the handle belongs to this live connection; the call reads and clears its last
+    // TLS error only.
+    let last = unsafe {
+        sys::esp_http_client_get_and_clear_last_tls_error(client.connection().handle(), &mut tls, &mut flags)
+    };
+    let code = error.downcast_ref::<EspIOError>().map(|e| e.0.code());
+    let cause = if crate::wifi::rssi().is_none() {
+        Cause::Wifi
+    } else {
+        match (last, code) {
+            (sys::ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME, _) => Cause::Dns,
+            (sys::ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT | sys::ESP_ERR_ESP_TLS_SERVER_HANDSHAKE_TIMEOUT, _) => Cause::Timeout,
+            (sys::ESP_ERR_ESP_TLS_CANNOT_CREATE_SOCKET | sys::ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST, _) => Cause::Connect,
+            // The mbedTLS errors: certificate, handshake, reading or writing the secure stream.
+            (last, _) if (sys::ESP_ERR_ESP_TLS_BASE + 0x10..sys::ESP_ERR_ESP_TLS_BASE + 0x100).contains(&last) => Cause::Tls,
+            (_, Some(sys::ESP_ERR_HTTP_EAGAIN | sys::ESP_ERR_HTTP_READ_TIMEOUT | sys::ESP_ERR_TIMEOUT)) => Cause::Timeout,
+            (_, Some(sys::ESP_ERR_HTTP_CONNECT)) => Cause::Connect,
+            _ => Cause::Network,
+        }
+    };
+    error.context(Unreachable(cause))
+}
+
 fn check(reply: &Reply) -> Result<()> {
     if (200..300).contains(&reply.status) {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "server answered {}: {}",
-            reply.status,
-            String::from_utf8_lossy(&reply.body)
-        ))
+        return Ok(());
     }
+    let error = serde_json::from_slice::<serde_json::Value>(&reply.body)
+        .ok()
+        .and_then(|body| body.get("error")?.as_str().map(str::to_owned));
+    Err(Status {
+        status: reply.status,
+        error,
+        body: String::from_utf8_lossy(&reply.body).chars().take(200).collect(),
+    }
+    .into())
 }
 
 fn expect_json<T: DeserializeOwned>(reply: Reply) -> Result<T> {

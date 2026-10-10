@@ -46,26 +46,27 @@ export async function loadPreviews(
     ? JSON.parse(await readFile(file, "utf8"))
     : (await import(pathToFileURL(file).href)).previews;
   if (!previews) throw new Error(`${path}: export const previews = definePreviews({...})`);
-  // Image files are relative to the previews file; the engine receives their bytes.
-  // Raw device readings get the status sprites the terminal host would add.
-  const resolved: Previews = {};
-  for (const [name, raw] of Object.entries(previews)) {
-    const preview = raw.device && !raw.device.status ? { ...raw, device: decorate(raw.device) } : raw;
-    resolved[name] = preview.images
-      ? {
-          ...preview,
-          images: Object.fromEntries(
-            await Promise.all(
-              Object.entries(preview.images).map(async ([src, png]) => [
-                src,
-                (await readFile(resolve(dirname(file), png))).toString("base64"),
-              ]),
-            ),
-          ),
-        }
-      : preview;
-  }
-  return resolved;
+  return Object.fromEntries(
+    await Promise.all(
+      Object.entries(previews).map(async ([name, raw]) => [name, await resolvePreview(raw, dirname(file))] as const),
+    ),
+  );
+}
+
+/**
+ * Image files are relative to the previews file; the engine receives their bytes.
+ * Raw device readings get the status sprites the terminal host would add.
+ */
+async function resolvePreview(raw: Preview, dir: string): Promise<Preview> {
+  const preview = raw.device && !raw.device.status ? { ...raw, device: decorate(raw.device) } : raw;
+  if (!preview.images) return preview;
+  const images = await Promise.all(
+    Object.entries(preview.images).map(async ([src, png]) => [
+      src,
+      (await readFile(resolve(dir, png))).toString("base64"),
+    ]),
+  );
+  return { ...preview, images: Object.fromEntries(images) };
 }
 
 export async function drawApp(
@@ -88,20 +89,22 @@ function draw(
   { screen, description, ...spec }: Preview,
   artifacts: Artifact[],
 ): Drawn {
-  const artifact = screen
-    ? artifacts.find((candidate) => candidate.screen === screen)
-    : artifacts.length === 1
-      ? artifacts[0]
-      : undefined;
-  if (!artifact)
-    throw new Error(
-      `${app}/${name}: ${screen ? `unknown screen "${screen}"` : "name a screen for this multi-screen app"}`,
-    );
+  const artifact = artifactFor(artifacts, screen);
+  if (!artifact) {
+    const reason = screen ? `unknown screen "${screen}"` : "name a screen for this multi-screen app";
+    throw new Error(`${app}/${name}: ${reason}`);
+  }
   try {
     return { app, name, screen, description, frame: wasm.render(artifact.bytes, spec) };
   } catch (error) {
     throw new Error(`${app}/${name}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/** The screen a preview names; a single-screen app needs none. */
+function artifactFor(artifacts: Artifact[], screen: string | undefined): Artifact | undefined {
+  if (screen) return artifacts.find((candidate) => candidate.screen === screen);
+  return artifacts.length === 1 ? artifacts[0] : undefined;
 }
 
 /** Snapshots live next to the app's entry, in `__snapshots__/`. */

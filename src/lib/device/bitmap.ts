@@ -10,15 +10,11 @@ import { downloadFile } from "@/lib/storage";
 export type Bitmap = { width: number; height: number; bits: Uint8Array };
 
 /**
- * Side of an item picture in panel pixels. It takes 48 x 48 logical pixels of the
- * 400 x 240 canvas the screens are laid out on, which the panel shows 2
- * times bigger: a 96 x 96 picture keeps all its detail there.
+ * Side of an item picture in panel pixels, as the terminal draws it; where a screen has less
+ * room, the terminal halves it.
  */
 export const ITEM_IMAGE_SIZE = 96;
 export const ITEM_IMAGE_BYTES = (ITEM_IMAGE_SIZE * ITEM_IMAGE_SIZE) / 8;
-/** Pictures saved before they were 96 px: 24 x 24. */
-const SMALL_IMAGE_SIZE = 24;
-const SMALL_IMAGE_BYTES = (SMALL_IMAGE_SIZE * SMALL_IMAGE_SIZE) / 8;
 
 export function blank(width: number, height: number): Bitmap {
   return {
@@ -40,6 +36,25 @@ export function get(b: Bitmap, x: number, y: number): boolean {
   return (b.bits[i >> 3] & (0x80 >> (i & 7))) !== 0;
 }
 
+/** Where Atkinson dithering passes a pixel's error: an eighth to each of these neighbours. */
+const ATKINSON: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [2, 0],
+  [-1, 1],
+  [0, 1],
+  [1, 1],
+  [0, 2],
+];
+
+/** Adds `error` to the neighbours of (x, y) that are still to come and on the picture. */
+function spread(level: Float32Array, width: number, height: number, x: number, y: number, error: number): void {
+  for (const [dx, dy] of ATKINSON) {
+    const nx = x + dx;
+    const ny = y + dy;
+    if (nx >= 0 && nx < width && ny < height) level[ny * width + nx] += error;
+  }
+}
+
 /** Atkinson dithering: the Macintosh look, which keeps a small photo readable. */
 export function dither(
   gray: Uint8Array,
@@ -48,26 +63,12 @@ export function dither(
 ): Bitmap {
   const out = blank(width, height);
   const level = Float32Array.from(gray);
-  const spread: [number, number][] = [
-    [1, 0],
-    [2, 0],
-    [-1, 1],
-    [0, 1],
-    [1, 1],
-    [0, 2],
-  ];
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const old = level[y * width + x];
       const ink = old < 128;
       if (ink) set(out, x, y);
-      const error = (old - (ink ? 0 : 255)) / 8;
-      for (const [dx, dy] of spread) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx >= 0 && nx < width && ny < height)
-          level[ny * width + nx] += error;
-      }
+      spread(level, width, height, x, y, (old - (ink ? 0 : 255)) / 8);
     }
   }
   return out;
@@ -80,21 +81,6 @@ export function enlarge(b: Bitmap, factor: number): Bitmap {
     for (let x = 0; x < out.width; x++)
       if (get(b, Math.floor(x / factor), Math.floor(y / factor)))
         set(out, x, y);
-  }
-  return out;
-}
-
-/** `b` shrunk by `factor`: a block becomes ink when at least half of it is. */
-export function shrink(b: Bitmap, factor: number): Bitmap {
-  const out = blank(b.width / factor, b.height / factor);
-  for (let y = 0; y < out.height; y++) {
-    for (let x = 0; x < out.width; x++) {
-      let ink = 0;
-      for (let dy = 0; dy < factor; dy++)
-        for (let dx = 0; dx < factor; dx++)
-          if (get(b, x * factor + dx, y * factor + dy)) ink++;
-      if (ink * 2 >= factor * factor) set(out, x, y);
-    }
   }
   return out;
 }
@@ -179,15 +165,6 @@ export async function photoBitmap(
 }
 
 /**
- * What the terminal shows for an item: its own black and white picture,
- * else its photo in black and white, else the catalogue fallback.
- */
-/** The 24 x 24 sprites the Rust renderer draws on its logical canvas. */
-export function smallImage(b: Bitmap): Bitmap {
-  return shrink(b, ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
-}
-
-/**
  * The picture followed by its opacity plane, the three colours the terminal draws: ink black,
  * paper white where it belongs to the object, transparent around it. The surroundings are the
  * paper reachable from the edges without crossing ink, so the white body of a can stays white
@@ -230,6 +207,10 @@ export function withOpacity(b: Bitmap): Uint8Array {
   return planes;
 }
 
+/**
+ * What the terminal shows for an item: its own black and white picture,
+ * else its photo in black and white, else the catalogue fallback.
+ */
 export async function itemImage(
   imageKey: string | null,
   terminalImage?: Uint8Array | null,
@@ -240,14 +221,6 @@ export async function itemImage(
       height: ITEM_IMAGE_SIZE,
       bits: Uint8Array.from(terminalImage),
     };
-  }
-  if (terminalImage?.length === SMALL_IMAGE_BYTES) {
-    const small = {
-      width: SMALL_IMAGE_SIZE,
-      height: SMALL_IMAGE_SIZE,
-      bits: Uint8Array.from(terminalImage),
-    };
-    return enlarge(small, ITEM_IMAGE_SIZE / SMALL_IMAGE_SIZE);
   }
   return (await photoBitmap(imageKey)) ?? fallbackProductImage();
 }

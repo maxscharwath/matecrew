@@ -4,6 +4,7 @@ import { EmulatedBoard, REFRESH_MS, decorate, type LogEntry, type Refresh } from
 import { batteryMillivolts } from "../emulator/status";
 import type { Preview } from "../preview";
 import type { Bundle } from "../cli/bundle";
+import { Cache, Keep, key, localStorageBackend } from "../cache";
 
 const PAPER = [0xf4, 0xf2, 0xec];
 const INK = [0x1d, 0x1d, 0x1f];
@@ -38,20 +39,11 @@ let board: EmulatedBoard;
 const bundles = new Map<string, Bundle | { error: string }>();
 let view: "device" | "previews" = "device";
 let inverted = false;
-const stored = (key: string) => {
-  try {
-    return localStorage.getItem(`dui:${key}`) ?? undefined;
-  } catch {
-    return undefined;
-  }
-};
-const store = (key: string, value: string) => {
-  try {
-    localStorage.setItem(`dui:${key}`, value);
-  } catch {
-    /* private mode: selection is not remembered */
-  }
-};
+/** The studio's choices, kept until changed; in a private window they are not remembered. */
+const choices = Cache.open(localStorageBackend({ prefix: "dui:" }));
+const APP = key<string>("app").keep(Keep.forever).maxBytes(256);
+const LOCALE = key<string>("locale").keep(Keep.forever).maxBytes(64);
+const PREVIEW = (app: string) => key<string>(`preview:${app}`).keep(Keep.forever).maxBytes(256);
 
 /* ---------- Data ---------- */
 
@@ -64,7 +56,7 @@ async function loadBundle(app: string): Promise<void> {
 }
 const current = () => bundles.get(ui.app.value);
 const isBundle = (value: unknown): value is Bundle => !!value && !("error" in (value as object));
-const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0);
 
 function selected(): { bundle: Bundle; preview: Preview; bytes: Uint8Array } | null {
   const bundle = current();
@@ -72,9 +64,7 @@ function selected(): { bundle: Bundle; preview: Preview; bytes: Uint8Array } | n
   const preview = bundle.previews[ui.preview.value] ?? {};
   const artifact = preview.screen
     ? bundle.artifacts.find((a) => a.screen === preview.screen)
-    : bundle.artifacts.length === 1
-      ? bundle.artifacts[0]
-      : bundle.artifacts[0];
+    : bundle.artifacts[0];
   return artifact ? { bundle, preview, bytes: decode(artifact.bytes) } : null;
 }
 
@@ -110,9 +100,7 @@ function sense(device: unknown): void {
   if (!device || typeof device !== "object") return;
   const { battery, wifi } = device as { battery?: Record<string, unknown>; wifi?: { rssi?: unknown } };
   if (battery) {
-    const millivolts = typeof battery.millivolts === "number" ? battery.millivolts
-      : typeof battery.percent === "number" ? batteryMillivolts(battery.percent)
-      : null;
+    const millivolts = recordedMillivolts(battery);
     if (millivolts !== null) ui.battery.value = String(millivolts);
     ui.usb.checked = battery.usb === true || battery.charging === true;
   }
@@ -121,6 +109,13 @@ function sense(device: unknown): void {
     if (typeof wifi.rssi === "number") ui.rssi.value = String(wifi.rssi);
   }
   showSensors();
+}
+
+/** The battery voltage a preview recorded, or the one its charge stands for. */
+function recordedMillivolts(battery: Record<string, unknown>): number | null {
+  if (typeof battery.millivolts === "number") return battery.millivolts;
+  if (typeof battery.percent === "number") return batteryMillivolts(battery.percent);
+  return null;
 }
 
 function showSensors(): void {
@@ -235,15 +230,19 @@ function boot(reboot = false): void {
   log({ at: performance.now(), kind: "info", text: `${reboot ? "boot" : "état"} ${ui.app.value} · ${ui.preview.value}` });
 }
 
-/** Stand in for the host's flow: the preview this one names for an app event, if any. */
+/**
+ * Stand in for the host's flow: the preview this one names for an app event, if any. A held key
+ * (`rightLong`) is the short one where the preview names nothing for it, as on the terminal.
+ */
 function follow(event: string): void {
   const bundle = current();
-  const next = selected()?.preview.on?.[event];
+  const on = selected()?.preview.on;
+  const next = on?.[event] ?? (event.endsWith("Long") ? on?.[event.slice(0, -"Long".length)] : undefined);
   if (!next || !isBundle(bundle) || !(next in bundle.previews)) return;
   // After the current effects settle, like a host answering an emit.
   setTimeout(() => {
     ui.preview.value = next;
-    store(`preview:${ui.app.value}`, next);
+    choices.put(PREVIEW(ui.app.value), next);
     log({ at: performance.now(), kind: "info", text: `${event} → ${next}` });
     boot();
   });
@@ -280,9 +279,8 @@ function showError(bundle: Bundle | { error: string } | undefined, runtime = "")
   if (isBundle(bundle)) {
     const size = bundle.artifacts.reduce((sum, a) => sum + a.size, 0);
     const nodes = Math.max(...bundle.artifacts.map((a) => a.nodes));
-    ui.status.textContent = runtime
-      ? "échec au chargement"
-      : `${bundle.artifacts.length > 1 ? `${bundle.artifacts.length} écrans · ` : ""}${size.toLocaleString("fr")} o · ${nodes} nœuds`;
+    const screens = bundle.artifacts.length > 1 ? `${bundle.artifacts.length} écrans · ` : "";
+    ui.status.textContent = runtime ? "échec au chargement" : `${screens}${size.toLocaleString("fr")} o · ${nodes} nœuds`;
   } else ui.status.textContent = error ? "échec de compilation" : "";
 }
 
@@ -310,24 +308,42 @@ function animatePins(): void {
     for (const pin of board.pins) {
       const row = rows.get(pin.gpio);
       if (!row) continue;
-      let high = board.level(pin.gpio, now);
-      let text = high ? "HIGH" : "LOW";
-      if (pin.signal === "buzzer") {
-        const hz = board.gpio.frequency(now);
-        text = hz ? `${hz} Hz` : "—";
-      } else if (pin.signal === "adc") {
-        high = false;
-        text = `${(Number(ui.battery.value) / 2000).toFixed(2)} V`;
-      } else if (pin.signal === "panel") {
-        // SPI clocks data at the start of a refresh; BUSY stays high until the panel settles.
-        high = board.busy(now) && (pin.gpio === 3 || now - lastRefresh < 60);
-        text = pin.gpio === 3 ? (board.busy(now) ? "occupé" : "prêt") : high ? "actif" : "—";
-      } else if (pin.signal === "i2c") text = high ? "trafic" : "—";
-      else if (pin.signal === "free") text = "—";
+      const { high, text } = reading(pin, now);
       row.led.classList.toggle("on", high);
       row.value.textContent = text;
     }
   requestAnimationFrame(animatePins);
+}
+
+type Reading = { high: boolean; text: string };
+
+/** What a pin's row shows: its LED and its value. */
+function reading(pin: EmulatedBoard["pins"][number], now: number): Reading {
+  const high = board.level(pin.gpio, now);
+  switch (pin.signal) {
+    case "buzzer": {
+      const hz = board.gpio.frequency(now);
+      return { high, text: hz ? `${hz} Hz` : "—" };
+    }
+    case "adc":
+      return { high: false, text: `${(Number(ui.battery.value) / 2000).toFixed(2)} V` };
+    case "panel":
+      return panelReading(pin.gpio, now);
+    case "i2c":
+      return { high, text: high ? "trafic" : "—" };
+    case "free":
+      return { high, text: "—" };
+    default:
+      return { high, text: high ? "HIGH" : "LOW" };
+  }
+}
+
+/** SPI clocks data at the start of a refresh; BUSY (GPIO 3) stays high until the panel settles. */
+function panelReading(gpio: number, now: number): Reading {
+  const busy = board.busy(now);
+  if (gpio === 3) return { high: busy, text: busy ? "occupé" : "prêt" };
+  const high = busy && now - lastRefresh < 60;
+  return { high, text: high ? "actif" : "—" };
 }
 let lastRefresh = 0;
 
@@ -389,7 +405,7 @@ function fillPreviews(): void {
   ui.preview.replaceChildren();
   if (!isBundle(bundle)) return;
   for (const name of Object.keys(bundle.previews)) ui.preview.add(new Option(name, name));
-  const remembered = stored(`preview:${ui.app.value}`);
+  const remembered = choices.get(PREVIEW(ui.app.value));
   if (remembered && remembered in bundle.previews) ui.preview.value = remembered;
 }
 
@@ -406,18 +422,18 @@ function wire(): void {
   for (const tab of document.querySelectorAll<HTMLButtonElement>("[data-view]"))
     tab.onclick = () => select(tab.dataset.view as "device" | "previews");
   ui.app.onchange = () => {
-    store("app", ui.app.value);
+    choices.put(APP, ui.app.value);
     fillPreviews();
     boot();
   };
   ui.preview.onchange = () => {
-    store(`preview:${ui.app.value}`, ui.preview.value);
+    choices.put(PREVIEW(ui.app.value), ui.preview.value);
     boot();
   };
   ui.reset.onclick = () => boot(true);
-  ui.locale.value = stored("locale") ?? "";
+  ui.locale.value = choices.get(LOCALE) ?? "";
   ui.locale.onchange = () => {
-    store("locale", ui.locale.value);
+    choices.put(LOCALE, ui.locale.value);
     // Apps read `$device.locale`; host-driven screens carry it in their data.
     hotReload();
     board.device(deviceInfo());
@@ -532,7 +548,7 @@ engine = await loadEngine();
 const apps: string[] = await (await fetch("/api/apps")).json();
 await Promise.all(apps.map(loadBundle));
 for (const app of apps) ui.app.add(new Option(app, app));
-const remembered = stored("app");
+const remembered = choices.get(APP);
 if (remembered && apps.includes(remembered)) ui.app.value = remembered;
 fillPreviews();
 board = createBoard();

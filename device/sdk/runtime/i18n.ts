@@ -11,7 +11,7 @@
  * context falls back to the base key. The build turns them into an ICU subset the engine reads.
  */
 import type { Binding } from "./types";
-import { translate, type Value } from "./expr";
+import { translate } from "./expr";
 
 /** Locale → key → message; the first locale is the default and defines the keys. */
 export type Messages = Record<string, Record<string, string>>;
@@ -37,8 +37,11 @@ function normalize(locale: string, entries: Record<string, string>): Record<stri
     if (/[{}]/.test(text.replace(INTERPOLATION, "")))
       throw new Error(`Message ${locale}.${key}: interpolate with {{name}}, plurals with ${key}_one / ${key}_other (i18next)`);
     const match = SUFFIX.exec(key);
-    if (match && !(match[1] in entries)) (plurals[match[1]] ??= {})[match[2] as Form] = text;
-    else out[key] = icu(text);
+    if (match && !(match[1] in entries)) {
+      const forms = plurals[match[1]] ?? {};
+      forms[match[2] as Form] = text;
+      plurals[match[1]] = forms;
+    } else out[key] = icu(text);
   }
   for (const [base, forms] of Object.entries(plurals)) {
     if (forms.other === undefined) throw new Error(`Message ${locale}.${base}: plural forms need ${base}_other`);
@@ -71,7 +74,7 @@ export function register(target: MessageTable, messages: Messages, key: string):
     if (key in entries) row[target.locales.indexOf(locale)] = entries[key];
 }
 
-export type Translate<M extends Messages> = (key: MessageKey<keyof M[keyof M] & string>, params?: Record<string, Value>) => Binding;
+export type Translate<M extends Messages> = (key: MessageKey<keyof M[keyof M] & string>, params?: Record<string, unknown>) => Binding;
 
 /**
  * A `t` for these messages: `t("stock", { count })` is a binding to the translated text. Only the
@@ -92,7 +95,7 @@ export function translator<M extends Messages>(messages: M, table: MessageTable)
  * i18next's context: `key_<context>` when the context has a variant, `key` otherwise. One select
  * on the device, so the context may change at run time (a binding).
  */
-function contextual(messages: Messages, table: MessageTable, key: string, params: Record<string, Value>): Binding {
+function contextual(messages: Messages, table: MessageTable, key: string, params: Record<string, unknown>): Binding {
   const prefix = `${key}_`;
   const variants = (entries: Record<string, string>) => Object.keys(entries).filter((k) => k.startsWith(prefix));
   const first = messages[Object.keys(messages)[0]];
@@ -102,8 +105,9 @@ function contextual(messages: Messages, table: MessageTable, key: string, params
   const selects: Messages = {};
   for (const [locale, entries] of Object.entries(messages)) {
     const options = variants(entries).map((k) => `${k.slice(prefix.length)} {${entries[k]}}`);
+    const other = `other {${entries[key] ?? ""}}`;
     if (options.length > 0 || key in entries)
-      selects[locale] = { [name]: `{context, select, ${[...options, `other {${entries[key] ?? ""}}`].join(" ")}}` };
+      selects[locale] = { [name]: `{context, select, ${[...options, other].join(" ")}}` };
   }
   register(table, selects, name);
   return translate(name, params);

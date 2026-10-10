@@ -53,11 +53,11 @@ export function Media({
   children,
   size = 96,
   variant = "sunken",
-}: {
+}: Readonly<{
   children?: Children;
   size?: number;
   variant?: SurfaceVariant;
-}): Element {
+}>): Element {
   return (
     <Surface variant={variant} radius={Math.floor(size / 2)} width={size} height={size} align="center" justify="center">
       {children}

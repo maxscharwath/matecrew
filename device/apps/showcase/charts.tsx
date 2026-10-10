@@ -28,7 +28,7 @@ export function LayoutPage() {
   return (
     <Page name="layout" gap={6}>
       {(["start", "center", "between", "evenly"] as const).map((justify) => (
-        <HStack gap={8} justify={justify} width="fill">
+        <HStack key={justify} gap={8} justify={justify} width="fill">
           {box(justify)}
           {box("B")}
           {box("C")}

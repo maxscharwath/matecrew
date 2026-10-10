@@ -12,6 +12,7 @@ const remoteCommand = z.discriminatedUnion("cmd", [
   z.object({ cmd: z.literal("sync") }),
   z.object({ cmd: z.literal("restart") }),
   z.object({ cmd: z.literal("notify"), text: z.string() }),
+  z.object({ cmd: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),
 ]);
 
 /**
@@ -48,6 +49,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ dev
       break;
     case "restart":
       command = { kind: "restart" };
+      break;
+    case "tap":
+      command = { kind: "tap", x: body.x, y: body.y };
       break;
     default:
       return Response.json({ error: "unsupported", message: `no remote "${body.cmd}" through the site` }, { status: 501 });

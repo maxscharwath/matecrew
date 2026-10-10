@@ -28,5 +28,5 @@ export function validApiPath(path: string): boolean {
 export function validImageSource(src: string): boolean {
   if (validApiPath(src)) return !src.includes("#");
   if (src.length > 1024 || /[\\\u0000-\u0020\u007f]/.test(src)) return false;
-  return /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[/?][^#]*)?$/.test(src);
+  return /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:[/?][^#]*)?$/.test(src);
 }

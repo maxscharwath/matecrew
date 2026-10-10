@@ -165,7 +165,7 @@ export default function Stock() {
       </Main>
       <Keys reader>
         <Key side="left" primary onPress={{ kind: "emit", name: "take" }}>Prendre</Key>
-        <Key side="right" onPress={{ kind: "emit", name: "mine" }}>Ma conso</Key>
+        <Key side="right" onPress={{ kind: "emit", name: "mine" }}>Mon compte</Key>
       </Keys>
     </Screen>
   );
@@ -315,6 +315,10 @@ screens are host-driven: there the studio follows each preview's `on` map instea
 The host downloads the original bytes; Rust decodes, fits, composites transparency over white and dithers them locally. Supported sources are HTTPS URLs and same-origin `/paths`. External requests carry no device token or cookies; redirects are rejected. The browser simulator needs the image server to allow CORS. The firmware does not use a server image proxy.
 
 Initial support: non-interlaced PNG, including palette, transparency, grayscale and 16-bit inputs; at most 512 × 512 source pixels and 64 KiB downloaded bytes. The destination is at most 256 × 256 logical pixels. JPEG, WebP, SVG and animated PNG are not supported. A stable placeholder appears during loading/failure. The packed cache holds at most eight images and 16 KiB of pixel data. Image URLs identify cached assets; change the URL/version query to refresh. Host storage can impose a smaller persistence budget (8 KiB for the current terminal app cache).
+
+## Cache
+
+What a host keeps between restarts that the server can send again (the last state, an app's bytecode and data, the studio's choices) goes through the cache SDK: typed keys declared in one place, each saying how long it keeps (`Keep.forever` only for what works offline) and how many bytes it may take, with a checked header so an expired or damaged entry reads as missing. `device/sdk/cache` is the TypeScript package (`@matecrew/device-cache`, also `@matecrew/device-ui/cache`; memory and `localStorage` backends) and `device/cache` its Rust twin (`matecrew-cache`), which the firmware runs over NVS; `device/firmware/src/cache.rs` lists everything the terminal caches. See their READMEs for the rules.
 
 ## Source layout
 

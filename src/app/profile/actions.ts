@@ -9,7 +9,7 @@ import { revokeMcpConnection } from "@/lib/mcp/connections";
 import { type Locale, locales } from "@/i18n/request";
 import { uploadFile, deleteFile, buildAvatarKey } from "@/lib/storage";
 
-const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg"];
+const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg"]);
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
 
 const UpdateProfileSchema = z.object({
@@ -52,7 +52,7 @@ export async function updateProfile(
   let imageUpdate: { image: string } | { image: null } | Record<string, never> = {};
 
   if (avatarFile && avatarFile.size > 0) {
-    if (!ALLOWED_MIME_TYPES.includes(avatarFile.type)) {
+    if (!ALLOWED_MIME_TYPES.has(avatarFile.type)) {
       return { success: false, error: "Invalid file type. Allowed: PNG, JPG." };
     }
     if (avatarFile.size > MAX_FILE_SIZE) {

@@ -1,0 +1,13 @@
+{
+  "name": "@matecrew/device-cache",
+  "version": "0.1.0",
+  "description": "Typed keys for what a page or device keeps: how long, how big, checked on read. Memory and localStorage backends",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": ["*.ts", "!*.test.ts", "README.md"],
+  "sideEffects": false,
+  "keywords": ["cache", "localstorage", "ttl", "typed", "iot"]
+}

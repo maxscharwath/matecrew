@@ -83,7 +83,7 @@ export function AppSidebar({
   currentOfficeId,
   avatarUrl,
   unreadWhatsNew = 0,
-}: AppSidebarProps) {
+}: Readonly<AppSidebarProps>) {
   const pathname = usePathname();
   const router = useRouter();
   const t = useTranslations();

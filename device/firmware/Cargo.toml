@@ -10,13 +10,24 @@ harness = false
 [profile.release]
 opt-level = "s"
 
+# The terminal runs this profile (`just flash`, `just release`). Overflow checks and debug
+# assertions are off: they slowed every drawing loop and took flash.
 [profile.dev]
 debug = true
 opt-level = "z"
+debug-assertions = false
+overflow-checks = false
+# One code unit with link-time optimization across every crate, std included: a third less
+# Rust code than 256 incremental units. Each build links for longer.
+codegen-units = 1
+incremental = false
+lto = "fat"
 
 [dependencies]
 anyhow = "1"
-log = "0.4"
+# The IDF logger lets INFO through at most (CONFIG_LOG_MAXIMUM_LEVEL): debug and trace lines of
+# every crate are left out of the build rather than filtered at run time.
+log = { version = "0.4", features = ["max_level_info", "release_max_level_info"] }
 esp-idf-svc = "0.53"
 embedded-svc = "0.29"
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +36,7 @@ sha2 = { version = "0.10", default-features = false }
 embedded-graphics = "0.8"
 # Bluetooth LE (NimBLE host, about half the flash of Bluedroid) for setup, control and updates.
 esp32-nimble = "0.13"
+matecrew-cache = { path = "../cache" }
 matecrew-core = { path = "../core" }
 matecrew-ui = { path = "../ui" }
 

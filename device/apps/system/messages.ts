@@ -19,6 +19,8 @@ export const messages = defineMessages({
     "boot.mateLoaded": "App maté chargée",
     "boot.ready": "Prêt",
     "boot.allReady": "Tout est prêt",
+    "pairing.title": "Appairage Bluetooth",
+    "pairing.hint": "Saisissez ce code dans la fenêtre de l'ordinateur",
   },
   en: {
     "boot.screen": "Screen",
@@ -37,5 +39,7 @@ export const messages = defineMessages({
     "boot.mateLoaded": "maté app loaded",
     "boot.ready": "Ready",
     "boot.allReady": "All set",
+    "pairing.title": "Bluetooth pairing",
+    "pairing.hint": "Enter this code in the computer's prompt",
   },
 });

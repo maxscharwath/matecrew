@@ -69,8 +69,8 @@ export function Home() {
       <Separator vertical />
       <VStack width="fill">
         {entries.flatMap(([route, Icon], i) => [
-          i > 0 && <Separator />,
-          <Item onPress={router.push(route)}>
+          i > 0 && <Separator key={`${route}-separator`} />,
+          <Item key={route} onPress={router.push(route)}>
             <ItemMedia><Icon size={28} /></ItemMedia>
             <ItemContent><ItemTitle>{t(route)}</ItemTitle></ItemContent>
             <ItemActions><ChevronRightIcon size={24} /></ItemActions>

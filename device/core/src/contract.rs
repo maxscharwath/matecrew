@@ -32,19 +32,9 @@ pub enum Side {
     Right,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum Action {
-    Take,
-    Return,
-}
-
+/// What the screen writes above a key: "Prendre" (left), "Mon compte" (right).
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct Key {
-    pub action: Action,
-    pub item_id: Option<String>,
-    /// "Prendre · Maté", or what an admin wrote instead.
     pub label: String,
 }
 
@@ -72,38 +62,16 @@ pub struct Item {
     pub id: String,
     pub name: String,
     pub stock: i64,
-    /// 24 x 24 pixels, packed 1-bit (1 = ink), base64. See [`ITEM_IMAGE_SIZE`].
-    #[serde(default)]
-    pub image: String,
-    /// 96 x 96, the definition the site draws it in; empty from sites that predate it.
-    #[serde(default)]
+    /// As [`ScreenItem::picture`].
     pub picture: String,
 }
 
-/// Side of an item's picture, in pixels of the 200 x 120 canvas.
-pub const ITEM_IMAGE_SIZE: u32 = 24;
-
+/// An assigned badge and its holder. What they drank lives on the site: "Mon compte" asks for it
+/// live (`AccountRequest`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Badge {
     pub uid: String,
     pub name: String,
-    /// What the holder drank today, this week and this month, as of the last sync.
-    #[serde(default)]
-    pub today: u32,
-    #[serde(default)]
-    pub week: u32,
-    #[serde(default)]
-    pub month: u32,
-    /// The last 7 days, oldest first (`DeviceState::day_labels` names them): per day, a count
-    /// per `products` entry.
-    #[serde(default)]
-    pub days: Vec<Vec<u32>>,
-    /// What `days` counts: the products drunk most, then "Autres" for the rest.
-    #[serde(default)]
-    pub products: Vec<String>,
-    /// This month at the price the cans were bought, formatted by the site: "CHF 12.40".
-    #[serde(default)]
-    pub cost: Option<String>,
 }
 
 /// What the terminal needs to work until the next sync. It keeps a copy in
@@ -119,19 +87,13 @@ pub struct DeviceState {
     pub badges: Vec<Badge>,
     pub sync_times: Vec<String>,
     pub server_time: String,
-    /// Weekday of each `Badge::days` entry, in the office's language ("lun" … "dim").
-    #[serde(default)]
-    pub day_labels: Vec<String>,
-    /// Screen content cached with state; old caches fall back to a local stock screen.
-    #[serde(default)]
-    pub screen: Option<DeviceScreen>,
-    #[serde(default)]
+    /// The main screen's content, cached with the state.
+    pub screen: DeviceScreen,
+    /// A compiled app to run instead of the maté screens.
     pub app_url: Option<String>,
-    /// Host-selected monochrome theme; absent in older caches.
-    #[serde(default)]
-    pub theme: Option<String>,
+    /// Host-selected monochrome theme.
+    pub theme: String,
     /// The latest firmware published on the site; the terminal installs it when it is newer.
-    #[serde(default)]
     pub firmware: Option<FirmwareRelease>,
 }
 
@@ -155,20 +117,6 @@ pub fn is_newer_version(candidate: &str, current: &str) -> bool {
 }
 
 impl DeviceState {
-    /// This state without its 96 x 96 pictures, for the terminal's small settings store
-    /// (24 KB of NVS): the next sync brings them back, and the 24 x 24 images stay meanwhile.
-    pub fn without_pictures(&self) -> Self {
-        let mut lean = self.clone();
-        lean.items.iter_mut().for_each(|i| i.picture.clear());
-        if let Some(screen) = &mut lean.screen {
-            screen.items.iter_mut().for_each(|i| i.picture.clear());
-            if let Some(prep) = &mut screen.preparation {
-                prep.items.iter_mut().for_each(|i| i.picture.clear());
-            }
-        }
-        lean
-    }
-
     pub fn key(&self, side: Side) -> &Key {
         match side {
             Side::Left => &self.keys.left,
@@ -193,7 +141,6 @@ pub struct Take {
     /// Given by the terminal; the site ignores a take it already has.
     pub id: String,
     pub badge_uid: String,
-    pub action: Action,
     pub item_id: Option<String>,
     /// When the badge was read, ISO 8601 in UTC.
     pub at: String,
@@ -218,7 +165,70 @@ pub struct ServeResponse {
     /// Orders marked served now.
     pub served: u32,
     /// Why nothing was served: "unknown_badge", "invalid_badge".
-    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Where the terminal asks for a badge holder's account, and cancels a purchase.
+pub const ACCOUNT_PATH: &str = "/api/device/account";
+pub const CANCEL_PURCHASE_PATH: &str = "/api/device/purchases/cancel";
+
+/// `POST /api/device/account`: the badge holder's account ("Mon compte"), live from the site. The
+/// badge goes in the body, out of URLs and access logs.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRequest<'a> {
+    pub badge_uid: &'a str,
+}
+
+/// One of a person's purchases, newest first (`Account::purchases`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Purchase {
+    pub id: String,
+    pub item_id: String,
+    pub item: String,
+    /// When, as the site words it in the office's language and time zone ("today 14:05").
+    pub when: String,
+    /// What it cost, as the site formats it; None before a price is known.
+    pub price: Option<String>,
+}
+
+/// What the badge holder drank and bought, as the site counts it now. The site answers 404
+/// `{"error":"unknown_badge"}` for a badge nobody holds in the terminal's office.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Account {
+    pub name: String,
+    /// Today, this week (from Monday) and this month, in the office's time zone.
+    pub today: u32,
+    pub week: u32,
+    pub month: u32,
+    /// This month at the price the cans were bought, formatted by the site: "CHF 12.40"; None
+    /// when the site cannot price it.
+    pub cost: Option<String>,
+    /// The last 7 days, oldest first, named by `labels`: per day, a count per `products` entry.
+    pub days: Vec<Vec<u32>>,
+    /// What `days` counts: the products drunk most, then "Autres" for the rest.
+    pub products: Vec<String>,
+    /// Weekday of each `days` entry, in the office's language ("lun" … "dim").
+    pub labels: Vec<String>,
+    /// The latest purchases the site still counts (not cancelled), newest first.
+    pub purchases: Vec<Purchase>,
+}
+
+/// `POST /api/device/purchases/cancel`: the badge holder cancels one of their purchases, by the
+/// same rules as on the site. Cancelling twice is cancelled.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelPurchaseRequest<'a> {
+    pub badge_uid: &'a str,
+    pub id: &'a str,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+pub struct CancelPurchaseResponse {
+    pub cancelled: bool,
+    /// Why not, or "already_cancelled": "unknown_badge", "not_found", "not_yours".
     pub reason: Option<String>,
 }
 
@@ -291,34 +301,57 @@ mod tests {
     const STATE: &str = r#"{
         "device": { "id": "d1", "name": "Terminal" },
         "office": { "name": "Lausanne", "timezone": "Europe/Zurich", "locale": "fr" },
-        "keys": {
-            "left": { "action": "TAKE", "itemId": "i1", "label": "Prendre · Maté" },
-            "right": { "action": "RETURN", "itemId": "i1", "label": "Rendre · Maté" }
-        },
-        "items": [{ "id": "i1", "name": "Maté", "stock": 36 }],
+        "keys": { "left": { "label": "Prendre" }, "right": { "label": "Mon compte" } },
+        "items": [{ "id": "i1", "name": "Maté", "stock": 36, "picture": "" }],
         "badges": [{ "uid": "04a1b2c3d4e5f6", "name": "Alex" }],
         "syncTimes": ["08:00", "12:00"],
-        "serverTime": "2026-10-09T18:25:00.000Z"
+        "serverTime": "2026-10-09T18:25:00.000Z",
+        "appUrl": null,
+        "theme": "paper",
+        "firmware": null
     }"#;
+
+    /// `STATE` with the main screen the site sends along.
+    fn state() -> DeviceState {
+        let mut state: serde_json::Value = serde_json::from_str(STATE).unwrap();
+        state["screen"] = serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap();
+        serde_json::from_value(state).unwrap()
+    }
+
+    #[test]
+    fn reads_an_account_and_a_cancellation() {
+        let account: Account = serde_json::from_str(
+            r#"{"name":"Alex","today":1,"week":4,"month":11,"cost":"CHF 12.40",
+            "days":[[0],[2],[1],[0],[0],[1],[1]],"products":["Maté"],"labels":["ven","sam","dim","lun","mar","mer","jeu"],
+            "purchases":[{"id":"c1","itemId":"i1","item":"Maté Classic","when":"14:05","price":"1.20"},
+            {"id":"c2","itemId":"i2","item":"Maté Zero","when":"Yesterday 09:12","price":null}]}"#,
+        )
+        .unwrap();
+        assert_eq!((account.today, account.week, account.month), (1, 4, 11));
+        assert_eq!(account.purchases[0].price.as_deref(), Some("1.20"));
+        assert_eq!(account.purchases[1].price, None);
+        let body = serde_json::to_string(&AccountRequest { badge_uid: "04A1" }).unwrap();
+        assert_eq!(body, r#"{"badgeUid":"04A1"}"#);
+        let body = serde_json::to_string(&CancelPurchaseRequest { badge_uid: "04A1", id: "c1" }).unwrap();
+        assert_eq!(body, r#"{"badgeUid":"04A1","id":"c1"}"#);
+        let done: CancelPurchaseResponse = serde_json::from_str(r#"{"cancelled":false,"reason":"not_yours"}"#).unwrap();
+        assert_eq!(done.reason.as_deref(), Some("not_yours"));
+    }
 
     #[test]
     fn reads_the_state_the_site_sends() {
-        let state: DeviceState = serde_json::from_str(STATE).unwrap();
-        assert_eq!(state.key(Side::Right).action, Action::Return);
-        assert_eq!(state.key(Side::Left).item_id.as_deref(), Some("i1"));
+        let state = state();
+        assert_eq!(state.key(Side::Right).label, "Mon compte");
+        assert_eq!(state.items[0].id, "i1");
         assert_eq!(state.badge_holder("04A1B2C3D4E5F6"), Some("Alex"));
         assert_eq!(state.badge_holder("04A1B2C3D4E5F7"), None);
     }
 
     #[test]
     fn screen_definition_survives_the_offline_state_cache() {
-        let mut state: DeviceState = serde_json::from_str(STATE).unwrap();
-        assert!(state.screen.is_none());
-        state.screen = Some(serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap());
-        let cached = serde_json::to_vec(&state).unwrap();
+        let cached = serde_json::to_vec(&state()).unwrap();
         let restored: DeviceState = serde_json::from_slice(&cached).unwrap();
-        let screen = restored.screen.unwrap();
-        assert!(screen.supported());
+        let screen = restored.screen;
         assert_eq!(screen.items[0].stock, 36);
         assert_eq!(screen.chart.unwrap().series[0][0], 48);
     }
@@ -328,14 +361,13 @@ mod tests {
         let take = Take {
             id: "t1".into(),
             badge_uid: "04A1B2C3".into(),
-            action: Action::Take,
             item_id: None,
             at: "2026-10-09T18:25:00Z".into(),
         };
         let json = serde_json::to_string(&TakesRequest { takes: &[take] }).unwrap();
         assert_eq!(
             json,
-            r#"{"takes":[{"id":"t1","badgeUid":"04A1B2C3","action":"TAKE","itemId":null,"at":"2026-10-09T18:25:00Z"}]}"#
+            r#"{"takes":[{"id":"t1","badgeUid":"04A1B2C3","itemId":null,"at":"2026-10-09T18:25:00Z"}]}"#
         );
     }
 
@@ -437,8 +469,6 @@ mod base64_tests {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceScreen {
-    pub version: u8,
-    pub template: String,
     pub office_name: String,
     pub time: String,
     pub wifi_bars: Option<u8>,
@@ -453,14 +483,11 @@ pub struct DeviceScreen {
     pub left_label: String,
     pub right_label: String,
 }
-impl DeviceScreen {
-    pub fn supported(&self) -> bool { self.version == 1 && self.template == "dashboard" }
-}
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ScreenItem {
-    /// `image`: 24 x 24, packed 1-bit, base64. `picture`: 96 x 96, from sites that send it.
-    pub name: String, pub stock: i64, pub low: bool, pub image: String,
-    #[serde(default)]
+    pub name: String, pub stock: i64, pub low: bool,
+    /// 96 x 96 as drawn, packed 1-bit, then its opacity plane (2 x 1152 bytes), base64: ink
+    /// black, opaque paper white, the rest transparent (`ui::picture`).
     pub picture: String,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -472,17 +499,14 @@ pub struct ScreenChart {
 pub struct Preparation {
     pub title: String, pub total: String, pub items: Vec<PreparationItem>,
     /// The session the right key serves (`ServeRequest`); None for orders without one.
-    #[serde(default)]
     pub session_id: Option<String>,
     /// The right key's label on this screen, "Servi".
-    #[serde(default)]
     pub serve_label: String,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PreparationItem {
-    pub name: String, pub count: u32, pub names: String, pub image: String,
-    /// 96 x 96, from sites that send it.
-    #[serde(default)]
+    pub name: String, pub count: u32, pub names: String,
+    /// As [`ScreenItem::picture`].
     pub picture: String,
 }
 

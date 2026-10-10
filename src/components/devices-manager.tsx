@@ -84,7 +84,7 @@ export function DevicesManager({ officeId, linkUrl, members, badges, devices }: 
   );
 }
 
-function LinkDevice({ linkUrl }: { linkUrl: string }) {
+function LinkDevice({ linkUrl }: Readonly<{ linkUrl: string }>) {
   const t = useTranslations("devices");
   return (
     <Popover>
@@ -105,12 +105,15 @@ function LinkDevice({ linkUrl }: { linkUrl: string }) {
 }
 
 /** A terminal as it looks right now and whether it is reachable; opens its page. */
-function DeviceTile({ officeId, device }: { officeId: string; device: DeviceRow }) {
+function DeviceTile({ officeId, device }: Readonly<{ officeId: string; device: DeviceRow }>) {
   const t = useTranslations("devices");
   const format = useFormatter();
   const now = useNow({ updateInterval: 60_000 });
   const base = `/org/${officeId}/admin/devices/${device.id}`;
   const lowBattery = device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV;
+  let seen = t("console.neverSeen");
+  if (device.online) seen = t("console.live");
+  else if (device.lastSeenAt) seen = t("console.lastSeen", { when: format.relativeTime(new Date(device.lastSeenAt), now) });
 
   return (
     <Link
@@ -127,13 +130,7 @@ function DeviceTile({ officeId, device }: { officeId: string; device: DeviceRow 
             {device.name}
             {device.virtual && <Badge variant="secondary">{t("virtualBadge")}</Badge>}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {device.online
-              ? t("console.live")
-              : device.lastSeenAt
-                ? t("console.lastSeen", { when: format.relativeTime(new Date(device.lastSeenAt), now) })
-                : t("console.neverSeen")}
-          </div>
+          <div className="text-xs text-muted-foreground">{seen}</div>
         </div>
         {device.batteryMv != null && (
           <span className={cn("flex items-center gap-1 text-xs", lowBattery ? "text-destructive" : "text-muted-foreground")}>
@@ -154,7 +151,7 @@ const NOBODY = "__nobody";
  * badge by scanning the QR the terminal shows for an unknown one; the select
  * is for an admin to assign, reassign or remove one.
  */
-function Badges({ officeId, badges, members }: { officeId: string; badges: BadgeRow[]; members: Props["members"] }) {
+function Badges({ officeId, badges, members }: Readonly<{ officeId: string; badges: BadgeRow[]; members: Props["members"] }>) {
   const t = useTranslations("devices");
   const format = useFormatter();
   const now = useNow({ updateInterval: 60_000 });

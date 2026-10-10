@@ -126,7 +126,7 @@ export function DeviceShell({
   pressed,
   badge,
   indicator,
-}: {
+}: Readonly<{
   screen: ReactNode;
   onKey: (side: Side) => void;
   onKeyLevel?: KeyLevel;
@@ -134,7 +134,7 @@ export function DeviceShell({
   pressed: Side | readonly Side[] | null;
   badge: ReactNode;
   indicator?: ReactNode;
-}) {
+}>) {
   const t = useTranslations("devices.console");
   const { room, shell, panel, fit } = usePanelFit();
   const isPressed = (side: Side) => pressed === side || (Array.isArray(pressed) && pressed.includes(side));
@@ -198,7 +198,7 @@ function TouchKey({
   pressed,
   onPress,
   onLevel,
-}: {
+}: Readonly<{
   side: Side;
   label: string;
   meta: string;
@@ -207,7 +207,7 @@ function TouchKey({
   pressed: boolean;
   onPress: (side: Side) => void;
   onLevel?: KeyLevel;
-}) {
+}>) {
   const [held, setHeld] = useState(false);
   const level = (high: boolean, source: string) => {
     setHeld(high);
@@ -294,13 +294,13 @@ export function BadgeZone({
   onOpenChange,
   onBadge,
   flashing,
-}: {
+}: Readonly<{
   badges: BadgeOption[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBadge: (uid: string) => void;
   flashing: boolean;
-}) {
+}>) {
   const t = useTranslations("devices.console");
   const [query, setQuery] = useState("");
   const typed = asUid(query);

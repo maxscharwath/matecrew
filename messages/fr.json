@@ -1142,7 +1142,7 @@
     "connecting": "Connexion…",
     "disconnect": "Déconnecter",
     "disconnected": "Terminal déconnecté.",
-    "pairingHint": "Au premier envoi, le navigateur demande un code : c'est celui affiché sur l'écran du terminal (BLE · 6 chiffres).",
+    "pairingHint": "Avant d'afficher l'écran ou d'envoyer un changement, le navigateur demande un code : celui affiché sur l'écran du terminal (BLE · 6 chiffres).",
     "info": {
       "firmware": "Firmware",
       "hardwareId": "Identifiant",
@@ -1198,13 +1198,20 @@
       "timeout": "Le terminal ne répond pas.",
       "transport": "Erreur Bluetooth : {message}",
       "forbidden": "Seul un admin du bureau peut relier un terminal."
+    },
+    "screen": {
+      "title": "Écran",
+      "description": "L'écran du terminal, en direct par Bluetooth. Un clic dessus y appuie.",
+      "waiting": "En attente de l'écran : le navigateur demande le code affiché sur le terminal.",
+      "unsupported": "Le firmware de ce terminal ne partage pas encore son écran : mets-le à jour.",
+      "failed": "Écran indisponible : {message}",
+      "tap": "Clique sur un bouton affiché pour l'actionner sur le terminal"
     }
   },
   "devices": {
     "keys": {
       "take": "Prendre",
-      "return": "Rendre",
-      "summary": "Ma conso"
+      "summary": "Mon compte"
     },
     "screen": {
       "batteryLow": "Batterie faible",
@@ -1215,7 +1222,10 @@
       "preparationOf": "Préparation · {label}",
       "toPrepare": "{count, plural, one {# maté} other {# matés}}",
       "chart": "Stock · {days} jours",
-      "more": "autres"
+      "more": "autres",
+      "purchaseToday": "Aujourd'hui · {time}",
+      "purchaseYesterday": "Hier · {time}",
+      "purchaseOn": "{date} · {time}"
     },
     "title": "Appareils",
     "subtitle": "Les terminaux à badge du bureau : leur écran, leurs réglages et les badges qu'ils ont lus.",
@@ -1294,7 +1304,8 @@
         "restart": "Redémarrage",
         "forgetWifi": "Oubli du Wi-Fi",
         "tap": "Appui à l'écran en {x}, {y}",
-        "app": "Ouvrir {app}"
+        "app": "Ouvrir {app}",
+        "both": "Les deux touches"
       },
       "shortcuts": "Clavier : ← et → pour les touches, B pour badger, S pour synchroniser.",
       "firmware": "Firmware",
@@ -1354,7 +1365,11 @@
         "firmware": "Firmware {version}",
         "firstFrame": "Écran reçu, dessiné {when}",
         "refresh": "{passes, plural, one {Rafraîchissement partiel} other {# rafraîchissements partiels}} {width}×{height} en {x},{y} · {percent} % des pixels",
-        "frameFailed": "Impossible de charger l'écran ({error})."
+        "frameFailed": "Impossible de charger l'écran ({error}).",
+        "bleConnected": "Connecté à {name} par Bluetooth. Le navigateur demande le code affiché sur son écran pour l'appairer.",
+        "bleDisconnected": "Bluetooth déconnecté : l'écran repasse par le site.",
+        "bleScreen": "Écran par Bluetooth : il vient directement du terminal, sans passer par le site.",
+        "viaBluetooth": "{what} · par Bluetooth"
       },
       "controls": {
         "title": "Commandes",
@@ -1373,6 +1388,7 @@
       },
       "board": {
         "subtitle": "Son câblage ; une broche s'allume quand la console l'actionne.",
+        "activity": "Activité",
         "pad": "Broche",
         "function": "Fonction",
         "pins": {
@@ -1401,11 +1417,23 @@
         "preview": "Aperçu · données du site",
         "hidePreview": "Masquer",
         "mirror": "Miroir en direct · {when}",
-        "last": "Dernier écran · {when}"
+        "last": "Dernier écran · {when}",
+        "bluetooth": "Miroir Bluetooth · {when}"
       },
       "settingsHint": "Son nom sur le site, et l'article sur lequel s'ouvre le choix.",
       "unlinkHint": "Le terminal perd son accès à sa prochaine connexion et affiche de nouveau un code de liaison. Ses prises restent.",
-      "takesHint": "Ce que le terminal a envoyé, du plus récent au plus ancien."
+      "takesHint": "Ce que le terminal a envoyé, du plus récent au plus ancien.",
+      "ble": {
+        "connect": "Bluetooth",
+        "connectHint": "Voir et piloter ce terminal par Bluetooth, à proximité : son écran vient directement de lui, plus vite que par le site",
+        "pairing": "Appairage…",
+        "live": "Bluetooth",
+        "disconnect": "Déconnecter le Bluetooth",
+        "mismatch": "{name} est un autre terminal : choisissez celui-ci dans la liste.",
+        "failed": "Bluetooth : {message}",
+        "screenFailed": "Pas d'écran par Bluetooth ({message}).",
+        "sendFailed": "Pas envoyé par Bluetooth ({message}) : envoyé par le site."
+      }
     },
     "virtual": {
       "open": "Terminal virtuel",

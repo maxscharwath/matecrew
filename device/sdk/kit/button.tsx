@@ -36,7 +36,7 @@ export type ButtonProps = {
 };
 
 /** A labelled control: what shows is a surface; a ghost hit area covers it. */
-export function Button({ children, onPress, variant = "default", size = "default", input, width = "hug" }: ButtonProps): Element {
+export function Button({ children, onPress, variant = "default", size = "default", input, width = "hug" }: Readonly<ButtonProps>): Element {
   const s = SIZES[size];
   return (
     <Group width={width} height={s.height}>
@@ -62,11 +62,11 @@ export function Button({ children, onPress, variant = "default", size = "default
 export function Badge({
   children,
   variant = "default",
-}: {
+}: Readonly<{
   children?: Content;
   /** `default` (ink), `outline`, `secondary` (grey). */
   variant?: "default" | "outline" | "secondary";
-}): Element {
+}>): Element {
   const look = { default: "ink", outline: "hairline", secondary: "tint" } as const;
   return (
     <Surface variant={look[variant]} radius={16} direction="row" align="center" gap={6} padding={[6, 12]}>

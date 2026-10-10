@@ -106,10 +106,7 @@ pub(crate) fn requests(scene: &crate::Scene, data: &Value) -> Vec<ImageRequest> 
                     }
                 }
             }
-            Node::Group { children, .. }
-            | Node::Panel { children, .. }
-            | Node::Row { children, .. }
-            | Node::Column { children, .. } => {
+            Node::Group { children, .. } | Node::Panel { children, .. } => {
                 for (child, placed) in children.iter().zip(layout::place(node, area, env, item)) {
                     visit(child, placed, env, item, out, remaining);
                 }

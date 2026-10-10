@@ -4,14 +4,21 @@
 //!
 //! Security: what changes something (`SETUP`, `CONTROL`, `OTA`) needs an encrypted link
 //! authenticated by passkey (LE Secure Connections, MITM protection). The passkey is new at
-//! every boot and shown on the terminal (setup, link and about screens): the browser's system
-//! dialog asks for it, so only someone who can read the panel gets in. Events, the log among
+//! every boot and shown on the terminal (setup, link and about screens, and over any screen
+//! while a pairing waits for it): the browser's system dialog asks for it, so only someone who
+//! can read the panel gets in. Events, the log among
 //! them, go to such a link only. Nothing is bonded: pairing again each session keeps the 24 KB
 //! of NVS for settings. `SETUP` is refused once the terminal is linked to a site.
 //!
 //! A firmware update writes the other app slot as frames arrive (sequential erase, so no write
 //! waits seconds), checks size, CRC-32 per frame and SHA-256 at the end, then restarts on it;
 //! the bootloader goes back if the new firmware never confirms itself (`ota.rs`).
+//!
+//! Screen mirror: while a paired browser is subscribed to `SCREEN`, the notifier thread sends it
+//! the panel as it changes, the whole screen first, then the changed rows (`link::screen_update`,
+//! run-length coded: a few KB a screen). The screen loop only hands each new frame over
+//! (`show_screen`). Notifications are numbered: a browser that misses one asks for the whole
+//! screen again.
 
 use anyhow::{anyhow, Result};
 use esp32_nimble::{
@@ -27,13 +34,13 @@ use esp_idf_svc::{
 use matecrew_core::{
     contract::normalize_uid,
     flow::Event as FlowEvent,
-    link::{self, Control, Event, OtaFrame, Setup},
+    link::{self, Control, Event, OtaFrame, ScreenRequest, Setup},
 };
 use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering},
         mpsc::Sender,
         Arc, Mutex,
     },
@@ -51,8 +58,22 @@ static OUTBOX: Mutex<VecDeque<Event>> = Mutex::new(VecDeque::new());
 const OUTBOX_MAX: usize = 64;
 /// A browser that paired with the passkey is connected: events are worth sending.
 static TRUSTED: AtomicBool = AtomicBool::new(false);
+/// A browser is connected, paired or not: the status bar shows it.
+static CONNECTED: AtomicBool = AtomicBool::new(false);
+/// A pairing waits for the passkey: the terminal shows it over its screen until it ends.
+static PAIRING: AtomicBool = AtomicBool::new(false);
+static PASSKEY: AtomicU32 = AtomicU32::new(0);
 /// The link's ATT MTU; a notification carries 3 bytes less.
 static MTU: AtomicU16 = AtomicU16::new(23);
+/// The connection notifications go to.
+static CONN: AtomicU16 = AtomicU16::new(0);
+/// The browser is subscribed to `EVENTS`, to `SCREEN`.
+static EVENTS_ON: AtomicBool = AtomicBool::new(false);
+static WATCHING: AtomicBool = AtomicBool::new(false);
+/// The browser asked for the whole screen (it starts watching, or missed a notification).
+static WHOLE: AtomicBool = AtomicBool::new(false);
+/// The panel's latest frame, and whether the mirror has taken it yet.
+static PANEL: Mutex<Panel> = Mutex::new(Panel { bits: Vec::new(), fresh: false });
 /// Networks the setup scan heard, for `INFO`.
 static NETWORKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// The firmware update being written, if any.
@@ -60,6 +81,16 @@ static UPDATE: Mutex<Option<Update>> = Mutex::new(None);
 
 /// ATT application error answered to a write the terminal refuses (0x80..=0x9F).
 const REFUSED: u8 = 0x80;
+/// NimBLE buffers the screen mirror leaves free for events and write answers (36 in all; a full
+/// notification takes two or three): it waits rather than starve them.
+const MIRROR_SPARE: i32 = 8;
+/// How long a notification may wait for buffers before the link counts as stuck.
+const NOTIFY_PATIENCE: Duration = Duration::from_secs(2);
+
+struct Panel {
+    bits: Vec<u8>,
+    fresh: bool,
+}
 
 /// Who the terminal is, for `INFO`.
 pub struct Identity {
@@ -81,6 +112,16 @@ impl Ble {
     }
 }
 
+/// Whether a browser is connected, and whether it paired with the passkey.
+pub fn linked() -> (bool, bool) {
+    (CONNECTED.load(Ordering::Relaxed), TRUSTED.load(Ordering::Relaxed))
+}
+
+/// The passkey while a pairing waits for it.
+pub fn pairing() -> Option<u32> {
+    PAIRING.load(Ordering::Relaxed).then(|| PASSKEY.load(Ordering::Relaxed))
+}
+
 /// The terminal's log, to the serial port as before and to a paired browser.
 pub fn init_logging() {
     static ESP: EspIdfLogger<EspIdfLogFilter> = EspIdfLogger::new(EspIdfLogFilter::new());
@@ -90,6 +131,10 @@ pub fn init_logging() {
             ESP.enabled(metadata)
         }
         fn log(&self, record: &log::Record) {
+            // esp32-nimble warns of each GAP event it leaves to the stack (MTU, PHY, data length).
+            if record.target() == "esp32_nimble::server::ble_server" && record.args().to_string().starts_with("unhandled event") {
+                return;
+            }
             ESP.log(record);
             // The BLE stack's own lines would loop through a failing notification.
             let target = record.target();
@@ -126,6 +171,16 @@ pub fn send(event: Event) {
     }
 }
 
+/// A new frame on the panel, from the screen loop: a copy for the screen mirror, sent from the
+/// notifier thread if a browser watches.
+pub fn show_screen(bits: &[u8]) {
+    if let Ok(mut panel) = PANEL.lock() {
+        panel.bits.clear();
+        panel.bits.extend_from_slice(bits);
+        panel.fresh = true;
+    }
+}
+
 /// The networks the setup scan heard, strongest first.
 pub fn set_networks(networks: Vec<String>) {
     if let Ok(mut known) = NETWORKS.lock() {
@@ -156,21 +211,48 @@ pub fn start(store: Store, inputs: Sender<Input>, identity: Identity) -> Result<
         .set_passkey(ble.passkey)
         .set_io_cap(SecurityIOCap::DisplayOnly);
     let _ = device.set_preferred_mtu(517);
+    // NimBLE logs each notification at INFO: the screen mirror would flood the serial port.
+    // SAFETY: a static tag and a level.
+    unsafe { sys::esp_log_level_set(c"NimBLE".as_ptr(), sys::esp_log_level_t_ESP_LOG_WARN) };
+
+    PASSKEY.store(ble.passkey, Ordering::Relaxed);
 
     let server = device.get_server();
     server.advertise_on_disconnect(true);
-    server.on_connect(|_, desc| {
+    // Each change of the link redraws the screen: its status bar icon, the pairing card.
+    let changed = inputs.clone();
+    server.on_connect(move |_, desc| {
         MTU.store(desc.mtu(), Ordering::Relaxed);
+        CONN.store(desc.conn_handle(), Ordering::Relaxed);
+        CONNECTED.store(true, Ordering::Relaxed);
+        let _ = changed.send(Input::Bluetooth);
         log::info!("ble: connected");
     });
-    server.on_authentication_complete(|_, desc, result| {
+    let changed = inputs.clone();
+    let passkey = ble.passkey;
+    server.on_passkey_request(move || {
+        PAIRING.store(true, Ordering::Relaxed);
+        let _ = changed.send(Input::Bluetooth);
+        log::info!("ble: pairing, showing the passkey");
+        passkey
+    });
+    let changed = inputs.clone();
+    server.on_authentication_complete(move |_, desc, result| {
         let trusted = result.is_ok() && desc.encrypted() && desc.authenticated();
         MTU.store(desc.mtu(), Ordering::Relaxed);
         TRUSTED.store(trusted, Ordering::Relaxed);
+        PAIRING.store(false, Ordering::Relaxed);
+        let _ = changed.send(Input::Bluetooth);
         log::info!("ble: paired {}", if trusted { "with the passkey" } else { "without it, nothing allowed" });
     });
-    server.on_disconnect(|_, _| {
+    let changed = inputs.clone();
+    server.on_disconnect(move |_, _| {
         TRUSTED.store(false, Ordering::Relaxed);
+        CONNECTED.store(false, Ordering::Relaxed);
+        PAIRING.store(false, Ordering::Relaxed);
+        EVENTS_ON.store(false, Ordering::Relaxed);
+        WATCHING.store(false, Ordering::Relaxed);
+        let _ = changed.send(Input::Bluetooth);
         if let Ok(mut outbox) = OUTBOX.lock() {
             outbox.clear();
         }
@@ -205,6 +287,7 @@ pub fn start(store: Store, inputs: Sender<Input>, identity: Identity) -> Result<
         });
     }
 
+    let taps = inputs.clone();
     let control = service.lock().create_characteristic(uuid(link::CONTROL), changes);
     control.lock().on_write(move |args| {
         MTU.store(args.desc().mtu(), Ordering::Relaxed);
@@ -218,6 +301,23 @@ pub fn start(store: Store, inputs: Sender<Input>, identity: Identity) -> Result<
     let events = service
         .lock()
         .create_characteristic(uuid(link::EVENTS), NimbleProperties::READ | NimbleProperties::NOTIFY);
+    events.lock().on_subscribe(|_, _, how| EVENTS_ON.store(!how.is_empty(), Ordering::Relaxed));
+
+    // Subscribing starts the mirror with the whole screen; a write asks for it again, or taps it.
+    let screen = service.lock().create_characteristic(uuid(link::SCREEN), NimbleProperties::NOTIFY | changes);
+    screen
+        .lock()
+        .on_subscribe(|_, _, how| {
+            WATCHING.store(!how.is_empty(), Ordering::Relaxed);
+            WHOLE.store(true, Ordering::Relaxed);
+        })
+        .on_write(move |args| match ScreenRequest::parse(args.recv_data()) {
+            Ok(ScreenRequest::Whole) => WHOLE.store(true, Ordering::Relaxed),
+            Ok(ScreenRequest::Tap { x, y }) => {
+                let _ = taps.send(Input::Tap(x.into(), y.into()));
+            }
+            Err(_) => args.reject_with_error_code(REFUSED),
+        });
 
     let ota = service.lock().create_characteristic(uuid(link::OTA), changes);
     {
@@ -241,21 +341,128 @@ pub fn start(store: Store, inputs: Sender<Input>, identity: Identity) -> Result<
         .map_err(|e| anyhow!("ble advertising: {e:?}"))?;
     advertising.lock().start().map_err(|e| anyhow!("ble advertising: {e:?}"))?;
 
-    // Sends queued events one notification each, as long as a paired browser is there.
-    thread::Builder::new().stack_size(4096).spawn(move || loop {
-        thread::sleep(Duration::from_millis(30));
-        if !TRUSTED.load(Ordering::Relaxed) {
-            continue;
-        }
-        let batch: Vec<Event> = OUTBOX.lock().map(|mut outbox| outbox.drain(..).collect()).unwrap_or_default();
-        let room = usize::from(MTU.load(Ordering::Relaxed)).saturating_sub(3).clamp(20, link::ATTRIBUTE_MAX);
-        for event in batch {
-            events.lock().set_value(&event.encode(room)).notify();
+    // Sends queued events one notification each, then what changed on the screen if the browser
+    // watches it, as long as a paired browser is there.
+    thread::Builder::new().stack_size(6 * 1024).spawn(move || {
+        let mut handles = None;
+        let mut mirror: Option<Mirror> = None;
+        loop {
+            thread::sleep(Duration::from_millis(30));
+            if !TRUSTED.load(Ordering::Relaxed) {
+                mirror = None;
+                continue;
+            }
+            handles = handles.or_else(|| handle(link::EVENTS).zip(handle(link::SCREEN)));
+            let Some((events, screen)) = handles else { continue };
+            let batch: Vec<Event> = OUTBOX.lock().map(|mut outbox| outbox.drain(..).collect()).unwrap_or_default();
+            for event in batch {
+                if EVENTS_ON.load(Ordering::Relaxed) {
+                    notify(events, &event.encode(room()), 0);
+                }
+            }
+            if WATCHING.load(Ordering::Relaxed) {
+                if mirror.is_none() {
+                    log::info!("ble: mirroring the screen");
+                }
+                mirror.get_or_insert_with(Mirror::default).update(screen);
+            } else {
+                mirror = None;
+            }
         }
     })?;
 
     log::info!("ble: advertising as {}", ble.name);
     Ok(ble)
+}
+
+/// What a notification carries on this link.
+fn room() -> usize {
+    usize::from(MTU.load(Ordering::Relaxed)).saturating_sub(3).clamp(20, link::ATTRIBUTE_MAX)
+}
+
+/// The value handle of a characteristic of the link service, once the GATT server runs.
+fn handle(characteristic: &str) -> Option<u16> {
+    let service = sys::ble_uuid_any_t::from(uuid(link::SERVICE));
+    let wanted = sys::ble_uuid_any_t::from(uuid(characteristic));
+    let mut handle = 0;
+    // SAFETY: two UUIDs that outlive the call, and an out-parameter.
+    let rc = unsafe { sys::ble_gatts_find_chr(&service.u, &wanted.u, core::ptr::null_mut(), &mut handle) };
+    (rc == 0).then_some(handle)
+}
+
+/// One notification, straight to NimBLE: esp32-nimble's own `notify` holds the characteristic's
+/// lock, and NimBLE reads the attribute through that lock when a buffer runs out. Waits while
+/// fewer than `spare` buffers are free; false once the browser left or the link stays stuck.
+fn notify(handle: u16, value: &[u8], spare: i32) -> bool {
+    let deadline = Instant::now() + NOTIFY_PATIENCE;
+    while TRUSTED.load(Ordering::Relaxed) && Instant::now() < deadline {
+        // SAFETY: NimBLE copies `value` into a buffer of its own, which the notify consumes.
+        let rc = unsafe {
+            let om = if sys::os_msys_num_free() >= spare {
+                sys::ble_hs_mbuf_from_flat(value.as_ptr().cast(), value.len() as u16)
+            } else {
+                core::ptr::null_mut()
+            };
+            if om.is_null() {
+                sys::BLE_HS_ENOMEM as i32
+            } else {
+                sys::ble_gatts_notify_custom(CONN.load(Ordering::Relaxed), handle, om)
+            }
+        };
+        match rc {
+            0 => return true,
+            rc if rc == sys::BLE_HS_ENOMEM as i32 => thread::sleep(Duration::from_millis(10)),
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// The screen mirror to the browser: what it shows (`None`: send the whole screen), the frame
+/// being sent, the notification being sent and the number of the next one.
+#[derive(Default)]
+struct Mirror {
+    shown: Option<Vec<u8>>,
+    next: Vec<u8>,
+    notification: Vec<u8>,
+    seq: u8,
+}
+
+impl Mirror {
+    /// Sends what changed on the panel since the last update, if anything.
+    fn update(&mut self, handle: u16) {
+        if WHOLE.swap(false, Ordering::Relaxed) {
+            self.shown = None;
+        }
+        let due = PANEL.lock().is_ok_and(|mut panel| {
+            let due = !panel.bits.is_empty() && (panel.fresh || self.shown.is_none());
+            if due {
+                self.next.clear();
+                self.next.extend_from_slice(&panel.bits);
+                panel.fresh = false;
+            }
+            due
+        });
+        let (width, height) = (matecrew_ui::WIDTH as u16, matecrew_ui::HEIGHT as u16);
+        let Some(update) = due.then(|| link::screen_update(self.shown.as_deref(), &self.next, width, height)).flatten() else {
+            return;
+        };
+        let room = room();
+        let mut index = 0;
+        while link::screen_notification(&update, room, index, self.seq, &mut self.notification) {
+            self.seq = self.seq.wrapping_add(1);
+            index += 1;
+            if !notify(handle, &self.notification, MIRROR_SPARE) {
+                // The browser misses the end of it: the whole screen goes next.
+                self.shown = None;
+                return;
+            }
+        }
+        match &mut self.shown {
+            Some(shown) => core::mem::swap(shown, &mut self.next),
+            None => self.shown = Some(core::mem::take(&mut self.next)),
+        }
+    }
 }
 
 fn answer(op: &str, done: Result<(), String>) {

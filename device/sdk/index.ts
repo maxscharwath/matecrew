@@ -6,8 +6,6 @@ export {
   HStack,
   VStack,
   Spacer,
-  Row,
-  Column,
   Card as Panel,
   Text,
   Progress as ProgressBar,

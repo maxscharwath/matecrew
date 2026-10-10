@@ -6,8 +6,6 @@ impl Node {
             Self::Router { rect, .. }
             | Self::Modal { rect, .. }
             | Self::Group { rect, .. }
-            | Self::Row { rect, .. }
-            | Self::Column { rect, .. }
             | Self::Panel { rect, .. }
             | Self::Text { rect, .. }
             | Self::Progress { rect, .. }
@@ -34,8 +32,7 @@ impl Node {
         {
             return false;
         }
-        if matches!(self,Self::Row {gap,..}|Self::Column {gap,..}|Self::Repeat {gap,..} if *gap>MAX_VIEWPORT)
-        {
+        if matches!(self, Self::Repeat { gap, .. } if *gap > MAX_VIEWPORT) {
             return false;
         }
         match self {
@@ -61,9 +58,7 @@ impl Node {
                             && r.root.valid(depth + 1, nodes)
                     })
             }
-            Self::Group { children, .. }
-            | Self::Row { children, .. }
-            | Self::Column { children, .. } => children.iter().all(|n| n.valid(depth + 1, nodes)),
+            Self::Group { children, .. } => children.iter().all(|n| n.valid(depth + 1, nodes)),
             Self::Modal { child, .. } | Self::When { child, .. } | Self::Repeat { child, .. } => {
                 child.valid(depth + 1, nodes)
             }
@@ -114,10 +109,9 @@ impl Node {
             Self::Button { action, input, .. } => {
                 scene.actions.contains_key(action) && input.as_deref().is_none_or(valid_identifier)
             }
-            Self::Group { children, .. }
-            | Self::Panel { children, .. }
-            | Self::Row { children, .. }
-            | Self::Column { children, .. } => children.iter().all(|n| n.references_valid(scene)),
+            Self::Group { children, .. } | Self::Panel { children, .. } => {
+                children.iter().all(|n| n.references_valid(scene))
+            }
             Self::Modal { child, .. } | Self::When { child, .. } | Self::Repeat { child, .. } => {
                 child.references_valid(scene)
             }

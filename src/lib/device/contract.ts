@@ -44,18 +44,11 @@ export const linkTokenError = z.object({
   ]),
 });
 
-export const deviceKeyAction = z.enum(["TAKE", "RETURN"]);
+/** What the screen writes above a key: left takes, right opens the badge holder's account. */
+export const deviceKey = z.object({ label: z.string() });
 
-export const deviceKey = z.object({
-  action: deviceKeyAction,
-  itemId: z.string().nullable(),
-  label: z.string(),
-});
-
-/** Versioned screen definition. The server supplies content; Rust owns layout and pixels. */
+/** The main screen's content. The server supplies it; the terminal's compiled screens own layout and pixels. */
 export const deviceScreen = z.object({
-  version: z.literal(1),
-  template: z.literal("dashboard"),
   officeName: z.string(), time: z.string(),
   wifiBars: z.number().int().min(0).max(3).nullable(),
   batteryPercent: z.number().int().min(0).max(100).nullable(),
@@ -65,13 +58,11 @@ export const deviceScreen = z.object({
       name: z.string(),
       stock: z.number().int(),
       low: z.boolean(),
-      /** 24 x 24, packed 1-bit, base64. */
-      image: z.string(),
       /**
        * 96 x 96 as drawn, packed 1-bit, then its opacity plane (2 x 1152 bytes), base64:
-       * ink black, opaque paper white, the rest transparent. Older firmware ignores it.
+       * ink black, opaque paper white, the rest transparent.
        */
-      picture: z.string().optional(),
+      picture: z.string(),
     }),
   ),
   chart: z.object({ series: z.array(z.array(z.number().int())), max: z.number().int().positive(), days: z.number().int().positive() }).nullable(),
@@ -80,7 +71,7 @@ export const deviceScreen = z.object({
       title: z.string(),
       total: z.string(),
       items: z.array(
-        z.object({ name: z.string(), count: z.number().int(), names: z.string(), image: z.string(), picture: z.string().optional() }),
+        z.object({ name: z.string(), count: z.number().int(), names: z.string(), picture: z.string() }),
       ),
       /** The session to serve; null for orders without one. */
       sessionId: z.string().nullable(),
@@ -101,37 +92,19 @@ export const deviceState = z.object({
   device: z.object({ id: z.string(), name: z.string() }),
   office: z.object({ name: z.string(), timezone: z.string(), locale: z.string() }),
   keys: z.object({ left: deviceKey, right: deviceKey }),
-  /** In the picker's order. `image`: 24 x 24 pixels, packed 1-bit (1 = ink), base64. */
-  items: z.array(
-    z.object({ id: z.string(), name: z.string(), stock: z.number().int(), image: z.string(), picture: z.string().optional() }),
-  ),
+  /** In the picker's order. `picture` as on the screen's items. */
+  items: z.array(z.object({ id: z.string(), name: z.string(), stock: z.number().int(), picture: z.string() })),
   /**
-   * Assigned badges only: an UID missing here is unknown to the terminal.
-   * With what the holder drank today, this week and this month, for "Ma conso".
+   * Assigned badges only: an UID missing here is unknown to the terminal. What the holder drank
+   * and bought stays on the site: "Mon compte" asks for it live (`POST /api/device/account`).
    */
-  badges: z.array(
-    z.object({
-      uid: z.string(),
-      name: z.string(),
-      today: z.number().int(),
-      week: z.number().int(),
-      month: z.number().int(),
-      /** The last 7 days, oldest first (`dayLabels`): per day, a count per `products` entry. */
-      days: z.array(z.array(z.number().int())).default([]),
-      /** What `days` counts: the products drunk most, then "Autres" for the rest. */
-      products: z.array(z.string()).default([]),
-      /** This month at the price the cans were bought, formatted: "CHF 12.40". */
-      cost: z.string().nullable().default(null),
-    }),
-  ),
-  /** Weekday of each `days` entry, in the office's language. */
-  dayLabels: z.array(z.string()).default([]),
+  badges: z.array(z.object({ uid: z.string(), name: z.string() })),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
   screen: deviceScreen,
   /** Optional compiled DUI1 app; null uses the native matécrew screens. */
-  appUrl: z.string().nullable().default(null),
-  theme: deviceTheme.default("paper"),
+  appUrl: z.string().nullable(),
+  theme: deviceTheme,
   /**
    * The newest firmware on the site; the terminal installs it when it is
    * newer than its own. `url` is a path on the site, fetched with the token.
@@ -145,7 +118,6 @@ export const deviceTake = z.object({
   /** Id the terminal gives the take; resending it is harmless. */
   id: z.string().trim().min(1).max(64),
   badgeUid: z.string().trim().min(1).max(32),
-  action: deviceKeyAction,
   itemId: z.string().nullable(),
   /** When the badge was read, ISO 8601. */
   at: z.iso.datetime(),
@@ -168,6 +140,55 @@ export const serveRequest = z.object({
   badgeUid: z.string().trim().min(1).max(32),
 });
 
+/** `POST /api/device/account`: the badge holder's account, "Mon compte" (the badge stays out of URLs). */
+export const accountRequest = z.object({
+  badgeUid: z.string().trim().min(1).max(32),
+});
+
+/** One of a person's purchases, newest first. */
+export const purchase = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  item: z.string(),
+  /** When, in the office's language and time zone ("Aujourd'hui · 14:05"). */
+  when: z.string(),
+  /** What it cost, formatted; null before a price is known. */
+  price: z.string().nullable(),
+});
+
+/**
+ * What the badge holder drank and bought, as the site counts it now, in the office's time zone and
+ * language. A badge nobody holds in the device's office is a 404 `{ error: "unknown_badge" }`.
+ */
+export const deviceAccount = z.object({
+  name: z.string(),
+  /** Today, this week (from Monday) and this month. */
+  today: z.number().int(),
+  week: z.number().int(),
+  month: z.number().int(),
+  /** This month at the price the cans were bought, formatted: "CHF 12.40"; null when unknown. */
+  cost: z.string().nullable(),
+  /** The last 7 days, oldest first (`labels`): per day, a count per `products` entry. */
+  days: z.array(z.array(z.number().int())),
+  /** What `days` counts: the products drunk most, then "Autres" for the rest. */
+  products: z.array(z.string()),
+  /** Weekday of each `days` entry, in the office's language ("lun" … "dim"). */
+  labels: z.array(z.string()),
+  /** The latest purchases the site still counts (not cancelled), newest first. */
+  purchases: z.array(purchase),
+});
+
+/** `POST /api/device/purchases/cancel`: the badge holder cancels one of their purchases. */
+export const cancelPurchaseRequest = z.object({
+  badgeUid: z.string().trim().min(1).max(32),
+  id: z.string().min(1).max(64),
+});
+export const cancelPurchaseResponse = z.object({
+  cancelled: z.boolean(),
+  /** "already_cancelled" with `cancelled`; otherwise why not: "unknown_badge", "not_found", "not_yours". */
+  reason: z.string().nullable(),
+});
+
 export const serveResponse = z.object({
   /** Orders marked served now; 0 when someone served them already. */
   served: z.number().int(),
@@ -179,7 +200,7 @@ export const statusRequest = z.object({
   firmwareVersion: z.string().trim().max(32),
   batteryMv: z.number().int().min(0).max(5000).optional(),
   wifiRssi: z.number().int().min(-127).max(0).optional(),
-  unknownBadges: z.array(z.string().trim().min(1).max(32)).max(50).default([]),
+  unknownBadges: z.array(z.string().trim().min(1).max(32)).max(50),
 });
 
 /**
@@ -189,7 +210,7 @@ export const statusRequest = z.object({
  */
 export const deviceCommand = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("key"), side: z.enum(["left", "right"]) }),
-  /** Both keys together; firmware that predates it ignores it. */
+  /** Both keys together: the about page. */
   z.object({ id: z.string(), kind: z.literal("both") }),
   z.object({ id: z.string(), kind: z.literal("badge"), uid: z.string() }),
   z.object({ id: z.string(), kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),
@@ -217,5 +238,8 @@ export type DeviceTake = z.infer<typeof deviceTake>;
 export type TakesResponse = z.infer<typeof takesResponse>;
 export type ServeRequest = z.infer<typeof serveRequest>;
 export type ServeResponse = z.infer<typeof serveResponse>;
+export type Purchase = z.infer<typeof purchase>;
+export type DeviceAccount = z.infer<typeof deviceAccount>;
+export type CancelPurchaseResponse = z.infer<typeof cancelPurchaseResponse>;
 export type DeviceCommand = z.infer<typeof deviceCommand>;
 export type CommandsResponse = z.infer<typeof commandsResponse>;

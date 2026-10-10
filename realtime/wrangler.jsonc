@@ -1,0 +1,15 @@
+// The terminals' realtime relay, on OWT's Cloudflare account.
+// Secrets: `bunx wrangler secret put REALTIME_SECRET` (the same value as the site's).
+{
+  "$schema": "https://unpkg.com/wrangler@4/config-schema.json",
+  "name": "matecrew-realtime",
+  "account_id": "fb4a07dcf42e0226490dbaea4aa55bba",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "TERMINALS", "class_name": "Terminal" }]
+  },
+  // SQLite-backed Durable Objects: on the Workers free plan, with WebSocket hibernation.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Terminal"] }],
+  "observability": { "enabled": true }
+}

@@ -1,7 +1,8 @@
 //! The terminal's Bluetooth LE link, as bytes: the protocol version, the GATT UUIDs, the JSON a
 //! browser writes to set up or control the terminal, the events the terminal notifies, the frames
-//! of a firmware update and their CRC-32. The GATT server is in the firmware (`ble.rs`), the
-//! browser side in `device/sdk/link` (`@matecrew/device-link`), which mirrors this file.
+//! of a firmware update and their CRC-32, the updates of its screen mirror. The GATT server is in
+//! the firmware (`ble.rs`), the browser side in `device/sdk/link` (`@matecrew/device-link`), which
+//! mirrors this file.
 //!
 //! Nothing here is specific to an app: a site address and a link secret are opaque strings the
 //! terminal stores, a badge is a hex UID.
@@ -12,6 +13,12 @@
 //! - `CONTROL` (write, authenticated): JSON [`Control`].
 //! - `EVENTS` (notify, authenticated links only): JSON [`Event`], one per notification.
 //! - `OTA` (write, authenticated): binary [`OtaFrame`]s.
+//! - `SCREEN` (notify, authenticated links only; write, authenticated): the panel, live, while the
+//!   browser is subscribed: [`screen_update`]s cut by [`screen_notification`]. Writes are
+//!   [`ScreenRequest`]s: the whole screen again, a tap on it.
+//!
+//! `SCREEN` came later within protocol 1: an addition an older peer does not misread (an older
+//! terminal has no such characteristic).
 
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +33,7 @@ pub const SETUP: &str = "d3b70002-6b0e-4e4f-8c1a-5f3a2b1c0d00";
 pub const CONTROL: &str = "d3b70003-6b0e-4e4f-8c1a-5f3a2b1c0d00";
 pub const EVENTS: &str = "d3b70004-6b0e-4e4f-8c1a-5f3a2b1c0d00";
 pub const OTA: &str = "d3b70005-6b0e-4e4f-8c1a-5f3a2b1c0d00";
+pub const SCREEN: &str = "d3b70006-6b0e-4e4f-8c1a-5f3a2b1c0d00";
 
 /// The longest value an attribute holds (Bluetooth Core, ATT).
 pub const ATTRIBUTE_MAX: usize = 512;
@@ -231,6 +239,141 @@ impl<'a> OtaFrame<'a> {
     }
 }
 
+/// A write to `SCREEN`.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ScreenRequest {
+    /// `0x01`: send the whole screen next, to start watching or after a lost notification.
+    Whole,
+    /// `0x02`, x, y: a touch on the screen at (x, y) of the remote taps' 200 x 120 grid.
+    Tap { x: u8, y: u8 },
+}
+
+impl ScreenRequest {
+    pub fn parse(bytes: &[u8]) -> Result<Self, LinkError> {
+        match *bytes {
+            [0x01] => Ok(Self::Whole),
+            [0x02, x, y] if x < 200 && y < 120 => Ok(Self::Tap { x, y }),
+            [0x02, _, _] => Err(LinkError::Invalid("tap")),
+            _ => Err(LinkError::Malformed),
+        }
+    }
+}
+
+/// Flags of a `SCREEN` notification: it starts an update, it ends one.
+pub const SCREEN_FIRST: u8 = 0x01;
+pub const SCREEN_LAST: u8 = 0x02;
+
+/// Update kinds: the whole screen, a band of rows replaced, a band of rows XORed into the screen.
+const SCREEN_KEY: u8 = 0x01;
+const SCREEN_ROWS: u8 = 0x02;
+const SCREEN_XOR: u8 = 0x03;
+/// Kind, width, height, first row and rows (u16 each), CRC-32 of the updated screen.
+const SCREEN_HEADER: usize = 13;
+
+/// One update of the screen mirror, from `before` (what the browser has; `None` for the whole
+/// screen) to `after`, or `None` when no row changed. A screen is packed rows of `width` pixels,
+/// most significant bit first, 1 = ink, as the panel takes them. Little-endian integers:
+///
+/// - kind: `0x01` the whole screen, `0x02` a band of rows replaced, `0x03` a band XORed in;
+/// - width and height (u16) of the whole screen, the same in every update;
+/// - first row and rows (u16): the band that changed;
+/// - CRC-32 of the whole screen once updated: a browser that ends up elsewhere asks for it whole;
+/// - the band's bytes, run-length coded ([`rle`]). Replaced rows go XORed with the row above them
+///   in the new screen (zeros above the top one), so plain areas and vertical edges become runs;
+///   a 1-bit UI screen takes 3 to 11 KB of the 48 000 bytes. XORed rows are the changed bits
+///   alone, smaller when little changed within the band (a clock); the smaller of the two goes.
+pub fn screen_update(before: Option<&[u8]>, after: &[u8], width: u16, height: u16) -> Option<Vec<u8>> {
+    let stride = usize::from(width).div_ceil(8);
+    let (top, bottom) = match before {
+        None => (0, usize::from(height)),
+        Some(before) => {
+            let changed = |y: &usize| before[y * stride..(y + 1) * stride] != after[y * stride..(y + 1) * stride];
+            let top = (0..usize::from(height)).find(changed)?;
+            (top, (top..usize::from(height)).rfind(changed)? + 1)
+        }
+    };
+    let (start, end) = (top * stride, bottom * stride);
+    let mut update = vec![if before.is_some() { SCREEN_ROWS } else { SCREEN_KEY }];
+    for value in [width, height, top as u16, (bottom - top) as u16] {
+        update.extend_from_slice(&value.to_le_bytes());
+    }
+    update.extend_from_slice(&crc32(after).to_le_bytes());
+    // Each row XOR the one above it; the top row of the screen stays as it is.
+    let mut band = after[start..end].to_vec();
+    let skip = if start == 0 { stride } else { 0 };
+    for (byte, above) in band[skip..].iter_mut().zip(&after[start + skip - stride..end - stride]) {
+        *byte ^= above;
+    }
+    rle(&band, &mut update);
+    if let Some(before) = before {
+        band.copy_from_slice(&after[start..end]);
+        for (byte, was) in band.iter_mut().zip(&before[start..end]) {
+            *byte ^= was;
+        }
+        let mut xored = update[..SCREEN_HEADER].to_vec();
+        xored[0] = SCREEN_XOR;
+        rle(&band, &mut xored);
+        if xored.len() < update.len() {
+            return Some(xored);
+        }
+    }
+    Some(update)
+}
+
+/// Run-length coding: `0x00..=0x7F`, then that many plus one bytes as they are; `0x80..=0xFE`,
+/// then one byte repeated that many less 0x80 plus 3 times; `0xFF`, one byte and a LEB128 count,
+/// the byte repeated 130 times plus the count.
+fn rle(bytes: &[u8], out: &mut Vec<u8>) {
+    let literal = |out: &mut Vec<u8>, literal: &[u8]| {
+        for part in literal.chunks(128) {
+            out.push((part.len() - 1) as u8);
+            out.extend_from_slice(part);
+        }
+    };
+    let (mut from, mut at) = (0, 0);
+    while at < bytes.len() {
+        let value = bytes[at];
+        let run = bytes[at..].iter().take_while(|&&byte| byte == value).count();
+        if run >= 3 {
+            literal(out, &bytes[from..at]);
+            let extra = run - 3;
+            if extra < 0x7F {
+                out.extend([0x80 | extra as u8, value]);
+            } else {
+                out.extend([0xFF, value]);
+                let mut count = extra - 0x7F;
+                while count >= 0x80 {
+                    out.push(count as u8 | 0x80);
+                    count >>= 7;
+                }
+                out.push(count as u8);
+            }
+            from = at + run;
+        }
+        at += run;
+    }
+    literal(out, &bytes[from..]);
+}
+
+/// The `SCREEN` notification `index` of `update` into `out`, false past the last one. Each is at
+/// most `room` bytes (the link's MTU less 3): its number `seq`, one more than the notification
+/// before, wrapping; flags ([`SCREEN_FIRST`], [`SCREEN_LAST`]); the next part of the update. A gap
+/// in the numbers tells the browser a notification was lost.
+pub fn screen_notification(update: &[u8], room: usize, index: usize, seq: u8, out: &mut Vec<u8>) -> bool {
+    let part = room.saturating_sub(2).max(1);
+    let start = index * part;
+    if start >= update.len() {
+        return false;
+    }
+    let end = update.len().min(start + part);
+    let first = if index == 0 { SCREEN_FIRST } else { 0 };
+    let last = if end == update.len() { SCREEN_LAST } else { 0 };
+    out.clear();
+    out.extend_from_slice(&[seq, first | last]);
+    out.extend_from_slice(&update[start..end]);
+    true
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LinkError {
     /// Not the message's shape.
@@ -321,5 +464,164 @@ mod tests {
         let back: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(back["protocol"], 1);
         assert!(!back["networks"].as_array().unwrap().is_empty());
+    }
+
+    /// What a browser does with the updates (`device/sdk/link`), for the tests.
+    fn apply(screen: &mut Vec<u8>, update: &[u8]) -> Result<(), &'static str> {
+        let u16_at = |at: usize| usize::from(u16::from_le_bytes([update[at], update[at + 1]]));
+        let (kind, width, height, top, rows) = (update[0], u16_at(1), u16_at(3), u16_at(5), u16_at(7));
+        let stride = width.div_ceil(8);
+        if kind == SCREEN_KEY {
+            *screen = vec![0; stride * height];
+        }
+        if screen.len() != stride * height || top + rows > height {
+            return Err("not this screen");
+        }
+        let mut band = Vec::new();
+        let mut at = SCREEN_HEADER;
+        while at < update.len() {
+            let head = update[at];
+            if head < 0x80 {
+                let n = usize::from(head) + 1;
+                band.extend_from_slice(update.get(at + 1..at + 1 + n).ok_or("short")?);
+                at += 1 + n;
+            } else {
+                let value = update[at + 1];
+                let mut count = usize::from(head & 0x7F) + 3;
+                at += 2;
+                if head == 0xFF {
+                    let mut shift = 0;
+                    loop {
+                        let next = update[at];
+                        count += usize::from(next & 0x7F) << shift;
+                        shift += 7;
+                        at += 1;
+                        if next < 0x80 {
+                            break;
+                        }
+                    }
+                }
+                band.resize(band.len() + count, value);
+            }
+        }
+        if band.len() != rows * stride {
+            return Err("band size");
+        }
+        let start = top * stride;
+        for (i, byte) in band.into_iter().enumerate() {
+            let at = start + i;
+            screen[at] = match kind {
+                SCREEN_XOR => screen[at] ^ byte,
+                _ => byte ^ if at >= stride { screen[at - stride] } else { 0 },
+            };
+        }
+        let crc = u32::from_le_bytes(update[9..13].try_into().unwrap());
+        if crc32(screen) != crc {
+            return Err("crc");
+        }
+        Ok(())
+    }
+
+    /// An 800 x 480 UI-like screen: a status bar, boxes, text-like noise, a dithered area.
+    fn screen(seed: u32, text_rows: core::ops::Range<usize>) -> Vec<u8> {
+        let mut bits = vec![0u8; 48_000];
+        let mut state = seed;
+        let mut next = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        };
+        bits[..56 * 100].iter_mut().skip(100).step_by(7).for_each(|b| *b = 0x3C);
+        for y in 100..140 {
+            bits[y * 100 + 10..y * 100 + 40].fill(0xFF);
+        }
+        for y in text_rows {
+            for x in (12..88).step_by(3) {
+                bits[y * 100 + x] = next() & next();
+            }
+        }
+        for y in 400..470 {
+            bits[y * 100 + 50..y * 100 + 90].fill(if y % 2 == 0 { 0xAA } else { 0x55 });
+        }
+        bits
+    }
+
+    #[test]
+    fn a_whole_screen_has_a_fixed_layout() {
+        // 32 x 3: blank, a bar ending in one pixel, the same again. The same bytes as the SDK's test.
+        let frame = [0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0x01];
+        let update = screen_update(None, &frame, 32, 3).unwrap();
+        let mut expected = vec![0x01, 32, 0, 3, 0, 0, 0, 3, 0];
+        expected.extend_from_slice(&crc32(&frame).to_le_bytes());
+        // Up-filtered: 00 00 00 00 | FF FF FF 01 | 00 00 00 00.
+        expected.extend_from_slice(&[0x81, 0x00, 0x80, 0xFF, 0x00, 0x01, 0x81, 0x00]);
+        assert_eq!(update, expected);
+        assert_eq!(crc32(&frame), 0x92B2_F73D, "the SDK's test checks the same CRC");
+        let mut shown = Vec::new();
+        apply(&mut shown, &update).unwrap();
+        assert_eq!(shown, frame);
+    }
+
+    #[test]
+    fn screen_updates_rebuild_every_screen_from_the_first() {
+        let blank = vec![0u8; 48_000];
+        let key = screen_update(None, &blank, 800, 480).unwrap();
+        assert_eq!(key.len(), SCREEN_HEADER + 5, "48 000 zeros are one long run");
+
+        let main = screen(1, 160..380);
+        let clock = {
+            let mut bits = main.clone();
+            bits[20 * 100 + 46..20 * 100 + 50].copy_from_slice(&[0x18, 0x24, 0x42, 0x81]);
+            bits
+        };
+        let other = screen(2, 150..420);
+        let mut shown = Vec::new();
+        let mut before: Option<&[u8]> = None;
+        for after in [&blank, &main, &clock, &other, &main] {
+            let update = screen_update(before, after, 800, 480).unwrap();
+            apply(&mut shown, &update).unwrap();
+            assert_eq!(&shown, after);
+            before = Some(after);
+        }
+        assert_eq!(screen_update(Some(&main), &main, 800, 480), None, "nothing changed");
+        let tick = screen_update(Some(&main), &clock, 800, 480).unwrap();
+        assert_eq!(tick[0], SCREEN_XOR, "a few bits in a row are smaller XORed");
+        assert_eq!(&tick[5..9], &[20, 0, 1, 0], "only the changed row");
+        assert!(tick.len() < 40, "{}", tick.len());
+
+        // On another base, the CRC tells.
+        let mut elsewhere = other.clone();
+        assert_eq!(apply(&mut elsewhere, &tick), Err("crc"));
+    }
+
+    #[test]
+    fn screen_requests_are_read_and_checked() {
+        assert_eq!(ScreenRequest::parse(&[0x01]), Ok(ScreenRequest::Whole));
+        assert_eq!(ScreenRequest::parse(&[0x02, 199, 0]), Ok(ScreenRequest::Tap { x: 199, y: 0 }));
+        assert_eq!(ScreenRequest::parse(&[0x02, 200, 5]), Err(LinkError::Invalid("tap")));
+        assert_eq!(ScreenRequest::parse(&[0x02, 1]), Err(LinkError::Malformed));
+        assert_eq!(ScreenRequest::parse(&[]), Err(LinkError::Malformed));
+    }
+
+    fn notifications(update: &[u8], room: usize, seq: u8) -> Vec<Vec<u8>> {
+        let mut all = Vec::new();
+        let mut out = Vec::new();
+        while screen_notification(update, room, all.len(), seq.wrapping_add(all.len() as u8), &mut out) {
+            all.push(out.clone());
+        }
+        all
+    }
+
+    #[test]
+    fn notifications_carry_an_update_in_order() {
+        let update: Vec<u8> = (0..1000u32).map(|i| i as u8).collect();
+        let parts = notifications(&update, 100, 250);
+        assert_eq!(parts.len(), 11);
+        assert!(parts.iter().all(|n| n.len() <= 100));
+        assert_eq!(parts.iter().map(|n| n[0]).collect::<Vec<_>>(), vec![250, 251, 252, 253, 254, 255, 0, 1, 2, 3, 4]);
+        assert_eq!((parts[0][1], parts[5][1], parts[10][1]), (SCREEN_FIRST, 0, SCREEN_LAST));
+        let joined: Vec<u8> = parts.iter().flat_map(|n| n[2..].to_vec()).collect();
+        assert_eq!(joined, update);
+        assert_eq!(notifications(&update[..10], 514, 7), vec![[&[7, SCREEN_FIRST | SCREEN_LAST][..], &update[..10]].concat()]);
+        assert_eq!(notifications(&update[..98], 100, 0).len(), 1, "exactly one part");
     }
 }

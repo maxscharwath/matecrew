@@ -27,9 +27,9 @@ test("system notifications overlay built-in screens, expire offline and clear on
   app.reset();
   assert.equal(app.overlayDeadline(), null);
   assert.deepEqual(app.render(LINKED), idle);
-  // The key held across the reset is a new press, once the other key could no longer join.
+  // The key held across the reset is a new press, the left key once released.
   assert.equal(app.sampleGpio(true, false, 0), 0);
-  assert.equal(app.sampleGpio(true, false, 120), 1);
+  assert.equal(app.sampleGpio(false, false, 120), 1);
   assert.equal(app.notify("Nouveau départ", 1000, 0), true);
   assert.equal(app.overlayDeadline(), 1000);
 });

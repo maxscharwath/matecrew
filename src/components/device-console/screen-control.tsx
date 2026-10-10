@@ -14,11 +14,11 @@ export function ScreenControl({
   children,
   onTap,
   label,
-}: {
+}: Readonly<{
   children: ReactNode;
   onTap: (x: number, y: number) => void;
   label: string;
-}) {
+}>) {
   const [marks, setMarks] = useState<{ id: number; left: number; top: number }[]>([]);
   const next = useRef(0);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());

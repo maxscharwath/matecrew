@@ -31,7 +31,7 @@ export function createIcon(
     if (![width, height].every((value) => Number.isInteger(value) && value > 0))
       throw new Error("Icon dimensions must be positive integer pixels");
     bits ??= Array.from({ length: hex.length / 2 }, (_, i) =>
-      parseInt(hex.slice(i * 2, i * 2 + 2), 16),
+      Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16),
     );
     // Fit inside the requested box without stretching or unevenly magnifying source pixels.
     const ratio = Math.min(width / sourceWidth, height / sourceHeight);
@@ -64,7 +64,10 @@ export function createVectorIcon(nodes: VectorNode[]): IconComponent {
     const side = Math.min(width, height);
     const key = `${side}:${strokeWidth}`;
     let sprite = drawn.get(key);
-    if (!sprite) drawn.set(key, (sprite = rasterize([{ nodes, stroke: strokeWidth }], side)));
+    if (!sprite) {
+      sprite = rasterize([{ nodes, stroke: strokeWidth }], side);
+      drawn.set(key, sprite);
+    }
     return Image({
       x: x + Math.floor((width - side) / 2),
       y: y + Math.floor((height - side) / 2),
@@ -88,7 +91,7 @@ export function createArt(layers: ArtLayer[], viewBox: [number, number, number, 
   const drawn = new Map<string, Sprite>();
   return ({ x = 0, y = 0, size, width, height, inverted = false }) => {
     // Given one side, the other follows the art's proportions.
-    const w = width ?? size ?? (height !== undefined ? Math.round((height * viewBox[2]) / viewBox[3]) : viewBox[2]);
+    const w = width ?? size ?? (height === undefined ? viewBox[2] : Math.round((height * viewBox[2]) / viewBox[3]));
     const h = height ?? size ?? Math.round((w * viewBox[3]) / viewBox[2]);
     if (![w, h].every((value) => Number.isInteger(value) && value > 0))
       throw new Error("Art dimensions must be positive integer pixels");

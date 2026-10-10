@@ -1,0 +1,10 @@
+{
+  "name": "@matecrew/realtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bunx wrangler dev",
+    "deploy": "bunx wrangler deploy",
+    "test": "bun test tests"
+  }
+}

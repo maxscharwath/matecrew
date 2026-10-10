@@ -1,6 +1,7 @@
 /**
- * @matecrew/device-link: set up, control, debug and update a device over Bluetooth LE from a
- * web page, or control it through a server, with one API. Framework-agnostic, no dependencies.
+ * @matecrew/device-link: set up, control, debug, update and watch the screen of a device over
+ * Bluetooth LE from a web page, or control it through a server, with one API.
+ * Framework-agnostic, no dependencies.
  */
 export {
   PROTOCOL,
@@ -27,5 +28,17 @@ export {
   type Result,
   type Side,
 } from "./protocol";
+export {
+  SCREEN_WHOLE,
+  ScreenReader,
+  TAP_COLUMNS,
+  TAP_ROWS,
+  encodeScreenTap,
+  encodeScreenUpdate,
+  screenNotifications,
+  screenRgba,
+  type Screen,
+  type ScreenStep,
+} from "./screen";
 export { BleDevice, isSupported, type ConnectOptions, type UpdateOptions } from "./ble";
-export { HttpRemote, commands, type DeviceRemote, type HttpRemoteOptions } from "./remote";
+export { HttpRemote, commands, type DeviceRemote, type HttpRemoteOptions, type WatchOptions } from "./remote";

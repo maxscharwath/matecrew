@@ -21,11 +21,11 @@ export function DeviceSettings({
   officeId,
   device,
   items,
-}: {
+}: Readonly<{
   officeId: string;
   device: { id: string; name: string; firstItemId: string | null };
   items: { id: string; name: string }[];
-}) {
+}>) {
   const t = useTranslations("devices");
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -114,7 +114,7 @@ export function DeviceSettings({
 }
 
 /** The takes the terminal sent, last first, with why one was refused. */
-export function RecentTakes({ takes, timeZone }: { takes: Take[]; timeZone: string }) {
+export function RecentTakes({ takes, timeZone }: Readonly<{ takes: Take[]; timeZone: string }>) {
   const t = useTranslations("devices");
   const format = useFormatter();
   return (

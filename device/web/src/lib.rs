@@ -20,8 +20,9 @@ use matecrew_ui::frame::{Frame, BYTES};
 use serde::Deserialize;
 use std::cell::RefCell;
 thread_local! { static KEYS: RefCell<matecrew_core::hardware::TouchKeys> = RefCell::default(); }
-/// Sample GPIO 5 and 8 at `now_ms`: 1 the left key, 2 the right key, 4 both together, 0 nothing.
-/// Call it every `KEY_POLL_MS`: a lone key comes out once the other could no longer join it.
+/// Sample GPIO 5 and 8 at `now_ms`: 1 the left key, 2 the right key, 4 both together, 8 the left
+/// key held, 16 the right key held, 0 nothing. Call it every `KEY_POLL_MS`: a key comes out when
+/// it is released, or once held `LONG_MS`.
 #[no_mangle]
 pub extern "C" fn gpio_sample(left: u32, right: u32, now_ms: f64) -> u32 {
     use matecrew_core::{contract::Side, flow::Event};
@@ -29,6 +30,8 @@ pub extern "C" fn gpio_sample(left: u32, right: u32, now_ms: f64) -> u32 {
         Some(Event::Key { side: Side::Left }) => 1,
         Some(Event::Key { side: Side::Right }) => 2,
         Some(Event::BothKeys) => 4,
+        Some(Event::LongKey { side: Side::Left }) => 8,
+        Some(Event::LongKey { side: Side::Right }) => 16,
         _ => 0,
     })
 }
@@ -53,6 +56,7 @@ pub extern "C" fn buzzer_pattern(tone: u32) -> i32 {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum View {
+    /// The virtual terminal's start, 0 to 3 as the page steps through it ([`boot_log`]).
     Boot { stage: u8 },
     Main {
         state: DeviceState,
@@ -116,9 +120,34 @@ fn hex32(hex: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
+/// What the boot screen lists at each stage of the virtual terminal's start: the steps the
+/// physical terminal logs (`firmware/src/main.rs`), done one stage after the other.
+fn boot_log(stage: u8) -> ui::boot::BootLog {
+    let mut log = ui::boot::BootLog::new(6);
+    log.start("screen", &[]);
+    log.done("screenReady", &[]);
+    log.start("reader", &[]);
+    log.done("readerReady", &[("version", "1.6")]);
+    if stage >= 1 {
+        log.start("wifiJoining", &[("ssid", "Wi-Fi")]);
+    }
+    if stage >= 2 {
+        log.done("wifiJoinedQuiet", &[("ssid", "Wi-Fi")]);
+        log.start("site", &[]);
+        log.done("site", &[]);
+        log.start("apps", &[]);
+    }
+    if stage >= 3 {
+        log.done("appsLoaded", &[]);
+        log.start("ready", &[]);
+        log.done("allReady", &[]);
+    }
+    log
+}
+
 pub fn draw(frame: &mut Frame, view: &View) {
     let _ = match view {
-        View::Boot { stage } => ui::boot::render(frame, *stage),
+        View::Boot { stage } => boot_log(*stage).render(frame),
         View::Main { state, offline } => ui::state_screen(frame, state, *offline),
         View::Dashboard { data, offline } => ui::dashboard_screen(frame, data, *offline),
         View::Connecting { ssid } => ui::connecting_screen(frame, ssid),
@@ -199,9 +228,7 @@ pub unsafe extern "C" fn set_state(ptr: *mut u8, len: usize) -> i32 {
     let Some(state) = take_json::<DeviceState>(ptr, len) else {
         return -1;
     };
-    ui::set_theme(ui::Theme::from_name(
-        state.theme.as_deref().unwrap_or("flipper"),
-    ));
+    ui::set_theme(ui::Theme::from_name(&state.theme));
     STATE.set(Some(state));
     0
 }

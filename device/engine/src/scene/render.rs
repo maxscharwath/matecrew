@@ -65,21 +65,24 @@ impl Scene {
             px.clear(BinaryColor::Off)?;
         }
         let screen = Rectangle::new(Point::zero(), Size::new(self.width, self.height));
-        let mut viewport = crate::clip::Clip::new(&mut px, screen);
-        let area = super::layout::absolute(&self.root, screen, super::layout::Env { data, theme }, None);
-        draw_node(
-            &self.root,
-            &mut viewport,
-            area,
-            data,
-            None,
-            Rectangle::new(Point::zero(), Size::new(self.width, self.height)),
-            &mut RenderPass {
-                remaining: 2048,
-                theme,
-                flip: &flip,
-            },
-        )
+        // Sizes are measured once per paint: a group measures its children at every level.
+        super::layout::remembering(|| {
+            let mut viewport = crate::clip::Clip::new(&mut px, screen);
+            let area = super::layout::absolute(&self.root, screen, super::layout::Env { data, theme }, None);
+            draw_node(
+                &self.root,
+                &mut viewport,
+                area,
+                data,
+                None,
+                screen,
+                &mut RenderPass {
+                    remaining: 2048,
+                    theme,
+                    flip: &flip,
+                },
+            )
+        })
     }
 }
 fn content(value: &Value) -> String {
@@ -153,10 +156,7 @@ fn draw_node<D: DrawTarget<Color = BinaryColor>>(
                 draw_node(route, d, super::layout::absolute(route, area, env, item), data, item, clip, pass)?;
             }
         }
-        Node::Group { children, .. }
-        | Node::Panel { children, .. }
-        | Node::Row { children, .. }
-        | Node::Column { children, .. } => {
+        Node::Group { children, .. } | Node::Panel { children, .. } => {
             if let Node::Panel { inverted, style, .. } = node {
                 if let Some(style) = style {
                     style.draw(&mut cell, area, pass.theme.radius(false))?;

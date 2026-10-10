@@ -4,6 +4,7 @@
  * between "nearby" and "from anywhere" without changing its code.
  */
 import { encodeCommand, fail, ok, type DeviceEvent, type LinkError, type RemoteCommand, type Result } from "./protocol";
+import type { Screen } from "./screen";
 
 export interface DeviceRemote {
   /** "ble", "http", or a custom transport's name. */
@@ -13,7 +14,14 @@ export interface DeviceRemote {
   send(command: RemoteCommand): Promise<Result<void>>;
   /** Live events, for transports that stream them (Bluetooth does, plain HTTP does not). */
   onEvent?(listener: (event: DeviceEvent) => void): () => void;
+  /** The device's screen, live, for transports that mirror it (Bluetooth does). */
+  watchScreen?(listener: (screen: Screen) => void, options?: WatchOptions): () => void;
 }
+
+export type WatchOptions = {
+  /** Watching could not start or stopped: no mirror on this device, pairing refused, link lost. */
+  onError?: (error: LinkError) => void;
+};
 
 /** Shorthands over `send`, for any transport. */
 export const commands = {
@@ -23,6 +31,8 @@ export const commands = {
   sync: (remote: DeviceRemote) => remote.send({ cmd: "sync" }),
   restart: (remote: DeviceRemote) => remote.send({ cmd: "restart" }),
   notify: (remote: DeviceRemote, text: string) => remote.send({ cmd: "notify", text }),
+  /** A touch at (x, y) of the 200 × 120 tap grid. */
+  tap: (remote: DeviceRemote, x: number, y: number) => remote.send({ cmd: "tap", x, y }),
 };
 
 export type HttpRemoteOptions = {
@@ -62,7 +72,7 @@ export class HttpRemote implements DeviceRemote {
   constructor(private readonly options: HttpRemoteOptions) {}
 
   private async request(path: string, init: { method: string; body?: string }): Promise<Result<string>> {
-    const run = this.options.fetch ?? (globalThis as { fetch?: HttpRemoteOptions["fetch"] }).fetch;
+    const run = this.options.fetch ?? (globalThis as { fetch?: NonNullable<HttpRemoteOptions["fetch"]> }).fetch;
     if (!run) return fail("unsupported", "no fetch here");
     try {
       const response = await run(`${this.options.baseUrl.replace(/\/$/, "")}${path}`, {

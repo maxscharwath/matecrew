@@ -1,7 +1,10 @@
-//! Settings kept in NVS across reboots and deep sleep.
+//! Settings kept in NVS across reboots and deep sleep. What the site can send again (the last
+//! state, the app) is a cache: declared in `cache.rs`, reached through the same methods here.
 
+use crate::cache::{self, Cache};
 use anyhow::Result;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
+use matecrew_cache::Error;
 use matecrew_core::{contract::DeviceState, queue::Queue};
 
 pub struct WifiCredentials {
@@ -15,11 +18,20 @@ pub struct Setup {
     pub site: String,
 }
 
-pub struct Store(EspNvs<NvsDefault>);
+pub struct Store(EspNvs<NvsDefault>, &'static Cache);
+
+/// A cache that cannot keep a value is not the caller's failure: the value is still used, and
+/// the next sync brings it again.
+fn kept(result: Result<(), Error>) -> Result<()> {
+    if let Err(e) = result {
+        log::warn!("cache: {e}");
+    }
+    Ok(())
+}
 
 impl Store {
     pub fn new(partition: EspDefaultNvsPartition) -> Result<Self> {
-        Ok(Self(EspNvs::new(partition, "matecrew", true)?))
+        Ok(Self(EspNvs::new(partition, "matecrew", true)?, cache::open()?))
     }
 
     fn get(&self, key: &str) -> Result<Option<String>> {
@@ -56,21 +68,15 @@ impl Store {
         )
     }
     pub fn showcase_data(&self) -> Result<Option<serde_json::Value>> {
-        self.get_blob("showcase")?
-            .map(|b| serde_json::from_slice(&b).map_err(Into::into))
-            .transpose()
+        Ok(self.1.get(&cache::SHOWCASE)?)
     }
     pub fn set_showcase_data(&self, data: &serde_json::Value) -> Result<()> {
-        let mut cache = data.clone();
-        // API state already has its own cache; keep this slot for local UI/navigation/images.
-        if let Some(object) = cache.as_object_mut() {
+        let mut data = data.clone();
+        // The state is cached on its own; this keeps the showcase's navigation, theme and images.
+        if let Some(object) = data.as_object_mut() {
             object.remove("showcase");
         }
-        let bytes = serde_json::to_vec(&cache)?;
-        if bytes.len() <= 8192 {
-            self.0.set_blob("showcase", &bytes)?;
-        }
-        Ok(())
+        kept(self.1.put(&cache::SHOWCASE, &data))
     }
     pub fn wifi(&self) -> Result<Option<WifiCredentials>> {
         Ok(match (self.get("wifi_ssid")?, self.get("wifi_pass")?) {
@@ -177,23 +183,23 @@ impl Store {
         }
     }
 
-    /// Forgets the token and everything that came with it: the device links again.
+    /// Forgets the token and everything that came with it, every cache included (another
+    /// office's state and app): the device links again.
     pub fn clear_token(&self) -> Result<()> {
-        for key in ["token", "etag", "state", "queue"] {
+        for key in ["token", "queue"] {
             self.0.remove(key)?;
         }
-        Ok(())
+        Ok(self.1.clear()?)
     }
 
-    /// Badges, keys and items from the last sync, for badging while offline.
+    /// Badges, keys and items from the last sync, for badging while offline and for the first
+    /// screen after a restart.
     pub fn state(&self) -> Result<Option<DeviceState>> {
-        Ok(self
-            .get_blob("state")?
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+        Ok(self.1.get(&cache::STATE)?)
     }
 
     pub fn set_state(&self, state: &DeviceState) -> Result<()> {
-        Ok(self.0.set_blob("state", &serde_json::to_vec(&state.without_pictures())?)?)
+        kept(self.1.put(&cache::STATE, state))
     }
 
     /// Takes the site has not acknowledged yet, and badges it has not seen.
@@ -208,31 +214,22 @@ impl Store {
         Ok(self.0.set_blob("queue", &queue.to_bytes())?)
     }
 
+    /// The app's bytecode, if the one cached came from `url`.
     pub fn app(&self, url: &str) -> Result<Option<Vec<u8>>> {
-        if self.get("app_url")?.as_deref() != Some(url) {
+        if self.1.get(&cache::APP_URL)?.as_deref() != Some(url) {
             return Ok(None);
         }
-        self.get_blob("app")
+        Ok(self.1.get(&cache::APP)?)
     }
     pub fn set_app(&self, url: &str, bytes: &[u8]) -> Result<()> {
-        // Keep the board's small NVS partition available for badges and offline takes.
-        if bytes.len() <= 8192 {
-            self.0.set_blob("app", bytes)?;
-            self.set("app_url", url)?;
-        }
-        Ok(())
+        // The address last: bytecode that is not kept leaves the old pair, which no state asks for.
+        kept(self.1.put(&cache::APP, &bytes.to_vec()).and_then(|()| self.1.put(&cache::APP_URL, &url.to_owned())))
     }
 
     pub fn app_data(&self) -> Result<Option<serde_json::Value>> {
-        Ok(self
-            .get_blob("app_data")?
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
+        Ok(self.1.get(&cache::APP_DATA)?)
     }
     pub fn set_app_data(&self, value: &serde_json::Value) -> Result<()> {
-        let bytes = serde_json::to_vec(value)?;
-        if bytes.len() <= 8192 {
-            self.0.set_blob("app_data", &bytes)?;
-        }
-        Ok(())
+        kept(self.1.put(&cache::APP_DATA, value))
     }
 }

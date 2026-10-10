@@ -7,6 +7,7 @@ use crate::{limits::MAX_VIEWPORT, text, Theme};
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{cell::RefCell, collections::HashMap};
 
 /// Size codes carried in a rect's width or height (above any pixel size).
 pub const HUG: u32 = 0xFFFE;
@@ -193,8 +194,39 @@ pub fn line_height(node: &Node, theme: Theme) -> i32 {
     text_metrics(node, theme).map_or(0, |(_, line)| line)
 }
 
+thread_local! {
+    /// Content sizes measured during the paint under way (`remembering`), by node, width and
+    /// item. A flex group measures its children at every level above them, so without this a
+    /// deep tree measures its leaves over and over: two thirds of a paint on the terminal.
+    static SIZES: RefCell<Option<HashMap<(usize, Option<u32>, usize), Size>>> = const { RefCell::new(None) };
+}
+
+/// Runs `paint` with content sizes remembered until it ends: data and theme do not change
+/// within a paint, so a node's size for a width is measured once.
+pub(super) fn remembering<T>(paint: impl FnOnce() -> T) -> T {
+    let outer = SIZES.with(|sizes| sizes.replace(Some(HashMap::new())));
+    let painted = paint();
+    SIZES.with(|sizes| *sizes.borrow_mut() = outer);
+    painted
+}
+
 /// Natural size of what the node shows, given the width it may use (`None`: unconstrained).
+/// Measured once per paint (`remembering`).
 pub fn content(node: &Node, width: Option<u32>, env: Env, item: Option<&Value>) -> Size {
+    let key = (node as *const Node as usize, width, item.map_or(0, |item| item as *const Value as usize));
+    if let Some(size) = SIZES.with(|sizes| sizes.borrow().as_ref().and_then(|sizes| sizes.get(&key).copied())) {
+        return size;
+    }
+    let size = measure(node, width, env, item);
+    SIZES.with(|sizes| {
+        if let Some(sizes) = sizes.borrow_mut().as_mut() {
+            sizes.insert(key, size);
+        }
+    });
+    size
+}
+
+fn measure(node: &Node, width: Option<u32>, env: Env, item: Option<&Value>) -> Size {
     match node {
         Node::Text { value, max_lines, .. } => {
             let string = super::expr::text(&value.resolve(env.data, item));
@@ -233,16 +265,6 @@ pub fn content(node: &Node, width: Option<u32>, env: Env, item: Option<&Value>) 
             Some(layout) => flex_content(children, layout, width, env, item),
             None => extent(children, width, env, item),
         },
-        Node::Row { children, gap, .. } | Node::Column { children, gap, .. } => {
-            let row = matches!(node, Node::Row { .. });
-            let sizes: Vec<Size> = children.iter().map(|c| size_in(c, Size::new(width.unwrap_or(MAX_VIEWPORT), MAX_VIEWPORT), env, item)).collect();
-            let gaps = gap * sizes.len().saturating_sub(1) as u32;
-            if row {
-                Size::new(sizes.iter().map(|s| s.width).sum::<u32>() + gaps, sizes.iter().map(|s| s.height).max().unwrap_or(0))
-            } else {
-                Size::new(sizes.iter().map(|s| s.width).max().unwrap_or(0), sizes.iter().map(|s| s.height).sum::<u32>() + gaps)
-            }
-        }
         Node::When { child, .. } | Node::Modal { child, .. } => {
             if collapsed(node, env, item) {
                 Size::zero()
@@ -358,33 +380,6 @@ pub fn place(node: &Node, area: Rectangle, env: Env, item: Option<&Value>) -> Ve
             Some(layout) => flex(children, layout, area, env, item),
             None => children.iter().map(|c| absolute(c, area, env, item)).collect(),
         },
-        Node::Row { children, gap, .. } | Node::Column { children, gap, .. } => {
-            let row = matches!(node, Node::Row { .. });
-            let mut offset = 0i32;
-            children
-                .iter()
-                .map(|child| {
-                    let start = if row { Point::new(offset, 0) } else { Point::new(0, offset) };
-                    let bounds = Rectangle::new(
-                        area.top_left + start,
-                        Size::new(
-                            area.size.width.saturating_sub(if row { offset.max(0) as u32 } else { 0 }),
-                            area.size.height.saturating_sub(if row { 0 } else { offset.max(0) as u32 }),
-                        ),
-                    );
-                    let placed = absolute(child, bounds, env, item);
-                    let rect = child.rect();
-                    // Legacy stacks step by the child's declared size, as they always did.
-                    let step = if row { Dim::of(rect.width) } else { Dim::of(rect.height) };
-                    let step = match step {
-                        Dim::Px(v) => v,
-                        _ => if row { placed.size.width } else { placed.size.height },
-                    };
-                    offset = offset.saturating_add(step.min(4096) as i32 + (*gap).min(4096) as i32);
-                    placed
-                })
-                .collect()
-        }
         _ => vec![],
     }
 }

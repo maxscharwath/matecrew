@@ -85,6 +85,13 @@ export namespace JSX {
   export interface ElementChildrenAttribute {
     children: unknown;
   }
+  /**
+   * Accepted on every element so lists read like React's, then dropped: a screen compiles once
+   * to a static tree, with nothing to reconcile (`jsx` takes no key).
+   */
+  export interface IntrinsicAttributes {
+    key?: string | number;
+  }
 }
 const OVERLAY = Symbol("overlay");
 /** Mark a node as drawn over the screen, out of its flow (see `Overlay` in the kit). */
@@ -130,22 +137,6 @@ export const HStack = (props: Props & Omit<LayoutProps, "direction">) => Group({
 /** Takes the free space of its flex line (pushes siblings apart). */
 export const Spacer = ({ weight = 1 }: { weight?: number }) =>
   Group({ width: { fill: weight }, height: { fill: weight } });
-export function Row(props: Props & { gap?: number }): Node {
-  return {
-    kind: "row",
-    rect: rect(props),
-    gap: props.gap ?? 4,
-    children: children(props.children),
-  };
-}
-export function Column(props: Props & { gap?: number }): Node {
-  return {
-    kind: "column",
-    rect: rect(props),
-    gap: props.gap ?? 4,
-    children: children(props.children),
-  };
-}
 export function Card(props: Props & LayoutProps & SurfaceStyle & { inverted?: boolean }): Node {
   const { radius, borderWidth, borderStyle, background, opacity, shadow } = props;
   const styled = [radius, borderWidth, borderStyle, background, opacity, shadow].some(v => v !== undefined);

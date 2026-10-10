@@ -12,7 +12,9 @@ Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifa
 - **Prise** : on touche une action, on badge, l'écran confirme avec un bip. On a 10 s pour annuler.
 - **Badge inconnu** : l'écran le signale et le badge apparaît sur le site, où un admin l'attribue à un membre. Personne n'a besoin de connaître un UID.
 - **Hors ligne** : les prises restent en mémoire et partent à la synchro suivante.
-- **Ma conso** : aujourd'hui, la semaine, le mois, le coût du mois (au prix d'achat des canettes) et les 7 derniers jours en barres empilées par produit.
+- **Mon compte** : la touche droite, puis le badge : le terminal demande le compte au site, en direct (`POST /api/device/account`). Aujourd'hui, la semaine, le mois, le coût du mois (au prix d'achat des canettes), les 7 derniers jours en barres empilées par produit et les 2 derniers achats. Rien de personnel n'est gardé sur le terminal : sans réseau, l'écran le dit. La touche gauche « Achats » ouvre la liste, la droite ferme.
+- **Mes achats** : depuis « Mon compte », ou la touche droite maintenue 0,7 s puis le badge : les 20 derniers achats de la personne, quatre par page (image, article, date, prix). La touche gauche passe au suivant, la droite annule l'achat choisi après un second appui (mêmes règles que sur le site : le maté revient dans le stock) ; la dernière ligne revient à « Mon compte ». Un appui simple compte au relâchement, un appui long dès 0,7 s.
+- **Erreurs** : chaque échec dit ce qui s'est passé : pas de réseau (Wi-Fi, délai, connexion, TLS, DNS), le site a répondu une erreur (avec le code HTTP), réponse illisible (versions différentes) ou badge inconnu du site, avec une ligne technique (« HTTP 503 · /api/device/account »). La touche gauche réessaie.
 - **Préparation** : pendant une préparation, l'écran montre chaque article (image, quantité, qui l'a demandé) ; la touche droite devient « Servi » : le badge du runner clôt la session sur le site (servi, consommé, sorti du stock), comme la page runner.
 - **Batterie** : tension lue sur D5 (pont 1 MΩ / 1 MΩ, `DIVIDER_PERMILLE` dans `core/src/power.rs` pour calibrer), charge selon une courbe LiPo, icône d'alerte sous 10 %. Branché à un ordinateur en USB, la barre d'état montre la charge (un chargeur secteur n'est pas vu : il faudrait un pont VBUS sur D6).
 - **À propos** : les deux touches ensemble, depuis n'importe quel écran : version, date et commit du build, slot OTA, Wi-Fi et signal, IP, MAC, site, id de l'appareil, id de la puce, batterie, durée depuis l'allumage.
@@ -88,7 +90,7 @@ Les 20 variantes d’écran (Wi-Fi, liaison, badge, prise, confirmation, consomm
 - La copie NVS permet de redessiner hors ligne. Le pilote ignore les trames identiques, rafraîchit uniquement les zones modifiées et gère la veille et les rafraîchissements complets.
 - Les définitions intégrées sont embarquées dans le firmware : changer leur TSX demande `bun dui build`, `just web` et une nouvelle version du firmware. Une application téléchargeable peut aussi être fournie via `state.appUrl`, sous forme de `.dui`.
 - `apps/hello/index.tsx` montre `useDeviceData`, `useDeviceState` et les boutons. Les hooks sont compilés en déclarations de ressources et d’actions ; leur état et leurs effets s’exécutent en Rust. Le host fait les requêtes API et stocke le cache. Aucune VM JavaScript n’est nécessaire.
-- Ce DSL TSX supporte Screen, Group, Row, Column, Card, Text, Image, Qr, Chart, Progress, Button, List et When. Ce n’est pas un runtime React/DOM/CSS ; les fonctions TSX s’exécutent à la compilation, pas sur le serveur à chaque rendu.
+- Ce DSL TSX supporte Screen, Group, Stack, Card, Text, Image, Qr, Chart, Progress, Button, List et When. Ce n’est pas un runtime React/DOM/CSS ; les fonctions TSX s’exécutent à la compilation, pas sur le serveur à chaque rendu.
 
 Voir `sdk/README.md` pour le SDK complet et `engine/README.md` pour l’intégration sur un autre appareil.
 

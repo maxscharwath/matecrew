@@ -38,7 +38,9 @@ pub(crate) fn decorate(mut info: Value) -> Value {
         .filter(|p| *p <= 100)
         .map(|p| p as u8)
         .or_else(|| power.percent());
-    let charging = power.usb && percent.is_none_or(|p| p < 100);
+    // Charging only shows when the charge is known: without the battery divider the terminal
+    // only knows it runs on USB, and shows the plug alone.
+    let charging = power.usb && percent.is_some_and(|p| p < 100);
     let low = !power.usb && percent.is_some_and(|p| p <= LOW_PERCENT);
     let battery = match percent {
         _ if charging => status_icons::BATTERY_CHARGING,
@@ -51,7 +53,7 @@ pub(crate) fn decorate(mut info: Value) -> Value {
     };
     let text = match percent {
         Some(percent) => format!("{percent}%"),
-        None if power.usb => "USB".to_owned(),
+        None if power.usb => String::new(),
         None => "--".to_owned(),
     };
     info["battery"] = json!({
@@ -85,7 +87,7 @@ pub fn clock(state: Option<&DeviceState>, unix: i64) -> String {
     let Some(reference) = time::parse_iso(&state.server_time) else {
         return "--:--".into();
     };
-    let Some((hours, minutes)) = state.screen.as_ref().and_then(|s| s.time.split_once(':')) else {
+    let Some((hours, minutes)) = state.screen.time.split_once(':') else {
         return "--:--".into();
     };
     let Some((h, m)) = hours
@@ -132,6 +134,11 @@ mod tests {
         assert_eq!(info["status"]["low"], true);
         assert_eq!(info["status"]["battery"], json!(status_icons::BATTERY_WARNING));
         let info = decorate(json!({"battery":{"usb":true}}));
-        assert_eq!(info["status"]["batteryText"], "USB");
+        assert_eq!(
+            info["status"]["batteryText"], "",
+            "the plug says it, no text"
+        );
+        assert_eq!(info["status"]["battery"], json!(status_icons::PLUGGED));
+        assert_eq!(info["status"]["charging"], false);
     }
 }

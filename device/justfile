@@ -21,6 +21,7 @@ sim: ui
 # Unit tests that run on the Mac.
 test: ui
     cd engine && cargo test
+    cd cache && cargo test
     cd core && cargo test
     cd ui && cargo test
     cd web && cargo test
@@ -59,7 +60,7 @@ flash-local: ui
 release: ui
     cd firmware && {{esp}} cargo build
     mkdir -p release
-    espflash save-image --chip esp32s3 "$(cd firmware && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/xtensa-esp32s3-espidf/debug/matecrew-device" release/matecrew-{{version}}.bin
+    espflash save-image --chip esp32s3 --flash-mode dio --flash-freq 80mhz "$(cd firmware && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/xtensa-esp32s3-espidf/debug/matecrew-device" release/matecrew-{{version}}.bin
 
 # Publish that image on the local copy of production (scripts/dev-prod-copy.sh): terminals install it at their next sync.
 publish:

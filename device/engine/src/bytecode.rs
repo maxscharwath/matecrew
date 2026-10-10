@@ -257,23 +257,6 @@ impl<'a> Reader<'a> {
                     children: self.children(depth)?,
                 }
             }
-            1 | 2 => {
-                let gap = self.u16()? as u32;
-                let children = self.children(depth)?;
-                if kind == 1 {
-                    Node::Row {
-                        rect,
-                        gap,
-                        children,
-                    }
-                } else {
-                    Node::Column {
-                        rect,
-                        gap,
-                        children,
-                    }
-                }
-            }
             3 | 20 => Node::Panel {
                 rect,
                 inverted: self.flag()?,

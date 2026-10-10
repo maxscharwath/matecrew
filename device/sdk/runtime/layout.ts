@@ -54,13 +54,17 @@ export type LayoutProps = {
   justify?: Justify;
 };
 
+/** Top, right, bottom and left: one value for all four, or vertical and horizontal pairs. */
+function sidesOf(p: Padding): [number, number, number, number] {
+  if (typeof p === "number") return [p, p, p, p];
+  return p.length === 2 ? [p[0], p[1], p[0], p[1]] : p;
+}
+
 /** The layout these props describe, or none when no layout prop is given. */
 export function layoutOf(props: LayoutProps): Layout | undefined {
   const { direction, gap, padding, align, justify } = props;
   if ([direction, gap, padding, align, justify].every((v) => v === undefined)) return undefined;
-  const p = padding ?? 0;
-  const sides: [number, number, number, number] =
-    typeof p === "number" ? [p, p, p, p] : p.length === 2 ? [p[0], p[1], p[0], p[1]] : p;
+  const sides = sidesOf(padding ?? 0);
   return {
     direction: direction ?? "column",
     align: align ?? "stretch",

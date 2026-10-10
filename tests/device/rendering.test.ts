@@ -7,6 +7,7 @@ import { DeviceWasm } from "../../src/lib/device/virtual/wasm";
 import { VirtualDevice } from "../../src/lib/device/virtual/runtime";
 import definition from "../../device/fixtures/dashboard.json";
 import { compileScreen, encodeScene } from "@matecrew/device-ui/compiler";
+import { Cache, Keep, key, localStorageBackend } from "@matecrew/device-ui/cache";
 import hello from "../../device/apps/hello";
 import kitDemo from "./fixtures/kit-demo";
 
@@ -29,16 +30,15 @@ function state() {
   return deviceState.parse({
     device: { id: "test", name: "Terminal" },
     office: { name: "Lausanne", timezone: "Europe/Zurich", locale: "fr" },
-    keys: {
-      left: { action: "TAKE", itemId: "i1", label: "Prendre" },
-      right: { action: "RETURN", itemId: null, label: "Ma conso" },
-    },
+    keys: { left: { label: "Prendre" }, right: { label: "Mon compte" } },
     items: definition.items.map((i, n) => ({ ...i, id: `i${n + 1}` })),
     badges: [],
     syncTimes: [],
     serverTime: "2026-10-09T18:25:00Z",
     firmware: null,
     screen: definition,
+    appUrl: null,
+    theme: "paper",
   });
 }
 
@@ -93,7 +93,6 @@ async function setup(offline = false, compiled: boolean | "kit" = false) {
         officeName: "Lausanne",
         queue: [],
         unknownBadges: [],
-        state: state(),
       }),
     ],
   ]);
@@ -104,6 +103,8 @@ async function setup(offline = false, compiled: boolean | "kit" = false) {
       setItem: (key: string, value: string) => values.set(key, value),
     },
   });
+  // The last state, cached as the runtime keeps it (`CACHED.state`, under the device's key).
+  Cache.open(localStorageBackend({ prefix: "test:" })).put(key("state").keep(Keep.forever).maxBytes(96 * 1024), state());
   return { wasm: await DeviceWasm.load(), paths };
 }
 async function waitForPhase(phase: string) {
@@ -128,11 +129,6 @@ test("JSON definitions render and update in the shipped Rust/Wasm engine", async
     wasm.render({ type: "main", state: state(), offline: false }),
     bits,
   );
-  const legacy = state();
-  Reflect.deleteProperty(legacy, "screen");
-  const fallback = wasm.render({ type: "main", state: legacy, offline: false });
-  assert(fallback.some((byte) => byte !== 0));
-  assert.notDeepEqual(fallback, bits);
 });
 
 test("virtual sync draws state locally without requesting a server frame", async () => {

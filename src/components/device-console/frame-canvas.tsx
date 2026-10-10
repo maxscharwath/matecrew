@@ -13,12 +13,12 @@ export function FrameCanvas({
   refreshes = 0,
   full = false,
   className,
-}: {
+}: Readonly<{
   bits: Uint8Array | null;
   refreshes?: number;
   full?: boolean;
   className?: string;
-}) {
+}>) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
@@ -36,7 +36,7 @@ export function FrameCanvas({
 }
 
 /** A terminal's last uploaded screen, small: the device list's tile. Paper until it loads. */
-export function FrameThumbnail({ url }: { url: string }) {
+export function FrameThumbnail({ url }: Readonly<{ url: string }>) {
   const [bits, setBits] = useState<Uint8Array | null>(null);
   useEffect(() => {
     const controller = new AbortController();

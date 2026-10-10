@@ -8,7 +8,7 @@ function signedInTarget(redirectTo: string | undefined): string {
   return redirectTo?.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
 }
 
-export default async function SignUpPage({ searchParams }: { searchParams: Promise<{ redirectTo?: string }> }) {
+export default async function SignUpPage({ searchParams }: Readonly<{ searchParams: Promise<{ redirectTo?: string }> }>) {
   const { redirectTo } = await searchParams;
   if (await getOptionalSession()) redirect(signedInTarget(redirectTo));
   if (!isPasswordAuthEnabled()) {

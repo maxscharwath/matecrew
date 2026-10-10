@@ -3,19 +3,22 @@ use crate::{
     contract::Side,
     flow::{Beep, Event},
 };
-pub use device_board::{BUZZER_GPIO, CHORD_MS, KEY_LEFT_GPIO, KEY_POLL_MS, KEY_RIGHT_GPIO};
+pub use device_board::{BUZZER_GPIO, CHORD_MS, KEY_LEFT_GPIO, KEY_POLL_MS, KEY_RIGHT_GPIO, LONG_MS};
 
-/// The board's key reader: presses as flow events, both keys together as `BothKeys`.
+/// The board's key reader: presses as flow events, a key held long as `LongKey`, both keys
+/// together as `BothKeys`.
 #[derive(Default)]
 pub struct TouchKeys(device_board::Presses);
 impl TouchKeys {
     /// Active high with pull-down, sampled every `KEY_POLL_MS` with the time in milliseconds.
-    /// A lone key comes out `CHORD_MS` after it rose, unless the other one joins it.
+    /// A key comes out when it is released, or as a long press once held `LONG_MS`.
     pub fn sample(&mut self, left: bool, right: bool, now_ms: u64) -> Option<Event> {
         self.0.sample(left, right, now_ms).map(|press| match press {
             device_board::Press::Left => Event::Key { side: Side::Left },
             device_board::Press::Right => Event::Key { side: Side::Right },
             device_board::Press::Both => Event::BothKeys,
+            device_board::Press::LongLeft => Event::LongKey { side: Side::Left },
+            device_board::Press::LongRight => Event::LongKey { side: Side::Right },
         })
     }
 }
@@ -47,8 +50,10 @@ mod tests {
         let mut keys = TouchKeys::default();
         let left = Some(Event::Key { side: Side::Left });
         assert_eq!(keys.sample(true, false, 0), None);
-        assert_eq!(keys.sample(true, false, CHORD_MS), left);
-        assert_eq!(keys.sample(false, false, 1000), None);
+        assert_eq!(keys.sample(false, false, CHORD_MS), left);
+        assert_eq!(keys.sample(false, true, 500), None);
+        assert_eq!(keys.sample(false, true, 500 + LONG_MS), Some(Event::LongKey { side: Side::Right }));
+        assert_eq!(keys.sample(false, false, 1600), None);
         assert_eq!(keys.sample(false, true, 2000), None);
         assert_eq!(keys.sample(true, true, 2040), Some(Event::BothKeys));
         assert_eq!(keys.sample(false, false, 3000), None);

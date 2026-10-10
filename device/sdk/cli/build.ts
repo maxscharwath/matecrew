@@ -5,14 +5,11 @@ import { appNames, compileApp, loadProject, type Artifact, type Output } from ".
 
 export async function build(args: string[]): Promise<void> {
   const project = await loadProject();
-  const artifacts: Artifact[] = [];
-  const outputs: Output[] = [];
-  for (const name of appNames(project, args)) {
-    const result = await compileApp(project, name);
-    artifacts.push(...result.artifacts);
-    outputs.push(...result.outputs);
-  }
-  for (const output of outputs) await writeIfChanged(output.path, output.data);
+  // Every app compiles before anything is written, so a failure never leaves a partial build.
+  const results = await Promise.all(appNames(project, args).map((name) => compileApp(project, name)));
+  const artifacts: Artifact[] = results.flatMap((result) => result.artifacts);
+  const outputs: Output[] = results.flatMap((result) => result.outputs);
+  await Promise.all(outputs.map((output) => writeIfChanged(output.path, output.data)));
   report(project.root, artifacts);
 }
 
@@ -27,18 +24,13 @@ export function report(root: string, artifacts: Artifact[]): void {
   const widths = rows[0]?.map((_, column) =>
     Math.max(...rows.map((row) => row[column].length)),
   );
+  // Sizes align right, the path (last column) runs free, the rest align left.
+  const pad = (cell: string, column: number, last: boolean) => {
+    if (column >= 1 && column <= 3) return cell.padStart(widths![column]);
+    return last ? cell : cell.padEnd(widths![column]);
+  };
   for (const row of rows)
-    console.log(
-      row
-        .map((cell, column) =>
-          column >= 1 && column <= 3
-            ? cell.padStart(widths![column])
-            : column === row.length - 1
-              ? cell
-              : cell.padEnd(widths![column]),
-        )
-        .join("  "),
-    );
+    console.log(row.map((cell, column) => pad(cell, column, column === row.length - 1)).join("  "));
   const total = artifacts.reduce((sum, artifact) => sum + artifact.bytes.length, 0);
   const raw = artifacts.reduce((sum, artifact) => sum + artifact.raw, 0);
   console.log(`${artifacts.length} scenes, ${total} bytes (${raw} uncompressed, -${Math.round((1 - total / raw) * 100)} %)`);

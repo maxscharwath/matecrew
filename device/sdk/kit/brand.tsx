@@ -64,7 +64,7 @@ export const OwtLogo = createArt(
 );
 
 /** Mark and name, side by side; `size` is the mark's side. */
-export function Logo({ size = 48, style = "title" }: { size?: number; style?: TypeName }): Element {
+export function Logo({ size = 48, style = "title" }: Readonly<{ size?: number; style?: TypeName }>): Element {
   return (
     <HStack gap={Math.round(size / 4)} align="center">
       <MateCrewMark size={size} />

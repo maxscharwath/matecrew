@@ -8,6 +8,7 @@ import { getTodayDate } from "@/lib/date";
 import { checkAndAlertLowStock } from "@/lib/stock-alerts";
 import { resolveItemId } from "@/lib/items";
 import { stockDeltaOps } from "@/lib/stock";
+import { cancelConsumptionEntry } from "@/lib/cancel-consumption";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -70,36 +71,21 @@ export async function cancelConsumption(
   const { session } = await requireMembership(officeId);
   const t = await getTranslations();
 
-  const entry = await prisma.consumptionEntry.findUnique({
-    where: { id: consumptionEntryId },
+  const outcome = await cancelConsumptionEntry({
+    officeId,
+    userId: session.user.id,
+    entryId: consumptionEntryId,
+    note: "Consumption cancelled by user",
   });
-
-  if (entry?.officeId !== officeId) {
+  if (outcome === "not_found") {
     return { success: false, error: t("errors.consumptionNotFound") };
   }
-
-  if (entry.userId !== session.user.id) {
+  if (outcome === "not_yours") {
     return { success: false, error: t("errors.notYourConsumption") };
   }
-
-  if (entry.cancelledAt) {
+  if (outcome === "already_cancelled") {
     return { success: false, error: t("errors.alreadyCancelled") };
   }
-
-  await prisma.$transaction([
-    prisma.consumptionEntry.update({
-      where: { id: consumptionEntryId },
-      data: { cancelledAt: new Date() },
-    }),
-    ...stockDeltaOps({
-      officeId,
-      itemId: entry.itemId,
-      delta: entry.qty,
-      reason: "UNSERVED",
-      note: "Consumption cancelled by user",
-      userId: session.user.id,
-    }),
-  ]);
 
   revalidatePath(`/org/${officeId}/dashboard`);
   revalidatePath(`/org/${officeId}/request`);

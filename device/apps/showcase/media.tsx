@@ -66,7 +66,7 @@ export function Media() {
       <QrCode value={url} size={208}>Arrondi + logo</QrCode>
       <VStack gap={16}>
         {(["dots", "square"] as const).map((style) => (
-          <HStack gap={12}>
+          <HStack key={style} gap={12}>
             <QrCode value={url} size={124} style={style} logo={null} />
             <Small>{style === "dots" ? "Points" : "Carré"}</Small>
           </HStack>

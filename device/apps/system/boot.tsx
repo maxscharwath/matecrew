@@ -28,7 +28,7 @@ import { messages } from "./messages";
 const LINES = 5;
 
 /** One line of the log: what the terminal does, and how it went, in the office's language. */
-function Line({ index }: { index: number }) {
+function Line({ index }: Readonly<{ index: number }>) {
   const t = useI18n(messages);
   const at = (field: string) => bind(`boot.lines.${index}.${field}`, "");
   const param = (name: string) =>
@@ -104,7 +104,7 @@ export default function BootScreen() {
       <Progress value={bind("boot.progress", 0)} width={440} height={12} />
       <VStack gap={8} width={440}>
         {Array.from({ length: LINES }, (_, index) => (
-          <Line index={index} />
+          <Line key={index} index={index} />
         ))}
       </VStack>
       <Label align="center">{bind("boot.step", "")}</Label>

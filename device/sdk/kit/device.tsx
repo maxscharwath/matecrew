@@ -7,14 +7,15 @@
  *     <Main>…</Main>
  *     <Keys reader>
  *       <Key side="left" primary onPress={take}>Prendre</Key>
- *       <Key side="right" onPress={mine}>Ma conso</Key>
+ *       <Key side="right" onPress={mine}>Mon compte</Key>
  *     </Keys>
  *   </Screen>
  */
 import { Button as Pressable, Group, HStack, Image, Show, Stack, VStack, bind, type Children, type Content, type Handler, type TextChildren } from "../runtime/jsx-runtime";
 import type { Element, Node } from "../runtime/types";
 import type { LayoutProps } from "../runtime/layout";
-import { ArrowDownIcon, ArrowDownUpIcon, NfcIcon } from "../icons/lucide";
+import { and, not } from "../runtime/expr";
+import { ArrowDownIcon, ArrowDownUpIcon, ArrowUpIcon, BluetoothConnectedIcon, BluetoothIcon, NfcIcon } from "../icons/lucide";
 import { KEYS, MARGIN, SCREEN, STATUS, TABS } from "./tokens";
 import { Overlay, Separator, Surface } from "./surface";
 import { Label, Large, Muted, inline } from "./typography";
@@ -28,13 +29,13 @@ export function StatusBar({
   leading,
   trailing,
   status = true,
-}: {
+}: Readonly<{
   children?: TextChildren;
   /** Before the title, such as a mark. */
   leading?: Children;
   trailing?: Children;
   status?: boolean;
-}): Element {
+}>): Element {
   return (
     <VStack padding={[0, MARGIN]} height={STATUS} width="fill">
       <HStack gap={16} align="center" height="fill" width="fill">
@@ -42,11 +43,26 @@ export function StatusBar({
         <Large lines={1} width="fill">{children}</Large>
         {trailing ?? (status ? (
           <HStack gap={10} align="center">
-            {/* While the terminal talks to the site (`$device.net.busy`, set around a sync). */}
-            <Show when={bind("$device.net.busy", false)}>
+            {/* The terminal's exchanges (`$device.net`): up while it sends, down while it
+                receives, both for a round trip, a few seconds after each. */}
+            <Show when={and(bind("$device.net.up", false), not(bind("$device.net.down", false)))}>
+              <ArrowUpIcon size={22} />
+            </Show>
+            <Show when={and(bind("$device.net.down", false), not(bind("$device.net.up", false)))}>
+              <ArrowDownIcon size={22} />
+            </Show>
+            <Show when={and(bind("$device.net.up", false), bind("$device.net.down", false))}>
               <ArrowDownUpIcon size={22} />
             </Show>
             <Large>{bind("$device.clock", "--:--")}</Large>
+            {/* A computer or phone linked over Bluetooth (`$device.ble`): paired with the code, or
+                only connected. */}
+            <Show when={bind("$device.ble.paired", false)}>
+              <BluetoothConnectedIcon size={22} />
+            </Show>
+            <Show when={and(bind("$device.ble.connected", false), not(bind("$device.ble.paired", false)))}>
+              <BluetoothIcon size={22} />
+            </Show>
             <Image width={24} height={24} sourceWidth={24} sourceHeight={24} value={bind("$device.status.wifi", [])} />
             <Image width={24} height={24} sourceWidth={24} sourceHeight={24} value={bind("$device.status.battery", [])} />
             <Muted>{bind("$device.status.batteryText", "--")}</Muted>
@@ -96,7 +112,7 @@ export function Key({ children, side, onPress, primary = false }: KeyProps): Ele
 }
 
 /** Where the badge goes: the reader sits under the middle of the panel. */
-export function ReaderHint({ children = "Badge" }: { children?: TextChildren }): Element {
+export function ReaderHint({ children = "Badge" }: Readonly<{ children?: TextChildren }>): Element {
   return (
     <VStack gap={4} align="center" padding={[2, 0, 0, 0]}>
       <NfcIcon size={28} />
@@ -109,7 +125,7 @@ export function ReaderHint({ children = "Badge" }: { children?: TextChildren }):
  * The two keys, each tab centred over its key (x 130 and 670), the reader hint between them.
  * A missing side keeps its place.
  */
-export function Keys({ children, reader = false }: { children?: Children; reader?: boolean | TextChildren }): Element {
+export function Keys({ children, reader = false }: Readonly<{ children?: Children; reader?: boolean | TextChildren }>): Element {
   const keys = [children].flat(Infinity as 1).filter(Boolean) as (Node & { [SIDE]?: string })[];
   const slot = (side: "left" | "right") => keys.find((k) => k[SIDE] === side) ?? <Group width={TAB} height={SCREEN.height - TABS} />;
   const inset = KEYS.left - TAB / 2;
@@ -126,7 +142,7 @@ export function Keys({ children, reader = false }: { children?: Children; reader
  * Run `onPress` when a badge is read. The host fires the `badge` input and puts the UID in
  * `$device.nfc.uid` first. Invisible; place it anywhere in the screen.
  */
-export function BadgeInput({ onPress }: { onPress: Handler }): Element {
+export function BadgeInput({ onPress }: Readonly<{ onPress: Handler }>): Element {
   return (
     <Overlay>
       <Pressable variant="ghost" input="badge" width={1} height={1} label="" onPress={onPress} />

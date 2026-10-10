@@ -18,7 +18,8 @@ export default async function BadgePage({ searchParams }: Props) {
   const session = await getOptionalSession();
   if (!session) {
     const query = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => typeof e[1] === "string"));
-    redirect(`/sign-in?redirectTo=${encodeURIComponent(`/badge?${query}`)}`);
+    const back = `/badge?${query}`;
+    redirect(`/sign-in?redirectTo=${encodeURIComponent(back)}`);
   }
   const t = await getTranslations("badgeClaim");
   const claim = await verifyClaim(params);

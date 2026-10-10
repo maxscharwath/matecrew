@@ -88,13 +88,13 @@ export async function dev(args: string[]): Promise<void> {
   let engineChanged = false;
   watch(project.root, { recursive: true }, (_, file) => {
     if (!file || IGNORED.test(file)) return;
-    const path = file.split("\\").join("/");
+    const path = file.replaceAll("\\", "/");
     if (RUST.test(path)) engineChanged = true;
     else if (!SOURCES.test(path)) return;
     clearTimeout(timer);
     timer = setTimeout(() => {
       const engine = engineChanged;
-      engineChanged = sourcesChanged = false;
+      engineChanged = false;
       void (engine ? rebuildEngine() : Promise.all(apps.map(rebuild)));
     }, 60);
   });

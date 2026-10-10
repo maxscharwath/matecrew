@@ -26,15 +26,32 @@ impl Session {
         })
     }
     /// Sample the key pins at `now_ms`, as the firmware does every `KEY_POLL_MS`: a key is the
-    /// matching hardware input once the other could no longer join it; both keys together
+    /// matching hardware input when it is released, or once held `LONG_MS`; both keys together
     /// belong to the host (the terminal's about page), so they come out as `emit("both")`.
     pub fn gpio(&mut self, left: bool, right: bool, now_ms: u64) -> Vec<Effect> {
         match self.keys.sample(left, right, now_ms) {
             Some(device_board::Press::Left) => self.runtime.input("left").unwrap_or_default(),
             Some(device_board::Press::Right) => self.runtime.input("right").unwrap_or_default(),
             Some(device_board::Press::Both) => vec![Effect::Emit { name: "both".into() }],
+            Some(device_board::Press::LongLeft) => self.held("left"),
+            Some(device_board::Press::LongRight) => self.held("right"),
             None => Vec::new(),
         }
+    }
+    /// A key held long: the app's `leftLong` / `rightLong` input where it has one, else the short
+    /// press with its own emit renamed, so a host can tell (the maté flow lists purchases on it).
+    fn held(&mut self, key: &str) -> Vec<Effect> {
+        let long = format!("{key}Long");
+        if let Some(effects) = self.runtime.input(&long) {
+            return effects;
+        }
+        let mut effects = self.runtime.input(key).unwrap_or_default();
+        for effect in &mut effects {
+            if matches!(effect, Effect::Emit { name } if name == key) {
+                *effect = Effect::Emit { name: long.clone() };
+            }
+        }
+        effects
     }
     /// Integer scale that fits the app on the panel, as the firmware fits it.
     pub fn scale(&self) -> u32 {

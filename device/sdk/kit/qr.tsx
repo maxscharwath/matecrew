@@ -18,14 +18,14 @@ export function QrCode({
   logo = OwtMark,
   style = "rounded",
   children,
-}: {
+}: Readonly<{
   value: unknown;
   size?: number;
   /** `null` for a plain code (more room for long payloads). */
   logo?: IconComponent | null;
   style?: "square" | "dots" | "rounded";
   children?: TextChildren;
-}): Element {
+}>): Element {
   const logoSize = Math.round(size / 7 / 4) * 4;
   return (
     <VStack gap={12} align="center">

@@ -18,7 +18,7 @@ const CONTENT_TYPES: Record<string, string> = {
  * (scripts/clone-prod-db.sh) without touching the real bucket.
  */
 export class LocalProvider implements StorageProvider {
-  private root = resolve(process.env.LOCAL_STORAGE_DIR ?? ".data/storage");
+  private readonly root = resolve(process.env.LOCAL_STORAGE_DIR ?? ".data/storage");
 
   /** The key's path, refusing anything that would land outside the root. */
   private path(key: string): string {

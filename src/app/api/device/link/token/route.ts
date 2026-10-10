@@ -59,7 +59,6 @@ export async function POST(request: Request) {
         tokenHash: sha256(token),
         linkedById: link.approvedById,
         leftItemId: defaultItem?.id ?? null,
-        rightItemId: defaultItem?.id ?? null,
       },
     });
   });

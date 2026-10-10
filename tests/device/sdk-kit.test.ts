@@ -49,7 +49,7 @@ test("TSX callbacks compile to buzzer effects emitted on every press", async () 
   assert.deepEqual(runtime.inputApp("left"), [
     { kind: "beep", tone: "success" },
   ]);
-  assert.equal(runtime.inputApp("right"), null);
+  assert.deepEqual(runtime.inputApp("right"), []);
 });
 
 test("bound web images decode in Rust/Wasm and restore without network", async () => {

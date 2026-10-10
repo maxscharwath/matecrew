@@ -5,7 +5,18 @@ import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Tabs as TabsPrimitive } from "radix-ui";
-import { ArrowLeft, History, Keyboard, Settings2, SquareTerminal } from "lucide-react";
+import {
+  ArrowLeft,
+  Bluetooth,
+  BluetoothConnected,
+  BluetoothSearching,
+  History,
+  Keyboard,
+  LoaderCircle,
+  Settings2,
+  SquareTerminal,
+} from "lucide-react";
+import type { RemoteCommand } from "@matecrew/device-ui/link";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +31,7 @@ import { StatusStrip } from "./status-strip";
 import { ConsoleMonitor, type MonitorLine } from "./console-monitor";
 import { BoardCard, ControlsCard } from "./console-controls";
 import { DeviceSettings, RecentTakes, type Take } from "./device-settings";
+import { useBleScreen, useBleTerminal, type BleTerminal } from "./ble-link";
 
 interface Props {
   readonly officeId: string;
@@ -52,6 +64,8 @@ const TAP_SCALE = PANEL_WIDTH / 200;
  * One terminal, like the SDK studio shows the emulated one: its panel
  * mirrored live and driven from here (keys, badge, taps), its state, a serial
  * monitor of what the console sent and saw, its board; then its takes and settings.
+ * Nearby, over Bluetooth, the panel comes straight from the terminal and the
+ * commands go straight to it; through the site otherwise.
  */
 export function DeviceConsole(props: Props) {
   return (
@@ -87,6 +101,25 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
     setEvents((current) => [{ id, at: Date.now(), kind, text }, ...current].slice(0, MAX_LINES));
   }, []);
 
+  // The terminal over Bluetooth, when connected from here: its screen, and a shorter way for commands.
+  const ble = useBleTerminal(device.hardwareId, {
+    connected: (name) => addEvent("link", t("log.bleConnected", { name })),
+    mismatch: (name) => {
+      toast.error(t("ble.mismatch", { name }));
+      addEvent("error", t("ble.mismatch", { name }));
+    },
+    failed: (error) => {
+      toast.error(t("ble.failed", { message: error.message }));
+      addEvent("error", t("ble.failed", { message: error.message }));
+    },
+    disconnected: () => addEvent("link", t("log.bleDisconnected")),
+  });
+  const { frame: bleFrame, error: bleError } = useBleScreen(ble.device);
+  const bleLive = bleFrame !== null;
+  useEffect(() => {
+    if (bleError && bleError.code !== "disconnected") addEvent("error", t("ble.screenFailed", { message: bleError.message }));
+  }, [bleError, addEvent, t]);
+
   // Relative times tick with the page.
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 1000);
@@ -94,11 +127,12 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
   }, []);
 
   // Poll /live while the page is visible: it records that someone watches, so
-  // the terminal stays awake, takes commands at once and uploads its screen.
+  // the terminal stays awake, takes commands at once and uploads its screen;
+  // not the screen while it comes over Bluetooth.
   const failing = useRef(false);
   const poll = useCallback(async () => {
     try {
-      const response = await fetch(`${base}/live`, { cache: "no-store" });
+      const response = await fetch(`${base}/live${bleLive ? "?watch=0" : ""}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const next = (await response.json()) as LiveStatus;
       setLive(next);
@@ -113,7 +147,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
         addEvent("error", t("log.pollFailed", { error: error instanceof Error ? error.message : String(error) }));
       }
     }
-  }, [base, addEvent, t]);
+  }, [base, bleLive, addEvent, t]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
@@ -146,43 +180,56 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
       addEvent("system", t("log.firmware", { version: live.firmwareVersion }));
   }, [live, addEvent, t]);
 
-  // Fetch the frame whenever the terminal uploaded a new one; one request at a time.
+  // Shows a frame from either way, and how the panel went from the one before.
   const shown = useRef<MirrorFrame | null>(null);
+  const shownVia = useRef<Mirror["via"]>("wifi");
+  const busyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const present = useCallback(
+    (frame: MirrorFrame, via: Mirror["via"]) => {
+      const previous = shown.current;
+      // A slower answer must not replace a newer frame; the two ways' clocks are not compared.
+      if (previous && via === "wifi" && shownVia.current === "wifi" && previous.drawnAt > frame.drawnAt) return;
+      if (via === "bluetooth" && shownVia.current !== "bluetooth") addEvent("link", t("log.bleScreen"));
+      shown.current = frame;
+      shownVia.current = via;
+      if (previous?.hash === frame.hash) return;
+      const change = previous ? compareFrames(previous.bits, frame.bits) : null;
+      setMirror({ frame, change: change && { ...change, at: Date.now() }, via });
+      if (!previous) {
+        addEvent("screen", t("log.firstFrame", { when: format.relativeTime(new Date(frame.drawnAt), new Date()) }));
+        return;
+      }
+      if (!change) return;
+      const { box, percent, passes } = change;
+      addEvent("screen", t("log.refresh", { width: box.width, height: box.height, x: box.x, y: box.y, percent, passes }));
+      busyTimers.current.forEach(clearTimeout);
+      setBusy({ passes, spi: true });
+      busyTimers.current = [
+        setTimeout(() => setBusy((current) => current && { ...current, spi: false }), SPI_MS),
+        setTimeout(() => setBusy(null), passes * PASS_MS),
+      ];
+    },
+    [addEvent, t, format],
+  );
+
+  // Over Bluetooth, each screen as it comes.
+  useEffect(() => {
+    if (bleFrame) present(bleFrame, "bluetooth");
+  }, [bleFrame, present]);
+
+  // Otherwise fetch the frame whenever the terminal uploaded a new one; one request at a time.
   const fetching = useRef<AbortController | null>(null);
   const failedHash = useRef<string | null>(null);
-  const busyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [fetched, setFetched] = useState(0);
   const wanted = live.frame?.hash ?? null;
   useEffect(() => {
-    if (!wanted || shown.current?.hash === wanted || fetching.current || failedHash.current === wanted) return;
+    if (bleLive || !wanted || shown.current?.hash === wanted || fetching.current || failedHash.current === wanted) return;
     const controller = new AbortController();
     fetching.current = controller;
     fetchFrame(`${base}/frame?h=${encodeURIComponent(wanted)}`, controller.signal)
       .then((frame) => {
         failedHash.current = null;
-        const previous = shown.current;
-        // A slower answer must not replace a newer frame.
-        if (previous && previous.drawnAt > frame.drawnAt) return;
-        shown.current = frame;
-        if (previous?.hash === frame.hash) return;
-        const change = previous ? compareFrames(previous.bits, frame.bits) : null;
-        setMirror({ frame, change: change && { ...change, at: Date.now() } });
-        if (!previous) {
-          addEvent("screen", t("log.firstFrame", { when: format.relativeTime(new Date(frame.drawnAt), new Date()) }));
-          return;
-        }
-        if (!change) return;
-        const { box, percent, passes } = change;
-        addEvent(
-          "screen",
-          t("log.refresh", { width: box.width, height: box.height, x: box.x, y: box.y, percent, passes }),
-        );
-        busyTimers.current.forEach(clearTimeout);
-        setBusy({ passes, spi: true });
-        busyTimers.current = [
-          setTimeout(() => setBusy((current) => current && { ...current, spi: false }), SPI_MS),
-          setTimeout(() => setBusy(null), passes * PASS_MS),
-        ];
+        present(frame, "wifi");
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -194,7 +241,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
         // The terminal may have uploaded another frame meanwhile: look again.
         setFetched((count) => count + 1);
       });
-  }, [wanted, fetched, base, addEvent, t, format]);
+  }, [wanted, fetched, bleLive, base, present, addEvent, t]);
   useEffect(
     () => () => {
       fetching.current?.abort();
@@ -203,14 +250,30 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
     [],
   );
 
-  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const send = useCallback(
-    (command: ConsoleCommand) => {
-      if (command.kind === "key" || command.kind === "badge") {
-        setPressed(command.kind === "key" ? command.side : "badge");
-        clearTimeout(flashTimer.current);
-        flashTimer.current = setTimeout(() => setPressed(null), FLASH_MS);
+  const describeSent = useCallback(
+    (command: ConsoleCommand): string => {
+      switch (command.kind) {
+        case "key":
+          return command.side === "right" ? t("kind.keyRight") : t("kind.keyLeft");
+        case "both":
+          return t("kind.both");
+        case "badge":
+          return t("kind.badge", { uid: command.uid });
+        case "tap":
+          return t("kind.tap", { x: command.x * TAP_SCALE, y: command.y * TAP_SCALE });
+        case "sync":
+          return t("kind.sync");
+        case "restart":
+          return t("kind.restart");
+        case "forgetWifi":
+          return t("kind.forgetWifi");
       }
+    },
+    [t],
+  );
+
+  const sendViaSite = useCallback(
+    (command: ConsoleCommand) => {
       sendDeviceCommand(officeId, device.id, command)
         .then((result) => {
           if (!result.success) {
@@ -227,6 +290,31 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
         });
     },
     [officeId, device.id, addEvent, t],
+  );
+
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const send = useCallback(
+    (command: ConsoleCommand) => {
+      if (command.kind === "key" || command.kind === "badge") {
+        setPressed(command.kind === "key" ? command.side : "badge");
+        clearTimeout(flashTimer.current);
+        flashTimer.current = setTimeout(() => setPressed(null), FLASH_MS);
+      }
+      // Paired over Bluetooth (its screen comes): straight to the terminal, else through the site.
+      const remote = bleLive ? toRemote(command) : null;
+      const target = ble.device;
+      if (!remote || !target) return sendViaSite(command);
+      void target.send(remote).then((sent) => {
+        if (sent.ok) {
+          const kind = command.kind === "key" || command.kind === "badge" || command.kind === "tap" ? "input" : "system";
+          addEvent(kind, t("log.viaBluetooth", { what: describeSent(command) }));
+          return;
+        }
+        addEvent("error", t("ble.sendFailed", { message: sent.error.message }));
+        sendViaSite(command);
+      });
+    },
+    [bleLive, ble.device, sendViaSite, describeSent, addEvent, t],
   );
 
   const shortcuts = useMemo(
@@ -298,6 +386,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
             <span className={cn("size-1.5 rounded-full", live.reachable ? "bg-emerald-500" : "bg-zinc-400")} />
             {live.reachable ? t("live") : t("offline")}
           </Badge>
+          {ble.supported && <BleButton ble={ble} live={bleLive} />}
           {waiting > 0 && <Badge variant="secondary">{t("waiting", { count: waiting })}</Badge>}
           <TabsPrimitive.List className="inline-flex h-9 w-fit items-center rounded-lg bg-muted p-[3px] text-muted-foreground sm:ml-auto">
             <TabTrigger value="console" icon={<SquareTerminal />} label={t("tabs.console")} />
@@ -329,7 +418,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
                   busy={busy?.passes ?? null}
                   mirror={mirror}
                   preview={preview}
-                  reachable={live.reachable}
+                  reachable={live.reachable || bleLive}
                   relative={(iso) => format.relativeTime(new Date(iso), now)}
                   onHidePreview={() => setPreview(false)}
                 />
@@ -337,7 +426,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
               screen={
                 <MirrorScreen
                   mirror={mirror}
-                  reachable={live.reachable}
+                  reachable={live.reachable || bleLive}
                   preview={preview}
                   previewUrl={`${base}/screen`}
                   onPreview={() => setPreview(true)}
@@ -362,7 +451,7 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
           <div className="space-y-4 @3xl:col-start-2 @3xl:row-start-2 @min-[75rem]:row-span-2 @min-[75rem]:row-start-1">
             <ControlsCard
               deviceName={device.name}
-              reachable={live.reachable}
+              reachable={live.reachable || bleLive}
               onKey={(side) => send({ kind: "key", side })}
               onBoth={() => send({ kind: "both" })}
               onBadge={(uid) => send({ kind: "badge", uid })}
@@ -390,17 +479,55 @@ function Console({ officeId, device, items, badges, takes, initial, renderedAt, 
   );
 }
 
+/** The console's commands as `@matecrew/device-link` sends them; null for those only the site relays. */
+function toRemote(command: ConsoleCommand): RemoteCommand | null {
+  switch (command.kind) {
+    case "key":
+      return { cmd: "key", side: command.side };
+    case "both":
+      return { cmd: "both" };
+    case "badge":
+      return { cmd: "badge", uid: command.uid };
+    case "tap":
+      return { cmd: "tap", x: command.x, y: command.y };
+    case "sync":
+      return command.app ? null : { cmd: "sync" };
+    case "restart":
+      return { cmd: "restart" };
+    case "forgetWifi":
+      return null;
+  }
+}
+
+/** Connects to this terminal over Bluetooth, then says how it goes; a click lets it go. */
+function BleButton({ ble, live }: Readonly<{ ble: BleTerminal; live: boolean }>) {
+  const t = useTranslations("devices.console.ble");
+  if (!ble.device)
+    return (
+      <Button variant="outline" size="xs" disabled={ble.connecting} onClick={ble.connect} title={t("connectHint")}>
+        {ble.connecting ? <LoaderCircle className="animate-spin" /> : <Bluetooth />}
+        {t("connect")}
+      </Button>
+    );
+  return (
+    <Button variant="outline" size="xs" onClick={ble.disconnect} title={t("disconnect")}>
+      {live ? <BluetoothConnected className="text-sky-600" /> : <BluetoothSearching className="animate-pulse" />}
+      {live ? t("live") : t("pairing")}
+    </Button>
+  );
+}
+
 function TabTrigger({
   value,
   icon,
   label,
   count,
-}: {
+}: Readonly<{
   value: string;
   icon: ReactNode;
   label: string;
   count?: number;
-}) {
+}>) {
   return (
     <TabsPrimitive.Trigger
       value={value}
@@ -421,14 +548,14 @@ function Indicator({
   reachable,
   relative,
   onHidePreview,
-}: {
+}: Readonly<{
   busy: number | null;
   mirror: Mirror | null;
   preview: boolean;
   reachable: boolean;
   relative: (iso: string) => string;
   onHidePreview: () => void;
-}) {
+}>) {
   const t = useTranslations("devices.console.indicator");
   const text = "text-[10px] font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-400";
   if (busy !== null)
@@ -451,9 +578,12 @@ function Indicator({
       </>
     );
   if (!mirror) return null;
+  const when = relative(mirror.frame.drawnAt);
+  let source: "bluetooth" | "mirror" | "last" = reachable ? "mirror" : "last";
+  if (mirror.via === "bluetooth") source = "bluetooth";
   return (
     <span className={text} suppressHydrationWarning>
-      {reachable ? t("mirror", { when: relative(mirror.frame.drawnAt) }) : t("last", { when: relative(mirror.frame.drawnAt) })}
+      {t(source, { when })}
     </span>
   );
 }

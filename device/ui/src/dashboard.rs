@@ -1,49 +1,14 @@
 //! Data adaptation only. Dashboard layouts live in screens/terminal.tsx.
 use super::*;
-use matecrew_core::contract::{DeviceScreen, DeviceState, ScreenItem};
+use matecrew_core::contract::{DeviceScreen, DeviceState};
 pub fn state_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     state: &DeviceState,
     offline: bool,
 ) -> Result<(), D::Error> {
-    set_theme(Theme::from_name(
-        state.theme.as_deref().unwrap_or("paper"),
-    ));
+    set_theme(Theme::from_name(&state.theme));
     set_locale(&state.office.locale);
-    let fallback;
-    let data = if let Some(data) = state.screen.as_ref().filter(|s| s.supported()) {
-        data
-    } else {
-        fallback = DeviceScreen {
-            version: 1,
-            template: "dashboard".into(),
-            office_name: state.office.name.clone(),
-            time: String::new(),
-            wifi_bars: None,
-            battery_percent: None,
-            battery_low_label: None,
-            items: state
-                .items
-                .iter()
-                .map(|i| ScreenItem {
-                    name: i.name.clone(),
-                    stock: i.stock,
-                    low: i.stock <= 0,
-                    image: i.image.clone(),
-                    picture: i.picture.clone(),
-                })
-                .collect(),
-            chart: None,
-            preparation: None,
-            low_label: "Stock bas".into(),
-            more_label: "autres".into(),
-            chart_label: String::new(),
-            left_label: state.keys.left.label.clone(),
-            right_label: state.keys.right.label.clone(),
-        };
-        &fallback
-    };
-    dashboard_screen(d, data, offline)
+    dashboard_screen(d, &state.screen, offline)
 }
 
 pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -51,13 +16,6 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
     data: &DeviceScreen,
     offline: bool,
 ) -> Result<(), D::Error> {
-    if !data.supported() {
-        return error_screen(
-            d,
-            "Écran incompatible",
-            "Mets à jour le firmware du terminal.",
-        );
-    }
     let mut value = serde_json::to_value(data).expect("screen API data");
     value["title"] = json!(if offline {
         "Hors ligne · prises gardées"
@@ -80,15 +38,10 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
         String::new()
     });
     value["moreCount"] = json!(data.items.len().saturating_sub(6));
-    for item in value["items"].as_array_mut().unwrap() {
+    for (item, data) in value["items"].as_array_mut().unwrap().iter_mut().zip(&data.items) {
         item["visible"] = json!(true);
-        let small = decode_base64(item["image"].as_str().unwrap_or("")).unwrap_or_default();
-        // 96 x 96 when the site sends it, shown as drawn or at half (`picture`).
-        let raw = decode_base64(item["picture"].as_str().unwrap_or(""))
-            .filter(|bits| !bits.is_empty())
-            .unwrap_or_else(|| small.clone());
-        let (full, half) = crate::picture::pictures(&raw);
-        item["bits"] = json!(small);
+        // Shown as drawn or at half (`picture`).
+        let (full, half) = crate::picture::pictures(&decode_base64(&data.picture).unwrap_or_default());
         item["picture"] = json!(full);
         item["picture48"] = json!(half);
     }
@@ -102,10 +55,7 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
                 "count":i.count,
                 "name":i.name,
                 "names":i.names,
-                "bits":decode_base64(&i.image).unwrap_or_default(),
-                "picture48":crate::picture::pictures(
-                    &decode_base64(if i.picture.is_empty() { &i.image } else { &i.picture }).unwrap_or_default()
-                ).1,
+                "picture48":crate::picture::pictures(&decode_base64(&i.picture).unwrap_or_default()).1,
                 "visible":true
             }))
             .collect::<Vec<_>>());
@@ -134,6 +84,7 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use matecrew_core::contract::ScreenItem;
     fn data() -> DeviceScreen {
         serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap()
     }
@@ -160,7 +111,6 @@ mod tests {
                 name: "Très long nom 漢字 ".repeat(20),
                 stock: i64::MIN,
                 low: true,
-                image: "invalid".into(),
                 picture: "invalid".into(),
             })
             .collect();
@@ -178,19 +128,5 @@ mod tests {
         data.items.clear();
         dashboard_screen(&mut reused, &data, false).unwrap();
         assert_eq!(reused.bits, draw(&data, false).bits);
-    }
-    #[test]
-    fn unsupported_definition_has_a_local_error_screen() {
-        let mut data = data();
-        data.version = 2;
-        let actual = draw(&data, false);
-        let mut expected = Frame::new();
-        error_screen(
-            &mut expected,
-            "Écran incompatible",
-            "Mets à jour le firmware du terminal.",
-        )
-        .unwrap();
-        assert_eq!(actual.bits, expected.bits);
     }
 }

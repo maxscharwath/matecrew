@@ -10,60 +10,45 @@ import {
   H1,
   Lead,
   Num,
-  Muted,
   Badge,
-  Card,
-  BarChart,
-  Bar,
-  Panel,
-  Show,
-  Surface,
-  concat,
-  and,
-  eq,
-  lt,
-  ne,
-  Stat,
-  StatLabel,
-  StatValue,
+  cond,
+  or,
   Empty,
   EmptyMedia,
   EmptyTitle,
   EmptyDescription,
-  type TextChildren,
 } from "@matecrew/device-ui";
-import { CircleCheckBigIcon, ClockIcon, DoorOpenIcon, GlobeIcon } from "@matecrew/device-ui/icons/lucide";
+import { CircleCheckBigIcon, ClockIcon, DoorOpenIcon } from "@matecrew/device-ui/icons/lucide";
 import { BadgeOverReader } from "../art";
-import { Frame, Picture, useT, view } from "./shared";
+import { Frame, PageDots, Picture, useT, view } from "./shared";
 
-/** After a key: the badge goes on the reader, right under the middle of the screen. */
+/**
+ * After a key: the badge goes on the reader, right under the middle of the screen. With
+ * `account`, the right key: the badge whose account to show (`account.tsx`); with `purchases`,
+ * it was held: the badge whose purchases to list (`purchases.tsx`).
+ */
 export function badge() {
   const t = useT();
+  const account = view("account", false);
+  const purchases = view("purchases", false);
+  const mine = or(account, purchases);
   return (
-    <Frame title={view("title")} keys reader align="center" justify="center" gap={8}>
+    <Frame
+      title={cond(purchases, t("purchases.title"), cond(account, t("account.title"), view("title")))}
+      left={cond(mine, t("account.dismiss"), view("left"))}
+      right={cond(mine, t("account.dismiss"), view("right"))}
+      keys
+      reader
+      align="center"
+      justify="center"
+      gap={8}
+    >
       <BadgeOverReader width={240} height={200} />
       <H1 align="center">{t("badge.heading")}</H1>
-      <Lead align="center">{t("badge.hint")}</Lead>
+      <Lead align="center">{cond(purchases, t("purchases.badgeHint"), cond(account, t("account.badgeHint"), t("badge.hint")))}</Lead>
     </Frame>
   );
 }
-
-/** Dots shown at most; past them the "2/12" above says where the list is. */
-const DOTS = 8;
-
-/** Where the list is: one dot per item, the current one filled. */
-const Pages = () => (
-  <HStack gap={10} align="center">
-    {Array.from({ length: DOTS }, (_, i) => [
-      <Show when={eq(view("index", 0), i)}>
-        <Surface variant="ink" radius={7} width={28} height={14} />
-      </Show>,
-      <Show when={and(lt(i, view("count", 0)), ne(view("index", 0), i))}>
-        <Surface variant="outline" radius={7} width={14} height={14} />
-      </Show>,
-    ])}
-  </HStack>
-);
 
 /** Choose what to take; the left key steps through the items, the right one takes this one. */
 export function pick() {
@@ -82,7 +67,7 @@ export function pick() {
         </VStack>
       </HStack>
       <HStack justify="center" width="fill">
-        <Pages />
+        <PageDots index={view("index", 0)} count={view("count", 0)} />
       </HStack>
     </Frame>
   );
@@ -112,55 +97,6 @@ export function taken() {
         <H1 align="center">{t("taken.heading", { name: view("name") })}</H1>
         <Badge variant="secondary"><ClockIcon size={18} /> {t("taken.back")}</Badge>
       </Empty>
-    </Frame>
-  );
-}
-
-/** Stacked bar tones, bottom first, as the engine draws them (scene/charts.rs). */
-const STACK = [100, 50, 25, 12];
-
-/**
- * My consumption, read from across the room: today in ink, the week, the month and what it cost
- * (at the price the cans were bought), then the last seven days as bars.
- */
-export function summary() {
-  const t = useT();
-  const tile = (label: TextChildren, value: TextChildren, { ink = false, size = "lg" as "xs" | "lg", weight = 5 } = {}) => (
-    <Card variant={ink ? "ink" : "outline"} width={{ fill: weight }} height="fill" padding={[14, 12]}>
-      <Stat>
-        <StatLabel>{label}</StatLabel>
-        <StatValue size={size}>{value}</StatValue>
-      </Stat>
-    </Card>
-  );
-  return (
-    <Frame title={concat(t("summary.title"), " · ", view("name"))} gap={16}>
-      <HStack gap={16} align="stretch" height={124}>
-        {tile(t("summary.today"), view("today", 0), { ink: true })}
-        {tile(t("summary.week"), view("week", 0))}
-        {tile(t("summary.month"), view("month", 0))}
-        {tile(t("summary.cost"), view("cost", "--"), { size: "sm", weight: 6 })}
-      </HStack>
-      <Card variant="outline" width="fill" height="fill" padding={[12, 16]} gap={6}>
-        <HStack gap={16}>
-          <Label width="fill">{t("summary.days")}</Label>
-          {STACK.map((tone, p) => (
-            <Show when={view(`products.${p}`, "")}>
-              <HStack gap={6}>
-                <Panel width={14} height={14} radius={3} borderWidth={1} background="ink" opacity={tone} />
-                <Muted>{view(`products.${p}`)}</Muted>
-              </HStack>
-            </Show>
-          ))}
-        </HStack>
-        <BarChart data={view("days", [])} xKey="day" max={view("max", 4)} grid={false} legend={false} stacked>
-          {STACK.map((_, p) => <Bar dataKey={`p${p}`} />)}
-        </BarChart>
-      </Card>
-      <HStack gap={12}>
-        <GlobeIcon size={20} />
-        <Muted>{t("summary.more")}</Muted>
-      </HStack>
     </Frame>
   );
 }

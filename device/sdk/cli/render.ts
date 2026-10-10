@@ -13,22 +13,32 @@ export async function render(args: string[]): Promise<void> {
   const project = await loadProject();
   const out = resolve(options.out ?? join(project.root, "out"));
   const started = performance.now();
+  const { only, scale } = options;
+  const apps = await Promise.all(
+    appNames(project, options.apps).map(async (app) => {
+      const drawn = await drawApp(project, app, only ? (name) => name.includes(only) : undefined);
+      const dir = join(out, app);
+      if (drawn.length) await writeApp(dir, app, drawn, scale);
+      return { app, dir, drawn };
+    }),
+  );
   let count = 0;
-  for (const app of appNames(project, options.apps)) {
-    const drawn = await drawApp(project, app, (name) =>
-      options.only ? name.includes(options.only) : true,
-    );
+  for (const { app, dir, drawn } of apps) {
     if (!drawn.length) continue;
-    const dir = join(out, app);
-    await mkdir(dir, { recursive: true });
-    for (const { name, frame } of drawn)
-      await writeFile(join(dir, `${name}.png`), framePng(frame, { scale: options.scale }));
-    await writeFile(join(dir, "sheet.png"), await sheet(drawn));
-    await writeFile(join(dir, "index.html"), html(app, drawn));
     count += drawn.length;
     console.log(`${app}: ${drawn.length} previews → ${relative(process.cwd(), dir)}/`);
   }
   console.log(`${count} frames in ${Math.round(performance.now() - started)} ms`);
+}
+
+/** One app's previews as PNGs, its contact sheet and its HTML index. */
+async function writeApp(dir: string, app: string, drawn: Drawn[], scale: number): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await Promise.all([
+    ...drawn.map(({ name, frame }) => writeFile(join(dir, `${name}.png`), framePng(frame, { scale }))),
+    sheet(drawn).then((png) => writeFile(join(dir, "sheet.png"), png)),
+    writeFile(join(dir, "index.html"), html(app, drawn)),
+  ]);
 }
 
 function parse(args: string[]) {
@@ -95,14 +105,15 @@ function label(engine: Awaited<ReturnType<typeof loadEngine>>, name: string, wid
 
 function html(app: string, drawn: Drawn[]): string {
   const escape = (text: string) =>
-    text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    text.replaceAll(/[&<>"]/g, (c) => `&#${c.codePointAt(0)};`);
   const cards = drawn
-    .map(
-      ({ name, description, frame }) => `<figure>
+    .map(({ name, description, frame }) => {
+      const detail = description ? ` · ${escape(description)}` : "";
+      return `<figure>
   <img src="${encodeURIComponent(name)}.png" width="${frame.width}" height="${frame.height}" alt="${escape(name)}">
-  <figcaption><b>${escape(name)}</b>${description ? ` · ${escape(description)}` : ""}</figcaption>
-</figure>`,
-    )
+  <figcaption><b>${escape(name)}</b>${detail}</figcaption>
+</figure>`;
+    })
     .join("\n");
   return `<!doctype html>
 <meta charset="utf-8">

@@ -30,7 +30,7 @@ export type Header = {
 };
 
 class BitWriter {
-  bytes: number[] = [];
+  readonly bytes: number[] = [];
   private bit = 0;
   /** Least significant bit first, as the reader expects. */
   put(value: number, bits: number) {
@@ -44,7 +44,7 @@ class BitWriter {
 
 class BitReader {
   private bit = 0;
-  constructor(private data: Uint8Array, private at: number) {}
+  constructor(private readonly data: Uint8Array, private at: number) {}
   get(bits: number) {
     let value = 0;
     for (let i = 0; i < bits; i++) {
@@ -95,7 +95,8 @@ function runs(glyph: Glyph, m0: number, m1: number): [number, number][] {
     else {
       if (ones) {
         pair(zeros, ones);
-        zeros = ones = 0;
+        zeros = 0;
+        ones = 0;
       }
       zeros++;
     }
@@ -114,7 +115,7 @@ function glyphBits(glyph: Glyph, bits: Bits, m0: number, m1: number): number[] {
   if (glyph.width && glyph.height) {
     let last: [number, number] | undefined;
     for (const [zeros, ones] of runs(glyph, m0, m1)) {
-      if (last && last[0] === zeros && last[1] === ones) {
+      if (last?.[0] === zeros && last[1] === ones) {
         out.put(1, 1);
         continue;
       }
@@ -135,57 +136,20 @@ function glyphBits(glyph: Glyph, bits: Bits, m0: number, m1: number): number[] {
  */
 export function encode(glyphs: Glyph[], box?: Header["box"]): Uint8Array {
   glyphs = [...glyphs].sort((a, b) => a.code - b.code);
-  const inked = glyphs.filter((g) => g.width && g.height);
-  const bits: Bits = {
-    w: unsignedBits(Math.max(...glyphs.map((g) => g.width))),
-    h: unsignedBits(Math.max(...glyphs.map((g) => g.height))),
-    x: signedBits(Math.min(...glyphs.map((g) => g.x)), Math.max(...glyphs.map((g) => g.x))),
-    y: signedBits(Math.min(...glyphs.map((g) => g.y)), Math.max(...glyphs.map((g) => g.y))),
-    d: signedBits(Math.min(...glyphs.map((g) => g.advance)), Math.max(...glyphs.map((g) => g.advance))),
-  };
-  if (Object.values(bits).some((n) => n > 8)) throw new Error(`field too wide for u8g2: ${JSON.stringify(bits)}`);
-  // The run lengths bdfconv would pick: the smallest font over every pair of widths.
-  let best: { size: number; m0: number; m1: number } | undefined;
-  for (let m0 = 2; m0 <= 8; m0++) {
-    for (let m1 = 2; m1 <= 8; m1++) {
-      const size = glyphs.reduce((sum, g) => sum + glyphBits(g, bits, m0, m1).length, 0);
-      if (!best || size < best.size) best = { size, m0, m1 };
-    }
-  }
-  const { m0, m1 } = best!;
-  const union = {
-    left: Math.min(...inked.map((g) => g.x)),
-    right: Math.max(...inked.map((g) => g.x + g.width)),
-    bottom: Math.min(...inked.map((g) => g.y)),
-    top: Math.max(...inked.map((g) => g.y + g.height)),
-  };
-  box ??= { width: union.right - union.left, height: union.top - union.bottom, x: union.left, y: union.bottom };
+  const bits = fieldBits(glyphs);
+  const { m0, m1 } = runLengths(glyphs, bits);
+  box ??= inkBox(glyphs.filter((g) => g.width && g.height));
   const find = (code: number) => glyphs.find((g) => g.code === code);
   const top = (code: number) => (find(code) ? find(code)!.y + find(code)!.height : 0);
   const bottom = (code: number) => find(code)?.y ?? 0;
 
+  const glyphData = (glyph: Glyph) => glyphBits(glyph, bits, m0, m1);
   const body: number[] = [];
-  let upperA = -1;
-  let lowerA = -1;
-  for (const glyph of glyphs.filter((g) => g.code < 0x100)) {
-    if (upperA < 0 && glyph.code >= 0x41) upperA = body.length;
-    if (lowerA < 0 && glyph.code >= 0x61) lowerA = body.length;
-    const data = glyphBits(glyph, bits, m0, m1);
-    if (data.length + 2 > 255) throw new Error(`glyph U+${glyph.code.toString(16)} takes ${data.length + 2} bytes`);
-    body.push(glyph.code, data.length + 2, ...data);
-  }
-  if (upperA < 0) upperA = body.length;
-  if (lowerA < 0) lowerA = body.length;
-  body.push(0, 0);
+  const { upperA, lowerA } = latinGlyphs(body, glyphs.filter((g) => g.code < 0x100), glyphData);
   // One jump table entry covers every glyph above U+00FF: a short linear search.
   const unicode = body.length;
   body.push(0, 4, 0xff, 0xff);
-  for (const glyph of glyphs.filter((g) => g.code >= 0x100)) {
-    const data = glyphBits(glyph, bits, m0, m1);
-    if (data.length + 3 > 255) throw new Error(`glyph U+${glyph.code.toString(16)} takes ${data.length + 3} bytes`);
-    body.push(glyph.code >> 8, glyph.code & 0xff, data.length + 3, ...data);
-  }
-  body.push(0, 0);
+  otherGlyphs(body, glyphs.filter((g) => g.code >= 0x100), glyphData);
 
   const s8 = (n: number) => n & 0xff;
   const header = [
@@ -214,6 +178,67 @@ export function encode(glyphs: Glyph[], box?: Header["box"]): Uint8Array {
     unicode & 0xff,
   ];
   return Uint8Array.from([...header, ...body]);
+}
+
+/** Bits for each glyph box field, from the widest value any glyph needs. */
+function fieldBits(glyphs: Glyph[]): Bits {
+  const bits: Bits = {
+    w: unsignedBits(Math.max(...glyphs.map((g) => g.width))),
+    h: unsignedBits(Math.max(...glyphs.map((g) => g.height))),
+    x: signedBits(Math.min(...glyphs.map((g) => g.x)), Math.max(...glyphs.map((g) => g.x))),
+    y: signedBits(Math.min(...glyphs.map((g) => g.y)), Math.max(...glyphs.map((g) => g.y))),
+    d: signedBits(Math.min(...glyphs.map((g) => g.advance)), Math.max(...glyphs.map((g) => g.advance))),
+  };
+  if (Object.values(bits).some((n) => n > 8)) throw new Error(`field too wide for u8g2: ${JSON.stringify(bits)}`);
+  return bits;
+}
+
+/** The run lengths bdfconv would pick: the smallest font over every pair of widths. */
+function runLengths(glyphs: Glyph[], bits: Bits): { m0: number; m1: number } {
+  let best: { size: number; m0: number; m1: number } | undefined;
+  for (let m0 = 2; m0 <= 8; m0++) {
+    for (let m1 = 2; m1 <= 8; m1++) {
+      const size = glyphs.reduce((sum, g) => sum + glyphBits(g, bits, m0, m1).length, 0);
+      if (!best || size < best.size) best = { size, m0, m1 };
+    }
+  }
+  return best!;
+}
+
+/** The box around every inked glyph. */
+function inkBox(inked: Glyph[]): Header["box"] {
+  const left = Math.min(...inked.map((g) => g.x));
+  const right = Math.max(...inked.map((g) => g.x + g.width));
+  const bottom = Math.min(...inked.map((g) => g.y));
+  const top = Math.max(...inked.map((g) => g.y + g.height));
+  return { width: right - left, height: top - bottom, x: left, y: bottom };
+}
+
+/** Glyphs below U+0100 by code, then the end mark; returns where the glyphs from "A" and from "a" start. */
+function latinGlyphs(body: number[], glyphs: Glyph[], glyphData: (glyph: Glyph) => number[]) {
+  let upperA = -1;
+  let lowerA = -1;
+  for (const glyph of glyphs) {
+    if (upperA < 0 && glyph.code >= 0x41) upperA = body.length;
+    if (lowerA < 0 && glyph.code >= 0x61) lowerA = body.length;
+    const data = glyphData(glyph);
+    if (data.length + 2 > 255) throw new Error(`glyph U+${glyph.code.toString(16)} takes ${data.length + 2} bytes`);
+    body.push(glyph.code, data.length + 2, ...data);
+  }
+  if (upperA < 0) upperA = body.length;
+  if (lowerA < 0) lowerA = body.length;
+  body.push(0, 0);
+  return { upperA, lowerA };
+}
+
+/** Glyphs from U+0100 on, by two-byte code, then the end mark. */
+function otherGlyphs(body: number[], glyphs: Glyph[], glyphData: (glyph: Glyph) => number[]): void {
+  for (const glyph of glyphs) {
+    const data = glyphData(glyph);
+    if (data.length + 3 > 255) throw new Error(`glyph U+${glyph.code.toString(16)} takes ${data.length + 3} bytes`);
+    body.push(glyph.code >> 8, glyph.code & 0xff, data.length + 3, ...data);
+  }
+  body.push(0, 0);
 }
 
 /** Reads a font back, glyph by glyph: to check the encoder and to measure existing fonts. */

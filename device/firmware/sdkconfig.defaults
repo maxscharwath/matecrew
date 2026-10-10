@@ -6,12 +6,19 @@ CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# Code runs from flash through a small cache, so each miss waits on the flash bus: four data
+# lines at 80 MHz (the XIAO's flash supports it, as Seeed's own board files set) instead of
+# two at 40.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 # The XIAO ESP32-S3 has 8 MB of octal PSRAM. Buffers, scenes, JSON and Wi-Fi go there; about
 # 180 KB of internal RAM stays free for task stacks, DMA, timers and USB (it was under 40 KB, and
 # the Wi-Fi then failed its own timers). Without the PSRAM the terminal still boots, on internal
 # RAM only.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
+# Scenes, JSON and the frame live there: twice the default 40 MHz.
+CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 # Only tiny allocations stay internal: JSON nodes, strings and layout vectors (thousands of
 # small ones) go to PSRAM. Allocations that must be internal (DMA, FreeRTOS, ISR) ask for it.
@@ -42,3 +49,52 @@ CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517
 CONFIG_BT_NIMBLE_PINNED_TO_CORE_0=y
 CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+# A failed assertion still aborts, and the panic handler prints its backtrace; only the file,
+# line and expression text of every assert in ESP-IDF stays out of the image.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# src/ble.rs lowers NimBLE's log to warnings at run time: the build leaves the rest out.
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
+# Bluetooth as the terminal uses it, a peripheral: it advertises and a browser connects. No
+# scanning, no outgoing connections, no GATT client, no RF test mode.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_GATT_CLIENT=n
+CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=n
+CONFIG_BT_NIMBLE_DTM_MODE_TEST=n
+CONFIG_BT_CTRL_BLE_SCAN=n
+CONFIG_BT_CTRL_DTM_ENABLE=n
+# mbedTLS as an HTTPS client of the site: ECDHE key exchange (what every current server
+# offers) and the common CA bundle (about 40 roots: Let's Encrypt, Google, DigiCert, GlobalSign,
+# Sectigo, Amazon...) instead of the whole Mozilla list. Error codes stay in the logs, without
+# their text. P-256, P-384 and P-521 stay for WPA3 (SAE), SHA-1 and CMAC for WPA2 and PMF.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+CONFIG_MBEDTLS_KEY_EXCHANGE_RSA=n
+CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA=n
+CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_RSA=n
+CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_PEM_WRITE_C=n
+CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
+CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
+CONFIG_MBEDTLS_PKCS7_C=n
+CONFIG_MBEDTLS_FS_IO=n
+# Wi-Fi as src/wifi.rs uses it: WPA2 or WPA3 personal as a station, a WPA2 setup access point.
+# No enterprise (802.1X), OWE, SAE-PK, WPA3 on the setup access point, nor the GMAC of 192-bit
+# enterprise. IPv4 only: the site and office networks answer over IPv4.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
+CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
+CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
+CONFIG_ESP_WIFI_GMAC_SUPPORT=n
+CONFIG_LWIP_IPV6=n
+# printf from the ROM's newlib-nano: ESP-IDF's C logs do not print floats or 64-bit integers.
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y

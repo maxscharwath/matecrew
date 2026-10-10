@@ -15,13 +15,38 @@ import {
   Styled,
   Image,
   Media,
+  Show,
   bind,
+  and,
+  eq,
+  lt,
+  ne,
   useI18n,
   type Children,
+  type Dimension,
   type LayoutProps,
   type TextChildren,
 } from "@matecrew/device-ui";
 import { messages } from "../messages";
+
+/** Dots shown at most; past them the screen says where the list is in words. */
+const DOTS = 8;
+
+/** Where a list is: one dot per page or item, the current one a pill. */
+export function PageDots({ index, count }: Readonly<{ index: unknown; count: unknown }>) {
+  return (
+    <HStack gap={10} align="center">
+      {Array.from({ length: DOTS }, (_, i) => [
+        <Show key={`current-${i}`} when={eq(index, i)}>
+          <Surface variant="ink" radius={7} width={28} height={14} />
+        </Show>,
+        <Show key={`other-${i}`} when={and(lt(i, count), ne(index, i))}>
+          <Surface variant="outline" radius={7} width={14} height={14} />
+        </Show>,
+      ])}
+    </HStack>
+  );
+}
 
 /** The host's view data for the current screen. */
 export const view = (key: string, fallback: unknown = "") => bind(`view.${key}`, fallback);
@@ -32,27 +57,32 @@ export const useT = () => useI18n(messages);
 
 /**
  * Every maté screen: status bar, content, then the keys when the host labels them
- * (`view.left`, `view.right`). `primary` marks the expected key.
+ * (`view.left`, `view.right`, or the screen's own `left` / `right`). `primary` marks the
+ * expected key.
  */
 export function Frame({
   title,
   leading,
   trailing,
   keys = false,
+  left = view("left"),
+  right = view("right"),
   primary,
   reader = false,
   children,
   ...layout
-}: LayoutProps & {
+}: Readonly<LayoutProps & {
   title: TextChildren;
   /** Before the title: the main screens show OWT's mark. */
   leading?: Children;
   trailing?: Children;
   keys?: boolean;
+  left?: TextChildren;
+  right?: TextChildren;
   primary?: "left" | "right";
   reader?: boolean;
   children?: Children;
-}) {
+}>) {
   const t = useT();
   return (
     <Screen theme="paper">
@@ -60,8 +90,9 @@ export function Frame({
       <Main {...layout}>{children}</Main>
       {keys && (
         <Keys reader={reader ? t("reader") : false}>
-          <Key side="left" primary={primary === "left"} onPress={emit("left")}>{view("left")}</Key>
-          <Key side="right" primary={primary === "right"} onPress={emit("right")}>{view("right")}</Key>
+          {/* A label too long for its tab takes a smaller size rather than losing its end. */}
+          <Key side="left" primary={primary === "left"} onPress={emit("left")}><Styled style="leadStrong" fit>{left}</Styled></Key>
+          <Key side="right" primary={primary === "right"} onPress={emit("right")}><Styled style="leadStrong" fit>{right}</Styled></Key>
         </Keys>
       )}
     </Screen>
@@ -69,7 +100,7 @@ export function Frame({
 }
 
 /** A numbered instruction: an ink disc with the figure, then the sentence. */
-export function Instruction({ n, children }: { n: number; children?: TextChildren }) {
+export function Instruction({ n, children }: Readonly<{ n: number; children?: TextChildren }>) {
   return (
     <HStack gap={16}>
       <Surface variant="ink" radius={14} width={28} height={28} align="center" justify="center">
@@ -85,11 +116,15 @@ export function Instruction({ n, children }: { n: number; children?: TextChildre
  * A value too long for its line takes a smaller size rather than losing its end: a network
  * name or an id is read, not skimmed.
  */
-export function Facts({ rows, dense = false, ...layout }: LayoutProps & { rows: [TextChildren, TextChildren][]; dense?: boolean }) {
+export function Facts({
+  rows,
+  dense = false,
+  ...layout
+}: Readonly<LayoutProps & { rows: [TextChildren, TextChildren][]; dense?: boolean; width?: Dimension; height?: Dimension }>) {
   return (
     <Surface variant="sunken" gap={dense ? 4 : 10} padding={dense ? [12, 20] : [16, 20]} width="fill" {...layout}>
       {rows.map(([label, value]) => (
-        <HStack gap={12}>
+        <HStack key={JSON.stringify(label)} gap={12}>
           <VStack width={128}>
             <Label>{label}</Label>
           </VStack>
@@ -108,7 +143,7 @@ export function Facts({ rows, dense = false, ...layout }: LayoutProps & { rows: 
  * An item's picture on a sunken disc of `size`, pixel for pixel, never magnified: `picture` is
  * 96 × 96 as the site draws it, `picture48` the same at half where there is less room.
  */
-export function Picture({ value, size, half = false }: { value: unknown; size: number; half?: boolean }) {
+export function Picture({ value, size, half = false }: Readonly<{ value: unknown; size: number; half?: boolean }>) {
   const side = half ? 48 : 96;
   return (
     <Media size={size}>

@@ -9,9 +9,11 @@ pub const KEY_RIGHT_GPIO: u8 = 8;
 pub const BUZZER_GPIO: u8 = 6;
 /// The firmware samples both keys at this period; so do the emulators.
 pub const KEY_POLL_MS: u64 = 20;
-/// After one key, the other within this window makes both keys (the terminal's about page)
-/// rather than its own press. A lone key is reported once the window has passed.
+/// After one key goes down, the other within this window makes both keys (the terminal's
+/// about page) rather than two presses.
 pub const CHORD_MS: u64 = 120;
+/// Held this long, a key is a long press, reported the moment the threshold passes.
+pub const LONG_MS: u64 = 700;
 /// The e-paper panel driven over SPI.
 pub const PANEL: [u32; 2] = [800, 480];
 
@@ -105,54 +107,75 @@ impl Tone {
     }
 }
 
-/// A press as the terminal reads it: one key, or both together.
+/// A press as the terminal reads it: one key, a key held long, or both together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Press {
     Left,
     Right,
     Both,
+    LongLeft,
+    LongRight,
 }
 
-/// Presses from the key levels: rising edges, with both keys within `CHORD_MS` as one `Both`.
-/// Sample at least every `KEY_POLL_MS`, also when nothing changes, so a lone key comes out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Key {
+    #[default]
+    Up,
+    /// Down since this time, not reported yet.
+    Down(u64),
+    /// Reported as a long press, until it is released.
+    Spent,
+}
+
+/// Presses from the key levels. A key is a press when it is released (`Left`, `Right`), or a
+/// long press the moment it has been held `LONG_MS` (`LongLeft`, `LongRight`), never both. The
+/// other key going down within `CHORD_MS` of the first makes one `Both`, and nothing more until
+/// both are released. Sample at least every `KEY_POLL_MS`, also when nothing changes, so a long
+/// press comes out while the key is still held.
 #[derive(Default)]
 pub struct Presses {
-    edges: TouchKeys,
-    /// The key that rose first, and when, while the other may still join it.
-    pending: Option<(usize, u64)>,
-    /// After `Both`, until both keys are released: their edges are not presses.
+    keys: [Key; 2],
+    /// After `Both`, until both keys are released.
     chord: bool,
 }
 impl Presses {
     pub fn sample(&mut self, left: bool, right: bool, now_ms: u64) -> Option<Press> {
-        const SIDES: [Press; 2] = [Press::Left, Press::Right];
-        let rising = self.edges.sample(left, right);
+        const SHORT: [Press; 2] = [Press::Left, Press::Right];
+        const LONG: [Press; 2] = [Press::LongLeft, Press::LongRight];
+        let levels = [left, right];
         if self.chord {
             self.chord = left || right;
+            self.keys = [Key::Up; 2];
             return None;
         }
-        match self.pending {
-            Some((side, _)) if rising[1 - side] => {
-                self.pending = None;
-                self.chord = true;
-                Some(Press::Both)
-            }
-            // The window passed, or the same key again: the first press stands on its own.
-            Some((side, at)) if rising[side] || now_ms.saturating_sub(at) >= CHORD_MS => {
-                self.pending = rising[side].then_some((side, now_ms));
-                Some(SIDES[side])
-            }
-            Some(_) => None,
-            None if rising == [true, true] => {
-                self.chord = true;
-                Some(Press::Both)
-            }
-            None => {
-                self.pending = rising.iter().position(|r| *r).map(|side| (side, now_ms));
-                None
+        for side in 0..2 {
+            if levels[side] && self.keys[side] == Key::Up {
+                self.keys[side] = Key::Down(now_ms);
             }
         }
+        if let [Key::Down(a), Key::Down(b)] = self.keys {
+            if a.abs_diff(b) <= CHORD_MS {
+                self.chord = true;
+                self.keys = [Key::Up; 2];
+                return Some(Press::Both);
+            }
+        }
+        for side in 0..2 {
+            match (self.keys[side], levels[side]) {
+                (Key::Down(_), false) => {
+                    self.keys[side] = Key::Up;
+                    return Some(SHORT[side]);
+                }
+                (Key::Down(at), true) if now_ms.saturating_sub(at) >= LONG_MS => {
+                    self.keys[side] = Key::Spent;
+                    return Some(LONG[side]);
+                }
+                (Key::Spent, false) => self.keys[side] = Key::Up,
+                _ => {}
+            }
+        }
+        None
     }
 }
 
@@ -169,39 +192,39 @@ mod tests {
         }
     }
     #[test]
-    fn a_lone_key_waits_for_the_chord_window_and_both_keys_make_one_press() {
+    fn a_tap_is_a_press_on_release_a_hold_a_long_press_and_both_keys_one_chord() {
         let mut keys = Presses::default();
         let poll = KEY_POLL_MS;
+        // A tap: nothing while it is down, the press when it is released.
         assert_eq!(keys.sample(true, false, 0), None);
-        let mut t = poll;
-        while t < CHORD_MS {
-            assert_eq!(keys.sample(true, false, t), None);
+        assert_eq!(keys.sample(true, false, poll), None);
+        assert_eq!(keys.sample(false, false, 2 * poll), Some(Press::Left));
+        assert_eq!(keys.sample(false, false, 3 * poll), None);
+        // A hold: the long press as the threshold passes, nothing on release.
+        let mut t = 1000;
+        assert_eq!(keys.sample(false, true, t), None);
+        while t + poll < 1000 + LONG_MS {
             t += poll;
+            assert_eq!(keys.sample(false, true, t), None);
         }
-        assert_eq!(keys.sample(true, false, t), Some(Press::Left));
-        assert_eq!(keys.sample(false, false, t + poll), None);
-        // A short tap still counts once the window has passed.
-        assert_eq!(keys.sample(false, true, 1000), None);
-        assert_eq!(keys.sample(false, false, 1020), None);
-        assert_eq!(keys.sample(false, false, 1000 + CHORD_MS), Some(Press::Right));
-        // The second key 60 ms later: both, and nothing more until they are released.
-        assert_eq!(keys.sample(true, false, 2000), None);
-        assert_eq!(keys.sample(true, false, 2040), None);
-        assert_eq!(keys.sample(true, true, 2060), Some(Press::Both));
-        for t in (2080..3000).step_by(20) {
+        assert_eq!(keys.sample(false, true, 1000 + LONG_MS), Some(Press::LongRight));
+        assert_eq!(keys.sample(false, true, 1000 + LONG_MS + poll), None);
+        assert_eq!(keys.sample(false, false, 2000), None);
+        // The second key 60 ms later: both, and nothing more until both are released.
+        assert_eq!(keys.sample(true, false, 3000), None);
+        assert_eq!(keys.sample(true, true, 3060), Some(Press::Both));
+        for t in (3080..4000).step_by(20) {
             assert_eq!(keys.sample(t % 200 != 0, true, t as u64), None);
         }
-        assert_eq!(keys.sample(false, false, 3000), None);
         assert_eq!(keys.sample(false, false, 4000), None);
         // Both in the same sample.
         assert_eq!(keys.sample(true, true, 5000), Some(Press::Both));
         assert_eq!(keys.sample(false, false, 5020), None);
-        // The same key twice in the window: two presses.
+        // The other key long after the first: two presses of their own.
         assert_eq!(keys.sample(true, false, 6000), None);
-        assert_eq!(keys.sample(false, false, 6020), None);
-        assert_eq!(keys.sample(true, false, 6040), Some(Press::Left));
-        assert_eq!(keys.sample(false, false, 6060), None);
-        assert_eq!(keys.sample(false, false, 6040 + CHORD_MS), Some(Press::Left));
+        assert_eq!(keys.sample(true, true, 6300), None);
+        assert_eq!(keys.sample(false, true, 6400), Some(Press::Left));
+        assert_eq!(keys.sample(false, false, 6420), Some(Press::Right));
     }
     #[test]
     fn keys_report_rising_edges_only_and_independently() {

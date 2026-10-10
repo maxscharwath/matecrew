@@ -80,12 +80,14 @@ export function BuzzerEmulator({
   buzzer,
   sound,
   onSound,
-}: {
+}: Readonly<{
   buzzer: ReturnType<typeof useBuzzerEmulator>;
   sound: boolean;
   onSound: (value: boolean) => void;
-}) {
+}>) {
   const t = useTranslations("devices.virtual.buzzer");
+  let soundState = t("muted");
+  if (sound) soundState = buzzer.ready ? t("ready") : t("activate");
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="px-4">
@@ -109,9 +111,7 @@ export function BuzzerEmulator({
             {sound ? <Volume2 /> : <VolumeX />}
             {sound ? t("mute") : t("enable")}
           </Button>
-          <span role="status" className="text-xs text-muted-foreground">
-            {!sound ? t("muted") : buzzer.ready ? t("ready") : t("activate")}
-          </span>
+          <output className="text-xs text-muted-foreground">{soundState}</output>
         </div>
         <label className="block space-y-1 text-xs">
           {t("volume", { value: buzzer.volume })}

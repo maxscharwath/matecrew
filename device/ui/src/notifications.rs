@@ -1,6 +1,7 @@
 //! System notifications shared by built-in maté screens and downloaded SDK apps.
 use crate::{engine, Theme};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
+use serde_json::json;
 use std::sync::{Mutex, OnceLock};
 fn layer() -> &'static Mutex<engine::Runtime> {
     static LAYER: OnceLock<Mutex<engine::Runtime>> = OnceLock::new();
@@ -14,6 +15,18 @@ fn layer() -> &'static Mutex<engine::Runtime> {
         )
     })
 }
+/// The passkey a browser pairing over Bluetooth waits for, shown over every screen until the
+/// pairing ends (`pairing(None)`).
+static PASSKEY: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Shows (`Some`) or hides (`None`) the Bluetooth pairing code; true when that changed the layer.
+pub fn pairing(passkey: Option<u32>) -> bool {
+    let mut shown = PASSKEY.lock().expect("passkey lock");
+    let changed = *shown != passkey;
+    *shown = passkey;
+    changed
+}
+
 pub fn notify(message: &str, duration_ms: u32, now_ms: u64) -> bool {
     layer()
         .lock()
@@ -39,10 +52,15 @@ pub fn render<D: DrawTarget<Color = BinaryColor>>(
     theme: Theme,
 ) -> Result<(), D::Error> {
     let layer = layer().lock().expect("system layer lock");
-    if layer.overlay_deadline().is_none() {
+    let passkey = *PASSKEY.lock().expect("passkey lock");
+    if layer.overlay_deadline().is_none() && passkey.is_none() {
         return Ok(());
     }
-    layer
-        .scene()
-        .render_layer(target, layer.data(), crate::app_scale(layer.scene()), theme)
+    let mut data = layer.data().clone();
+    if let Some(passkey) = passkey {
+        // Read in two groups of three, as phones and computers show it.
+        data["pairing"] = json!({"first": format!("{:03}", passkey / 1000), "last": format!("{:03}", passkey % 1000)});
+    }
+    data["$device"] = json!({"locale": crate::locale()});
+    layer.scene().render_layer(target, &data, crate::app_scale(layer.scene()), theme)
 }

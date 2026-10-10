@@ -18,14 +18,14 @@ export function Item({
   onPress,
   input,
   variant,
-}: {
+}: Readonly<{
   children?: Children;
   /** Makes the whole row pressable. */
   onPress?: Handler;
   input?: string;
   /** A boxed row (`outline`, `sunken`…); plain by default. */
   variant?: SurfaceVariant;
-}): Element {
+}>): Element {
   const row = variant ? (
     <Surface variant={variant} direction="row" align="center" gap={16} padding={[12, 16]} width="fill">
       {children}

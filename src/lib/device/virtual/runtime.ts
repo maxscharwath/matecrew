@@ -6,7 +6,7 @@ import { downloadImage } from "./images";
  * of takes, mirrors its panel to the site and obeys the console, through the
  * same API as the real one.
  */
-import { deviceState } from "@/lib/device/contract";
+import { cancelPurchaseResponse, deviceAccount, deviceState } from "@/lib/device/contract";
 import type {
   CommandsResponse,
   DeviceState,
@@ -21,6 +21,7 @@ import type {
   AppEffect,
   DeviceWasm,
   Effect,
+  Failure,
   FlowEvent,
   Side,
   View,
@@ -81,6 +82,32 @@ type Stored = {
 
 class Unlinked extends Error {}
 class NoNetwork extends Error {}
+/** The site answered with an error status. */
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** What the failure screen says about a request to the site that threw (firmware fetch.rs). */
+function failureOf(error: unknown): Failure {
+  if (error instanceof HttpError) return { kind: "site", status: error.status };
+  // The virtual terminal's network switch: its Wi-Fi.
+  if (error instanceof NoNetwork) return { kind: "offline", cause: "wifi" };
+  if (error instanceof Unlinked) return { kind: "site", status: 401 };
+  return { kind: "offline", cause: "network" };
+}
+
+/** A 4xx the site answered: a badge it does not know, or an error status. */
+async function refused(response: Response): Promise<Failure> {
+  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  return response.status === 404 && body?.error === "unknown_badge"
+    ? { kind: "unknownBadge" }
+    : { kind: "site", status: response.status };
+}
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -88,7 +115,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     const timer = setTimeout(resolve, ms);
     signal.addEventListener(
       "abort",
-      () => (clearTimeout(timer), reject(signal.reason)),
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
       { once: true },
     );
   });
@@ -102,6 +132,17 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** 53 random bits, as many as a JSON number holds exactly: a take id's (flow.rs). */
+function random53(): number {
+  const [high, low] = crypto.getRandomValues(new Uint32Array(2));
+  return (high & 0x1fffff) * 2 ** 32 + low;
+}
+
+/** Waits `ms`, then runs `step`: one sequential step of a loop that never awaits inside it. */
+function after(ms: number, signal: AbortSignal, step: () => Promise<unknown>): Promise<unknown> {
+  return sleep(ms, signal).then(step);
 }
 
 function randomHex(bytes: number): string {
@@ -127,7 +168,7 @@ export class VirtualDevice {
   private overlayTimer: ReturnType<typeof setTimeout> | undefined;
   private gpioTimer: ReturnType<typeof setInterval> | undefined;
   readonly gpio = new VirtualGpio();
-  private frameUpload: { busy: boolean; next: Uint8Array | null } = {
+  private readonly frameUpload: { busy: boolean; next: Uint8Array | null } = {
     busy: false,
     next: null,
   };
@@ -270,6 +311,10 @@ export class VirtualDevice {
       if (edges & 2) this.press("right");
       // Both keys belong to the terminal, whatever app runs: its about page.
       if (edges & 4) this.dispatch({ type: "bothKeys" });
+      // A held left key is the short one; the held right key is the terminal's purchases list,
+      // like both keys, whatever app runs (firmware/src/main.rs).
+      if (edges & 8) this.press("left");
+      if (edges & 16) this.dispatch({ type: "longKey", side: "right" });
     }, 20);
   }
 
@@ -312,10 +357,7 @@ export class VirtualDevice {
   press(side: Side): void {
     if (this.appLoaded && this.wasmIdle()) {
       this.wasm.tickApp(performance.now());
-      this.appEffects(
-        this.wasm.inputApp(side) ??
-          this.wasm.pressApp(side === "left" ? 32 : 168, 113),
-      );
+      this.appEffects(this.wasm.inputApp(side));
     } else this.dispatch({ type: "key", side });
   }
 
@@ -407,27 +449,43 @@ export class VirtualDevice {
 
   private async boot(signal: AbortSignal): Promise<void> {
     try {
-      for (let stage = 0; stage < 4; stage++) {
-        this.show({ type: "boot", stage });
-        await sleep(stage === 3 ? 180 : 350, signal);
-      }
-      while (!this.stored.token) {
-        await this.link(signal).catch(async (error: unknown) => {
-          if (signal.aborted) throw error;
-          this.fail(error);
-          await sleep(3000, signal);
-        });
-      }
+      // One stage after the other, as the firmware draws them.
+      await [0, 1, 2, 3].reduce<Promise<unknown>>(
+        (shown, stage) =>
+          shown.then(() => {
+            this.show({ type: "boot", stage });
+            return sleep(stage === 3 ? 180 : 350, signal);
+          }),
+        Promise.resolve(),
+      );
+      await this.linkUntilLinked(signal);
       await this.sync().catch((error: unknown) => this.fail(error));
-      void this.pollCommands(signal);
-      for (;;) {
-        await sleep(SYNC_EVERY_MS, signal);
-        if (this.wasmIdle())
-          await this.sync().catch((error: unknown) => this.fail(error));
-      }
+      this.pollCommands(signal);
+      this.syncEvery(signal);
     } catch (error) {
       if (!signal.aborted) this.fail(error);
     }
+  }
+
+  /** Links, again after a pause on each failure, until the device has a token. */
+  private async linkUntilLinked(signal: AbortSignal): Promise<void> {
+    if (this.stored.token) return;
+    await this.link(signal).catch(async (error: unknown) => {
+      if (signal.aborted) throw error;
+      this.fail(error);
+      await sleep(3000, signal);
+    });
+    return this.linkUntilLinked(signal);
+  }
+
+  /** Syncs every SYNC_EVERY_MS while the terminal is idle, until `signal` aborts. */
+  private syncEvery(signal: AbortSignal): void {
+    after(SYNC_EVERY_MS, signal, async () => {
+      if (this.wasmIdle()) await this.sync().catch((error: unknown) => this.fail(error));
+      this.syncEvery(signal);
+    }).catch((error: unknown) => {
+      if (!signal.aborted) this.fail(error);
+    });
   }
 
   private async link(signal: AbortSignal): Promise<void> {
@@ -500,23 +558,7 @@ export class VirtualDevice {
    * Sends the queue, fetches screen data with state, and draws the main screen locally.
    */
   private async sync(): Promise<void> {
-    if (this.stored.queue.length > 0) {
-      const response = await this.api("POST", "/api/device/takes", {
-        json: { takes: this.stored.queue },
-      });
-      const { done, rejected } = (await response.json()) as {
-        done: string[];
-        rejected: { id: string; reason: string }[];
-      };
-      for (const r of rejected)
-        this.log("error", `Prise ${r.id} refusée : ${r.reason}`);
-      this.stored.queue = this.stored.queue.filter(
-        (take) => !done.includes(take.id),
-      );
-      this.save();
-      this.update({ queue: this.stored.queue });
-    }
-
+    await this.sendTakes();
     if (!this.claimKey && this.stored.token)
       this.claimKey = await sha256Hex(this.stored.token);
     const state = deviceState.parse(
@@ -556,28 +598,7 @@ export class VirtualDevice {
       this.cacheCurrentApp();
       this.save();
     } else if (state.appUrl && !this.stored.appMode) {
-      const bytes = new Uint8Array(
-        await (await this.api("GET", state.appUrl)).arrayBuffer(),
-      );
-      const same =
-        this.stored.appBytes?.length === bytes.length &&
-        this.stored.appBytes.every((v, i) => v === bytes[i]);
-      if (!this.appLoaded || !same) {
-        this.wasm.loadApp(bytes);
-        this.appLoaded = true;
-        this.stored.appBytes = [...bytes];
-        this.stored.appData = {};
-      }
-      for (const effect of this.wasm.advanceApp(
-        Math.floor(performance.now()),
-        false,
-      )) {
-        if (effect.kind === "fetch")
-          await this.fetchAppResource(effect.id, effect.path);
-      }
-      await this.refreshAppImages();
-      this.cacheCurrentApp();
-      this.save();
+      await this.syncApp(state.appUrl);
     } else {
       this.appLoaded = false;
       this.stored.appBytes = undefined;
@@ -588,42 +609,120 @@ export class VirtualDevice {
     if (this.wasmIdle()) this.showMain();
   }
 
-  private async pollCommands(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      try {
-        if (!this.snapshot.network) {
-          await sleep(2000, signal);
-          continue;
-        }
-        const response = await this.api(
-          "GET",
-          `/api/device/commands?wait=${COMMANDS_WAIT_SECONDS}`,
-          { signal, quiet: true },
-        );
-        const { commands } = (await response.json()) as CommandsResponse;
-        for (const command of commands) {
-          this.log(
-            "info",
-            `Console : ${command.kind}${"side" in command ? ` ${command.side}` : ""}${"uid" in command ? ` ${command.uid}` : ""}`,
-          );
-          if (command.kind === "key") this.press(command.side);
-          else if (command.kind === "badge") this.tap(command.uid);
-          else if (command.kind === "tap") this.tapScreen(command.x, command.y);
-          else if (command.kind === "sync") {
-            if (command.app) this.selectApp(command.app);
-            else await this.sync();
-          } else if (
-            command.kind === "restart" ||
-            command.kind === "forgetWifi"
-          )
-            return this.restart();
-        }
-      } catch (error) {
-        if (signal.aborted) return;
-        if (!(error instanceof NoNetwork)) this.fail(error);
-        await sleep(3000, signal).catch(() => {});
-      }
+  /** Sends the queued takes; the site's `done` leave the queue. */
+  private async sendTakes(): Promise<void> {
+    if (this.stored.queue.length === 0) return;
+    const response = await this.api("POST", "/api/device/takes", {
+      json: { takes: this.stored.queue },
+    });
+    const { done, rejected } = (await response.json()) as {
+      done: string[];
+      rejected: { id: string; reason: string }[];
+    };
+    for (const r of rejected)
+      this.log("error", `Prise ${r.id} refusée : ${r.reason}`);
+    this.stored.queue = this.stored.queue.filter(
+      (take) => !done.includes(take.id),
+    );
+    this.save();
+    this.update({ queue: this.stored.queue });
+  }
+
+  /** The site's app (`appUrl`): loaded again when its bytes changed, then its data and images. */
+  private async syncApp(appUrl: string): Promise<void> {
+    const bytes = new Uint8Array(
+      await (await this.api("GET", appUrl)).arrayBuffer(),
+    );
+    const same =
+      this.stored.appBytes?.length === bytes.length &&
+      this.stored.appBytes.every((v, i) => v === bytes[i]);
+    if (!this.appLoaded || !same) {
+      this.wasm.loadApp(bytes);
+      this.appLoaded = true;
+      this.stored.appBytes = [...bytes];
+      this.stored.appData = {};
     }
+    const fetches = this.wasm
+      .advanceApp(Math.floor(performance.now()), false)
+      .filter((effect): effect is Extract<AppEffect, { kind: "fetch" }> => effect.kind === "fetch");
+    // One after the other, in the app's order, as the firmware's fetching thread does.
+    await fetches.reduce<Promise<unknown>>(
+      (fetched, effect) => fetched.then(() => this.fetchAppResource(effect.id, effect.path)),
+      Promise.resolve(),
+    );
+    await this.refreshAppImages();
+    this.cacheCurrentApp();
+    this.save();
+  }
+
+  /**
+   * The console's commands, one long poll after the other until `signal` aborts. Each poll starts
+   * the next one rather than awaiting it, so nothing piles up while the page stays open.
+   */
+  private pollCommands(signal: AbortSignal): void {
+    this.pollStep(signal)
+      .then((again) => {
+        if (again) this.pollCommands(signal);
+      })
+      .catch(() => {});
+  }
+
+  /** One poll, or a pause without network or after an error; false once it is time to stop. */
+  private async pollStep(signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return false;
+    try {
+      if (!this.snapshot.network) await sleep(2000, signal);
+      else if ((await this.pollOnce(signal)) === "restart") {
+        this.restart();
+        return false;
+      }
+    } catch (error) {
+      if (signal.aborted) return false;
+      if (!(error instanceof NoNetwork)) this.fail(error);
+      await sleep(3000, signal).catch(() => {});
+    }
+    return true;
+  }
+
+  /** One long poll: its commands in order, until one restarts the terminal. */
+  private async pollOnce(signal: AbortSignal): Promise<"restart" | "done"> {
+    const response = await this.api(
+      "GET",
+      `/api/device/commands?wait=${COMMANDS_WAIT_SECONDS}`,
+      { signal, quiet: true },
+    );
+    const { commands } = (await response.json()) as CommandsResponse;
+    // In the order the console sent them: a sync finishes before the next key.
+    return commands.reduce<Promise<"restart" | "done">>(
+      (previous, command) => previous.then((outcome) => (outcome === "restart" ? outcome : this.runCommand(command))),
+      Promise.resolve("done"),
+    );
+  }
+
+  /** A console command, as the firmware runs it. */
+  private async runCommand(command: CommandsResponse["commands"][number]): Promise<"restart" | "done"> {
+    const side = "side" in command ? ` ${command.side}` : "";
+    const uid = "uid" in command ? ` ${command.uid}` : "";
+    this.log("info", "Console : " + command.kind + side + uid);
+    switch (command.kind) {
+      case "key":
+        this.press(command.side);
+        break;
+      case "badge":
+        this.tap(command.uid);
+        break;
+      case "tap":
+        this.tapScreen(command.x, command.y);
+        break;
+      case "sync":
+        if (command.app) this.selectApp(command.app);
+        else await this.sync();
+        break;
+      case "restart":
+      case "forgetWifi":
+        return "restart";
+    }
+    return "done";
   }
 
   // The take flow, in the wasm.
@@ -647,7 +746,7 @@ export class VirtualDevice {
     const effects = this.wasm.handle(event, {
       nowMs: Math.floor(now),
       unix,
-      random: Math.floor(Math.random() * 2 ** 53),
+      random: random53(),
       claim,
     });
     if (event.type !== "tick" || effects.length > 0) {
@@ -698,6 +797,52 @@ export class VirtualDevice {
       case "serve":
         void this.serve(effect.uid, effect.name, effect.sessionId);
         return;
+      case "fetchAccount":
+        void this.account(effect.uid);
+        return;
+      case "cancelPurchase":
+        void this.cancelPurchase(effect.uid, effect.id);
+        return;
+    }
+  }
+
+  /** The badge holder's account, live, for "Mon compte" and its purchases (firmware fetch.rs). */
+  private async account(uid: string): Promise<void> {
+    try {
+      const response = await this.api("POST", "/api/device/account", {
+        json: { badgeUid: uid },
+        errors: true,
+      });
+      if (!response.ok) return this.dispatch({ type: "accountFailed", failure: await refused(response) });
+      const account = deviceAccount.safeParse(await response.json().catch(() => null));
+      this.dispatch(
+        account.success
+          ? { type: "account", account: account.data }
+          : { type: "accountFailed", failure: { kind: "unreadable" } },
+      );
+    } catch (error) {
+      this.log("flow", `account: ${error instanceof Error ? error.message : String(error)}`);
+      this.dispatch({ type: "accountFailed", failure: failureOf(error) });
+    }
+  }
+
+  /** One purchase cancelled by its owner, by the site's rules; the flow fetches the account again. */
+  private async cancelPurchase(uid: string, id: string): Promise<void> {
+    try {
+      const response = await this.api("POST", "/api/device/purchases/cancel", {
+        json: { badgeUid: uid, id },
+        errors: true,
+      });
+      if (!response.ok) return this.dispatch({ type: "accountFailed", failure: await refused(response) });
+      const reply = cancelPurchaseResponse.safeParse(await response.json().catch(() => null));
+      this.dispatch(
+        reply.success
+          ? { type: "purchaseCancelled", cancelled: reply.data.cancelled }
+          : { type: "accountFailed", failure: { kind: "unreadable" } },
+      );
+    } catch (error) {
+      this.log("flow", `cancelPurchase: ${error instanceof Error ? error.message : String(error)}`);
+      this.dispatch({ type: "accountFailed", failure: failureOf(error) });
     }
   }
 
@@ -939,7 +1084,7 @@ export class VirtualDevice {
       response.status !== 304 &&
       !(options.errors && response.status < 500)
     ) {
-      throw new Error(`${method} ${path.split("?")[0]} → ${response.status}`);
+      throw new HttpError(`${method} ${path.split("?")[0]} → ${response.status}`, response.status);
     }
     return response;
   }
@@ -976,13 +1121,22 @@ export class VirtualDevice {
   }
 
   private load(): Stored {
+    let stored = this.blank();
     try {
       const raw = localStorage.getItem(this.storageKey);
-      if (raw) return JSON.parse(raw) as Stored;
+      if (raw) stored = JSON.parse(raw) as Stored;
     } catch {
       // Private window or blocked storage: start fresh.
     }
-    return this.blank();
+    const cache = cacheOf(this.storageKey);
+    const appBytes = cache.get(CACHED.appBytes);
+    return {
+      ...stored,
+      state: cache.get(CACHED.state),
+      appBytes: appBytes && Array.from(appBytes),
+      appData: cache.get(CACHED.appData),
+      showcaseData: cache.get(CACHED.showcaseData),
+    };
   }
 
   private blank(): Stored {
@@ -998,11 +1152,38 @@ export class VirtualDevice {
   }
 
   private save(): void {
+    const { state, appBytes, appData, showcaseData, ...settings } = this.stored;
     try {
-      localStorage.setItem(this.storageKey, JSON.stringify(this.stored));
+      localStorage.setItem(this.storageKey, JSON.stringify(settings));
     } catch {
       // Nothing to do: the device keeps running from memory.
     }
+    const cache = cacheOf(this.storageKey);
+    keepOrForget(cache, CACHED.state, state);
+    keepOrForget(cache, CACHED.appBytes, appBytes && Uint8Array.from(appBytes));
+    keepOrForget(cache, CACHED.appData, appData);
+    keepOrForget(cache, CACHED.showcaseData, showcaseData);
   }
 }
 import { VirtualGpio, flipped } from "@matecrew/device-ui/emulator";
+import { Cache, DAY, Keep, WEEK, key, localStorageBackend, type Key } from "@matecrew/device-ui/cache";
+
+/**
+ * What the virtual terminal caches, with the keeps and limits of the real one
+ * (device/firmware/src/cache.rs): the site sends it all again at the next sync. The settings
+ * (token, queue) stay under the device's own key.
+ */
+const CACHED = {
+  state: key<DeviceState>("state").keep(Keep.forever).maxBytes(96 * 1024),
+  appBytes: key<Uint8Array>("app").keep(Keep.for(WEEK)).maxBytes(32 * 1024),
+  appData: key<Record<string, unknown>>("app_data").keep(Keep.for(WEEK)).maxBytes(8 * 1024),
+  showcaseData: key<Record<string, unknown>>("showcase").keep(Keep.for(DAY)).maxBytes(8 * 1024),
+};
+
+const cacheOf = (storageKey: string) => Cache.open(localStorageBackend({ prefix: `${storageKey}:` }));
+
+/** Keeps a value, or forgets the entry when there is none. */
+function keepOrForget<T>(cache: Cache, entry: Key<T>, value: T | null | undefined): void {
+  if (value === undefined || value === null) cache.forget(entry);
+  else cache.put(entry, value);
+}

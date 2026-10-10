@@ -1142,7 +1142,7 @@
     "connecting": "Connecting…",
     "disconnect": "Disconnect",
     "disconnected": "Terminal disconnected.",
-    "pairingHint": "On the first change, the browser asks for a code: the one on the terminal's screen (BLE · 6 digits).",
+    "pairingHint": "Before showing the screen or sending a change, the browser asks for a code: the one on the terminal's screen (BLE · 6 digits).",
     "info": {
       "firmware": "Firmware",
       "hardwareId": "Identifier",
@@ -1198,13 +1198,20 @@
       "timeout": "The terminal does not answer.",
       "transport": "Bluetooth error: {message}",
       "forbidden": "Only an admin of the office can link a terminal."
+    },
+    "screen": {
+      "title": "Screen",
+      "description": "The terminal's screen, live over Bluetooth. Click it to tap it.",
+      "waiting": "Waiting for the screen: the browser asks for the code shown on the terminal.",
+      "unsupported": "This terminal's firmware does not share its screen yet: update it.",
+      "failed": "Screen unavailable: {message}",
+      "tap": "Click a displayed button to press it on the terminal"
     }
   },
   "devices": {
     "keys": {
       "take": "Take",
-      "return": "Return",
-      "summary": "My drinks"
+      "summary": "My account"
     },
     "screen": {
       "batteryLow": "Battery low",
@@ -1215,7 +1222,10 @@
       "preparationOf": "Preparation · {label}",
       "toPrepare": "{count, plural, one {# mate} other {# mates}}",
       "chart": "Stock · {days} days",
-      "more": "more"
+      "more": "more",
+      "purchaseToday": "Today · {time}",
+      "purchaseYesterday": "Yesterday · {time}",
+      "purchaseOn": "{date} · {time}"
     },
     "title": "Devices",
     "subtitle": "The office's badge terminals: their screen, their settings and the badges they read.",
@@ -1294,7 +1304,8 @@
         "restart": "Restart",
         "forgetWifi": "Forget Wi-Fi",
         "tap": "Tap at {x}, {y}",
-        "app": "Open {app}"
+        "app": "Open {app}",
+        "both": "Both keys"
       },
       "shortcuts": "Keyboard: ← and → for the keys, B to tap a badge, S to sync.",
       "firmware": "Firmware",
@@ -1354,7 +1365,11 @@
         "firmware": "Firmware {version}",
         "firstFrame": "Screen received, drawn {when}",
         "refresh": "{passes, plural, one {Partial refresh} other {# partial refreshes}} {width}×{height} at {x},{y} · {percent} % of the pixels",
-        "frameFailed": "Could not load the screen ({error})."
+        "frameFailed": "Could not load the screen ({error}).",
+        "bleConnected": "Connected to {name} over Bluetooth. The browser asks for the code on its screen to pair.",
+        "bleDisconnected": "Bluetooth disconnected: the screen comes through the site again.",
+        "bleScreen": "Screen over Bluetooth: straight from the terminal, without the site.",
+        "viaBluetooth": "{what} · over Bluetooth"
       },
       "controls": {
         "title": "Controls",
@@ -1373,6 +1388,7 @@
       },
       "board": {
         "subtitle": "Its wiring; a pad lights up while the console drives it.",
+        "activity": "Activity",
         "pad": "Pad",
         "function": "Function",
         "pins": {
@@ -1401,11 +1417,23 @@
         "preview": "Preview · site data",
         "hidePreview": "Hide",
         "mirror": "Live mirror · {when}",
-        "last": "Last screen · {when}"
+        "last": "Last screen · {when}",
+        "bluetooth": "Bluetooth mirror · {when}"
       },
       "settingsHint": "Its name on the site, and the item the picker opens on.",
       "unlinkHint": "The terminal loses its access at its next connection and shows a link code again. Its takes stay.",
-      "takesHint": "What the terminal sent, most recent first."
+      "takesHint": "What the terminal sent, most recent first.",
+      "ble": {
+        "connect": "Bluetooth",
+        "connectHint": "Watch and drive this terminal over Bluetooth from nearby: its screen comes straight from it, faster than through the site",
+        "pairing": "Pairing…",
+        "live": "Bluetooth",
+        "disconnect": "Disconnect Bluetooth",
+        "mismatch": "{name} is another terminal: pick this one in the list.",
+        "failed": "Bluetooth: {message}",
+        "screenFailed": "No screen over Bluetooth ({message}).",
+        "sendFailed": "Not sent over Bluetooth ({message}): sent through the site."
+      }
     },
     "virtual": {
       "open": "Virtual terminal",

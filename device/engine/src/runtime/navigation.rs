@@ -16,10 +16,7 @@ impl Node {
                     found.extend(route.root.routers());
                 }
             }
-            Node::Group { children, .. }
-            | Node::Panel { children, .. }
-            | Node::Row { children, .. }
-            | Node::Column { children, .. } => {
+            Node::Group { children, .. } | Node::Panel { children, .. } => {
                 for child in children {
                     found.extend(child.routers());
                 }

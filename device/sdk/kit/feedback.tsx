@@ -16,7 +16,7 @@ import { H2, H3, Label, Lead, Muted, Num, P, Small } from "./typography";
 const isImage = (node: Node) => node.kind === "image";
 
 /** A boxed message: its icons on the left, title and description on the right. */
-export function Alert({ children, variant = "sunken" }: { children?: Children; variant?: SurfaceVariant }): Element {
+export function Alert({ children, variant = "sunken" }: Readonly<{ children?: Children; variant?: SurfaceVariant }>): Element {
   const nodes = [children].flat(Infinity as 1).filter(Boolean) as Node[];
   return (
     <Surface variant={variant} direction="row" gap={16} padding={20} width="fill" align="center">
@@ -31,7 +31,7 @@ export const AlertTitle = ({ children }: { children?: TextChildren }): Element =
 export const AlertDescription = ({ children }: { children?: TextChildren }): Element => <P lines={3}>{children}</P>;
 
 /** A centred state: nothing yet, done, or a step in progress. */
-export function Empty({ children }: { children?: Children }): Element {
+export function Empty({ children }: Readonly<{ children?: Children }>): Element {
   return (
     <VStack gap={16} align="center" justify="center" width="fill" height="fill">
       {children}
@@ -48,12 +48,12 @@ export const EmptyContent = ({ children }: { children?: Children }): Element => 
 );
 
 /** A pill progress bar over the full width (0–100). */
-export function Progress({ value, height = 24, width = "fill" }: { value: unknown; height?: number; width?: Dimension }): Element {
+export function Progress({ value, height = 24, width = "fill" }: Readonly<{ value: unknown; height?: number; width?: Dimension }>): Element {
   return <Bar value={value} width={width} height={height} />;
 }
 
 /** A number with its label and a line of help. */
-export function Stat({ children, align = "start" }: { children?: Children; align?: "start" | "center" | "end" }): Element {
+export function Stat({ children, align = "start" }: Readonly<{ children?: Children; align?: "start" | "center" | "end" }>): Element {
   return <VStack gap={6} align={align}>{children}</VStack>;
 }
 /** Tiles are narrow: label and value shrink before they would cut. */
@@ -63,21 +63,28 @@ export const StatValue = ({ children, size = "lg" }: { children?: TextChildren; 
 );
 export const StatHelp = ({ children }: { children?: TextChildren }): Element => <Muted>{children}</Muted>;
 
+/** A step's disc: ink once done, a ring for the current one, hairline for the rest. */
+function stepVariant(done: boolean, now: boolean): SurfaceVariant {
+  if (done) return "ink";
+  return now ? "outline" : "hairline";
+}
+
 /**
  * Where someone is in a sequence: done steps are ink discs with a check, the current one a ring
  * with its number, the rest hairline.
  */
-export function Steps({ steps, current }: { steps: TextChildren[]; current: number }): Element {
+export function Steps({ steps, current }: Readonly<{ steps: TextChildren[]; current: number }>): Element {
   return (
     <HStack gap={12}>
       {steps.map((label, i) => {
         const done = i < current;
         const now = i === current;
+        const number = i + 1;
         return (
-          <HStack gap={8}>
+          <HStack key={number} gap={8}>
             {i > 0 && <Surface variant={i <= current ? "ink" : "tint"} radius={1} width={12} height={2} />}
-            <Surface variant={done ? "ink" : now ? "outline" : "hairline"} radius={12} width={24} height={24} align="center" justify="center">
-              {done ? <CheckIcon size={16} strokeWidth={2.5} /> : <Small align="center">{String(i + 1)}</Small>}
+            <Surface variant={stepVariant(done, now)} radius={12} width={24} height={24} align="center" justify="center">
+              {done ? <CheckIcon size={16} strokeWidth={2.5} /> : <Small align="center">{String(number)}</Small>}
             </Surface>
             {now || done ? <Small>{label}</Small> : <Muted lines={1}>{label}</Muted>}
           </HStack>

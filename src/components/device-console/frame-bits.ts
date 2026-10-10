@@ -41,7 +41,7 @@ export async function fetchFrame(url: string, signal?: AbortSignal): Promise<Mir
   const binary = atob(body.bits);
   if (binary.length !== FRAME_BYTES) throw new Error(`frame: ${binary.length} bytes`);
   const bits = new Uint8Array(FRAME_BYTES);
-  for (let i = 0; i < FRAME_BYTES; i++) bits[i] = binary.charCodeAt(i);
+  for (let i = 0; i < FRAME_BYTES; i++) bits[i] = binary.codePointAt(i) ?? 0;
   return { hash: body.hash, drawnAt: body.drawnAt, bits };
 }
 

@@ -93,7 +93,7 @@ export function Logic() {
 }
 
 /** Polarity is a theme: paper, or the same screens in ink. */
-export function Themes({ change }: { change: (name: ThemeName) => Action }) {
+export function Themes({ change }: Readonly<{ change: (name: ThemeName) => Action }>) {
   return (
     <Page name="themes" direction="row" gap={28}>
       <VStack gap={16} width="fill">

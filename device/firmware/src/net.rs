@@ -30,6 +30,9 @@ struct Direction {
     ended: AtomicU32,
 }
 
+/// When the arrows last lit up (tenths of a second since `EPOCH`), for the log.
+static LIT: AtomicU32 = AtomicU32::new(0);
+
 static UP: Direction = Direction { active: AtomicU32::new(0), ended: AtomicU32::new(0) };
 static DOWN: Direction = Direction { active: AtomicU32::new(0), ended: AtomicU32::new(0) };
 
@@ -68,6 +71,7 @@ pub fn transfer(up: bool) -> Transfer {
     let was = direction.lit(now());
     direction.active.fetch_add(1, Ordering::Relaxed);
     if !was {
+        LIT.store(now(), Ordering::Relaxed);
         wake();
     }
     Transfer(direction)
@@ -85,6 +89,11 @@ impl Drop for Transfer {
 /// An exchange too short or too long to follow: the arrow blinks for `LINGER`.
 pub fn pulse(up: bool) {
     drop(transfer(up));
+}
+
+/// How long ago an arrow last lit up: how late the screen shows it.
+pub fn lit_ago() -> Duration {
+    Duration::from_millis(u64::from(now().saturating_sub(LIT.load(Ordering::Relaxed))) * 100)
 }
 
 /// The arrows lit now: (up, down).

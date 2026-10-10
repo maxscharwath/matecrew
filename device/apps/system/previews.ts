@@ -32,4 +32,9 @@ export const previews = definePreviews({
     description: "System toast over any screen",
     events: [{ kind: "notify", message: "Synchronisation terminée" }],
   },
+  pairing: {
+    screen: "notification",
+    description: "The code a computer asks for while it pairs over Bluetooth",
+    data: { pairing: { first: "482", last: "913" } },
+  },
 });

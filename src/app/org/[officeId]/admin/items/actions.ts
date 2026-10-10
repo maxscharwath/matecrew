@@ -11,7 +11,7 @@ import { ITEM_IMAGE_BYTES, photoBitmap, pictureToBitmap } from "@/lib/device/bit
 
 type ActionResult = { success: true } | { success: false; error: string };
 
-const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 function revalidateItemPages(officeId: string) {
@@ -146,7 +146,7 @@ export async function setItemImage(
   if (!(file instanceof File) || file.size === 0) {
     return { success: false, error: t("errors.invalidFileType", { name: "" }) };
   }
-  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
     return { success: false, error: t("errors.invalidFileType", { name: file.name }) };
   }
   if (file.size > MAX_IMAGE_SIZE) {
@@ -312,7 +312,7 @@ export async function terminalImageFromFile(
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
   const file = formData.get("image");
-  if (!(file instanceof File) || file.size === 0 || !ALLOWED_IMAGE_TYPES.includes(file.type)) {
+  if (!(file instanceof File) || file.size === 0 || !ALLOWED_IMAGE_TYPES.has(file.type)) {
     return { success: false, error: t("errors.invalidFileType", { name: file instanceof File ? file.name : "" }) };
   }
   if (file.size > MAX_IMAGE_SIZE) return { success: false, error: t("errors.fileTooLarge", { name: file.name }) };

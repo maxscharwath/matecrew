@@ -29,7 +29,7 @@ import {
 import { BluetoothIcon, CircleCheckBigIcon, IdCardIcon, InfoIcon, TriangleAlertIcon, WifiIcon } from "@matecrew/device-ui/icons/lucide";
 import { Facts, Frame, Instruction, useT, view } from "./shared";
 
-function Onboarding({ step, children }: { step: number; children?: Children }) {
+function Onboarding({ step, children }: Readonly<{ step: number; children?: Children }>) {
   const t = useT();
   return (
     <Frame title={t("setup.title")} trailing={<Steps steps={[t("steps.wifi"), t("steps.site"), t("steps.ready")]} current={step} />}>
