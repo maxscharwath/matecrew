@@ -2,20 +2,20 @@
 import { Qr, VStack, type TextChildren } from "../runtime/jsx-runtime";
 import type { Element } from "../runtime/types";
 import type { IconComponent } from "../icons/factory";
-import { MateCrewMark } from "./brand";
+import { OwtMark } from "./brand";
 import { Surface } from "./surface";
 import { Muted } from "./typography";
 
 /**
  * A QR code to scan from a phone at arm's length: rounded modules and finder patterns, the
- * mark in a cleared centre (high error correction), on a card. The children are its caption.
+ * OWT mark in a cleared centre (high error correction), on a card. The children are its caption.
  *
  *   <QrCode value={url} size={280}>Scanne pour valider</QrCode>
  */
 export function QrCode({
   value,
   size = 288,
-  logo = MateCrewMark,
+  logo = OwtMark,
   style = "rounded",
   children,
 }: {

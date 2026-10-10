@@ -16,9 +16,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::Input;
+use crate::{buzzer::Buzzer, Input};
 
-pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>) -> Result<()> {
+/// Polls the keys on a thread of their own; each press beeps at once, then goes to the main loop
+/// as `Input::Pressed`, even while it waits for the panel.
+pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>, buzzer: Buzzer) -> Result<()> {
     // Pulled down so a key that is not wired yet reads as released.
     let left = PinDriver::input(left, Pull::Down)?;
     let right = PinDriver::input(right, Pull::Down)?;
@@ -43,7 +45,8 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>)
             last = read;
             if let Some(event) = keys.sample(level[0], level[1], now) {
                 log::info!("keys: {event:?}");
-                if inputs.send(Input::Flow(event)).is_err() {
+                buzzer.beep(matecrew_core::flow::Beep::Key);
+                if inputs.send(Input::Pressed(event)).is_err() {
                     return;
                 }
             }

@@ -4,6 +4,7 @@
 
 mod api;
 mod buzzer;
+mod cores;
 mod fetch;
 mod console;
 mod display;
@@ -21,8 +22,9 @@ use anyhow::{bail, Result};
 use core::convert::Infallible;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::{gpio::Gpio6, peripherals::Peripherals, reset},
+    hal::{cpu::Core, gpio::Gpio6, peripherals::Peripherals, reset},
     nvs::EspDefaultNvsPartition,
+    sntp::{EspSntp, SntpConf},
     sys::{esp_random, settimeofday, timeval},
     wifi::{BlockingWifi, EspWifi},
 };
@@ -35,6 +37,7 @@ use matecrew_core::{
 };
 use matecrew_ui as ui;
 use std::{
+    collections::VecDeque,
     sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -59,6 +62,8 @@ const SYNC_EVERY: Duration = Duration::from_secs(120);
 const OFFLINE_RETRY: Duration = Duration::from_secs(30);
 /// How often the NFC reader is asked for a badge while the flow waits for one.
 const BADGE_POLL: Duration = Duration::from_millis(150);
+/// The reader is also polled while idle, more slowly: a badge put on it shows in a toast.
+const IDLE_BADGE_POLL: Duration = Duration::from_millis(400);
 /// Before this (November 2023) the clock has not been set by a sync yet.
 const CLOCK_SET_AFTER: i64 = 1_700_000_000;
 
@@ -75,6 +80,10 @@ pub enum Input {
     MoveSite(String),
     /// An app's data or image, from the fetching thread.
     Fetched(fetch::Fetched),
+    /// A badge put on the reader while nobody asked for one.
+    BadgeSeen(String),
+    /// A touch key, already beeped by the keys thread the moment it was touched.
+    Pressed(Event),
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -108,14 +117,17 @@ fn app() -> Result<()> {
     let store = Store::new(nvs.clone())?;
     ota::check_boot(&store)?;
     store.pin_site(api::DEFAULT_SITE)?;
-    let mut screen = Panel::new(Pins {
-        spi: p.spi2,
-        sck: p.pins.gpio7,
-        mosi: p.pins.gpio9,
-        cs: p.pins.gpio2,
-        busy: p.pins.gpio3,
-        dc: p.pins.gpio4,
-        rst: p.pins.gpio1,
+    // The panel's task shares core 1 with the screen loop.
+    let mut screen = cores::on(Core::Core1, || {
+        Panel::new(Pins {
+            spi: p.spi2,
+            sck: p.pins.gpio7,
+            mosi: p.pins.gpio9,
+            cs: p.pins.gpio2,
+            busy: p.pins.gpio3,
+            dc: p.pins.gpio4,
+            rst: p.pins.gpio1,
+        })
     })?;
 
     let (sender, inputs) = mpsc::channel();
@@ -123,7 +135,14 @@ fn app() -> Result<()> {
     if let Err(e) = console::watch(sender.clone()) {
         log::warn!("no serial console commands: {e:#}");
     }
-    keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone())?;
+    // SAFETY: the buzzer drives D5 only while it beeps, between battery readings (`Supply`
+    // waits for it to be quiet).
+    let buzzer = cores::on(Core::Core1, || {
+        Buzzer::start(p.ledc.timer0, p.ledc.channel0, unsafe { Gpio6::steal() })
+    })?;
+    cores::on(Core::Core1, || {
+        keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone())
+    })?;
     // D5 (GPIO 6): half the battery voltage, and the piezo. Without the ADC the status bar says "--".
     let battery = (|| -> Result<_> {
         use esp_idf_svc::hal::adc::{
@@ -147,8 +166,6 @@ fn app() -> Result<()> {
             Box::new(|| None)
         }
     });
-    // SAFETY: the buzzer drives D5 only while it beeps, on this thread, between battery readings.
-    let buzzer = Buzzer::new(p.ledc.timer0, p.ledc.channel0, unsafe { Gpio6::steal() })?;
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio43, p.pins.gpio44) {
         Ok(nfc) => Some(nfc),
         Err(e) => {
@@ -205,6 +222,15 @@ fn app() -> Result<()> {
     } else {
         store.set_wifi_failures(0)?;
     }
+    // The clock from the internet (NTP, every hour), whether the site answers or not: the status
+    // bar and the takes' times are right after a restart. A sync with the site sets it too.
+    let sntp = cores::on(Core::Core0, || {
+        EspSntp::new_with_callback(&SntpConf::default(), |since_epoch| {
+            log::info!("clock set by NTP: {} s since 1970", since_epoch.as_secs())
+        })
+    })
+    .inspect_err(|e| log::warn!("no NTP clock: {e}"))
+    .ok();
     if !linked {
         let ip = wifi.wifi().sta_netif().get_ip_info()?.ip.to_string();
         screen.show(|d| ui::connected_screen(d, &creds.ssid, &ip))?;
@@ -218,7 +244,7 @@ fn app() -> Result<()> {
     let claim_key = claim::key(&token);
     screen.show(|d| ui::boot::render(d, 2))?;
     let api = Api::with_token(&site, token);
-    remote::poll_commands(api.clone(), sender.clone())?;
+    cores::on(Core::Core0, || remote::poll_commands(api.clone(), sender.clone()))?;
     let state = store.state()?;
     let mode = store.app_mode()?;
     let mut app = state
@@ -251,8 +277,13 @@ fn app() -> Result<()> {
     Terminal {
         site: site.clone(),
         claim_key,
-        mirror: remote::Mirror::start(api.clone())?,
-        fetcher: fetch::Fetcher::start(api.clone(), sender.clone())?,
+        mirror: cores::on(Core::Core0, || remote::Mirror::start(api.clone()))?,
+        fetcher: cores::on(Core::Core0, || fetch::Fetcher::start(api.clone(), sender.clone()))?,
+        _sntp: sntp,
+        badge_on_reader: None,
+        pressed: false,
+        pending: VecDeque::new(),
+        dirty: false,
         api,
         state,
         app,
@@ -417,7 +448,17 @@ struct Terminal {
     inputs: Receiver<Input>,
     /// Keeps the channel open even if every input thread stops.
     _sender: Sender<Input>,
+    /// Keeps the NTP clock running.
+    _sntp: Option<EspSntp<'static>>,
     fetcher: fetch::Fetcher,
+    /// The badge on the reader while idle, toasted once until it is taken away.
+    badge_on_reader: Option<String>,
+    /// A key press being handled already beeped: the key beep its screen asks for is that one.
+    pressed: bool,
+    /// Inputs taken off the channel early, to see whether more are waiting.
+    pending: VecDeque<Input>,
+    /// A screen was skipped because more inputs were waiting: drawn once they are handled.
+    dirty: bool,
     flow: Flow,
     /// Origin of the flow's milliseconds.
     started: Instant,
@@ -483,17 +524,30 @@ impl Terminal {
                     self.pending_app = Some(mode);
                 }
                 Next::Input(Input::Fetched(fetched)) => self.fetched(fetched)?,
+                Next::Input(Input::BadgeSeen(uid)) => {
+                    touched = Instant::now();
+                    self.badge_seen(&uid)?
+                }
                 Next::Input(Input::Tap(x, y)) => {
                     touched = Instant::now();
                     self.tap_screen(x, y)?
                 }
+                Next::Input(Input::Pressed(event)) => {
+                    touched = Instant::now();
+                    self.pressed = true;
+                    let stepped = self.step(event);
+                    self.pressed = false;
+                    stepped?
+                }
                 Next::Input(Input::Flow(event)) => {
                     touched = Instant::now();
-                    if matches!(event, Event::Key { .. } | Event::BothKeys) {
-                        self.buzzer.press();
+                    // Keys from the console or the site beep here, the touch keys did already.
+                    self.pressed = matches!(event, Event::Key { .. } | Event::BothKeys);
+                    if self.pressed {
+                        self.buzzer.beep(matecrew_core::flow::Beep::Key);
                     }
                     let stepped = self.step(event);
-                    self.buzzer.handled();
+                    self.pressed = false;
                     stepped?
                 }
                 Next::Tick => self.step(Event::Tick)?,
@@ -506,6 +560,7 @@ impl Terminal {
                         if touched.elapsed() >= CLEAN_WHEN_IDLE {
                             self.screen.clean()?;
                         }
+                        self.screen.rest()?;
                         self.maybe_update();
                         sync_at = Instant::now()
                             + if self.offline {
@@ -536,6 +591,15 @@ impl Terminal {
     /// Waits for an input, the flow's deadline or the sync, and reads badges meanwhile.
     fn next(&mut self, sync_at: Instant) -> Result<Next> {
         loop {
+            if let Some(input) = self.pending.pop_front() {
+                return Ok(Next::Input(input));
+            }
+            if self.dirty {
+                // Every waiting input is handled: show where they led.
+                self.dirty = false;
+                self.redraw_current()?;
+                continue;
+            }
             let mut deadline = self
                 .flow
                 .deadline()
@@ -562,8 +626,11 @@ impl Terminal {
                     Next::Tick
                 });
             }
+            let idle_reader = self.flow.is_idle() && self.nfc.is_some();
             let wait = if self.flow.wants_badge() {
                 BADGE_POLL.min(deadline - now)
+            } else if idle_reader {
+                IDLE_BADGE_POLL.min(deadline - now)
             } else {
                 deadline - now
             };
@@ -576,6 +643,16 @@ impl Terminal {
                 match nfc.read_uid() {
                     Ok(Some(uid)) => return Ok(Next::Input(Input::Flow(Event::Badge { uid }))),
                     Ok(None) => {}
+                    Err(e) => log::warn!("NFC: {e:#}"),
+                }
+            } else if let (true, Some(nfc)) = (idle_reader, &mut self.nfc) {
+                match nfc.read_uid() {
+                    Ok(Some(uid)) if self.badge_on_reader.as_ref() != Some(&uid) => {
+                        self.badge_on_reader = Some(uid.clone());
+                        return Ok(Next::Input(Input::BadgeSeen(uid)));
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) => self.badge_on_reader = None,
                     Err(e) => log::warn!("NFC: {e:#}"),
                 }
             }
@@ -679,7 +756,7 @@ impl Terminal {
                 ui::engine::Effect::Emit { name } if name == "summary" => {
                     domain = Some(matecrew_core::contract::Side::Right)
                 }
-                ui::engine::Effect::Beep { tone } => self.buzzer.beep(match tone {
+                ui::engine::Effect::Beep { tone } => self.beep(match tone {
                     ui::engine::scene::BeepTone::Key => matecrew_core::flow::Beep::Key,
                     ui::engine::scene::BeepTone::Success => matecrew_core::flow::Beep::Accepted,
                     ui::engine::scene::BeepTone::Error => matecrew_core::flow::Beep::Error,
@@ -701,6 +778,20 @@ impl Terminal {
         self.request_images();
         self.save_app_cache()?;
         self.draw_main()
+    }
+
+    /// A badge on the reader while nobody asked for one: a toast says whose it is, with the
+    /// badge tone, so a badge can be tried at any time.
+    fn badge_seen(&mut self, uid: &str) -> Result<()> {
+        let name = self.state.as_ref().and_then(|state| state.badge(uid)).map(|badge| badge.name.clone());
+        log::info!("badge seen: {}", if name.is_some() { "known" } else { "unknown" });
+        self.buzzer.beep(matecrew_core::flow::Beep::Badge);
+        let message = match name {
+            Some(name) => format!("Badge de {name}"),
+            None => format!("Badge inconnu · {uid}"),
+        };
+        ui::notifications::notify(&message, 4000, self.started.elapsed().as_millis() as u64);
+        self.redraw_current()
     }
 
     fn request_images(&mut self) {
@@ -755,7 +846,7 @@ impl Terminal {
         };
         for effect in self.flow.handle(event, cx) {
             match effect {
-                Effect::Beep { beep } => self.buzzer.beep(beep),
+                Effect::Beep { beep } => self.beep(beep),
                 Effect::Queue { take } => {
                     log::info!("take {} queued for {}", take.id, take.badge_uid);
                     if let Some(dropped) = self.queue.push(take) {
@@ -782,11 +873,36 @@ impl Terminal {
                         self.device_info();
                     }
                     self.last_flow_screen = Some(screen.clone());
-                    self.show(|d| ui::flow_screen(d, &screen))?;
+                    if self.input_waiting() {
+                        self.dirty = true;
+                    } else {
+                        self.show(|d| ui::flow_screen(d, &screen))?;
+                    }
                 }
             }
         }
         Ok(())
+    }
+
+    /// Whether another input is already waiting: then a screen is not worth 1 to 2 s of refresh,
+    /// the next input changes it again. Quick presses show only where they lead.
+    fn input_waiting(&mut self) -> bool {
+        if !self.pending.is_empty() {
+            return true;
+        }
+        match self.inputs.try_recv() {
+            Ok(input) => {
+                self.pending.push_back(input);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn beep(&mut self, beep: matecrew_core::flow::Beep) {
+        if !(self.pressed && beep == matecrew_core::flow::Beep::Key) {
+            self.buzzer.beep(beep);
+        }
     }
 
     /// "Servi" and a runner's badge: the site serves the session now, then the main screen
@@ -875,6 +991,10 @@ impl Terminal {
     }
 
     fn draw_main(&mut self) -> Result<()> {
+        if self.input_waiting() {
+            self.dirty = true;
+            return Ok(());
+        }
         let info = self.device_info();
         if let Some(app) = &mut self.app {
             app.update_device(info);
@@ -1070,6 +1190,7 @@ impl Terminal {
                 if let Err(e) = self.store.set_ota_pending(Some(&release.version)) {
                     log::error!("ota: {e:#}");
                 }
+                self.screen.flush();
                 reset::restart();
             }
             Err(e) => {

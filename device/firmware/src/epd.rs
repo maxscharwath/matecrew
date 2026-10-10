@@ -9,9 +9,11 @@
 //!   refreshes leave, when nobody is using the terminal.
 //! - partial: one rectangle, no flashing; driven twice for a new screen.
 //!
-//! Between partial refreshes the controller stays powered and in partial
-//! mode: waking it (reset, power on) and sending the old image again would
-//! cost more than the refresh itself. `sleep` powers it down.
+//! Between partial refreshes the controller only turns its high voltage off
+//! (left on, it wears the panel), keeping its settings and the old image:
+//! turning it back on is far quicker than waking it from deep sleep (reset,
+//! settings, the old image sent again, about 350 ms). `sleep` puts it in deep
+//! sleep, for when nobody uses the terminal.
 
 use anyhow::{bail, Result};
 use esp_idf_svc::hal::{
@@ -38,7 +40,7 @@ pub const CHUNK: usize = 4096;
 enum State {
     /// Deep sleep: only a reset wakes it, and its memory is gone.
     Asleep,
-    /// Powered, in partial mode, its old image in sync with the panel.
+    /// In partial mode, its old image in sync with the panel, high voltage off.
     Partial,
 }
 
@@ -101,6 +103,9 @@ impl Epd {
             self.command(0xE5, &[0x6E])?; // 110: the controller's fast waveform
             // Partial data interval: after each refresh the new image becomes the old one.
             self.command(0x50, &[0xA9, 0x07])?;
+        } else {
+            self.command(0x04, &[])?; // power on
+            self.wait()?;
         }
         let woken = started.elapsed();
         self.command(0x91, &[])?; // partial in
@@ -127,6 +132,8 @@ impl Epd {
             self.wait()?;
         }
         self.command(0x92, &[])?; // partial out
+        self.command(0x02, &[])?; // power off: no high voltage until the next refresh
+        self.wait()?;
         self.state = State::Partial;
         log::info!(
             "epd: wake {} ms, send {} ms, refresh {} ms ({passes} pass)",

@@ -23,10 +23,22 @@ import { Label, Large, Muted, inline } from "./typography";
  * What this screen is, on the left; the time, Wi-Fi and battery the host reports on the right
  * (or `trailing`, e.g. setup steps). A hairline closes it.
  */
-export function StatusBar({ children, trailing, status = true }: { children?: TextChildren; trailing?: Children; status?: boolean }): Element {
+export function StatusBar({
+  children,
+  leading,
+  trailing,
+  status = true,
+}: {
+  children?: TextChildren;
+  /** Before the title, such as a mark. */
+  leading?: Children;
+  trailing?: Children;
+  status?: boolean;
+}): Element {
   return (
     <VStack padding={[0, MARGIN]} height={STATUS} width="fill">
       <HStack gap={16} align="center" height="fill" width="fill">
+        {leading}
         <Large lines={1} width="fill">{children}</Large>
         {trailing ?? (status ? (
           <HStack gap={10} align="center">

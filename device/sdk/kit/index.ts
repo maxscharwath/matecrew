@@ -29,7 +29,7 @@ export { Item, ItemMedia, ItemContent, ItemTitle, ItemDescription, ItemActions, 
 export { StatusBar, Main, Keys, Key, ReaderHint, BadgeInput } from "./device";
 export { QrCode } from "./qr";
 export { OverlayHost } from "./overlays";
-export { MateCrewMark, Logo } from "./brand";
+export { MateCrewMark, OwtMark, OwtLogo, Logo } from "./brand";
 export {
   LineChart,
   BarChart,

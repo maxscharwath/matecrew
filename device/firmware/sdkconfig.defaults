@@ -1,5 +1,9 @@
 # Nested TSX scenes and the system overlay share the main render task.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
+# The screen loop runs on core 1, away from Wi-Fi and lwIP on core 0 (src/cores.rs).
+CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
+# Drawing an app screen takes 250 to 420 ms at 160 MHz: a third less at 240.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 # The XIAO ESP32-S3 has 8 MB of octal PSRAM. Buffers, scenes, JSON and Wi-Fi go there; about

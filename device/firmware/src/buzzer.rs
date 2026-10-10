@@ -1,6 +1,9 @@
 //! Passive piezo on D5 (GPIO 6), driven by LEDC: a short high beep when a key
 //! is touched, two when a badge is accepted, a low one when something fails.
 //!
+//! Beeps play on a thread of their own, so a key beeps the moment it is
+//! touched, even while the panel refreshes, and nothing waits for a tone.
+//!
 //! D5 also reads the battery through its 1 MΩ / 1 MΩ divider. A piezo passes no direct current,
 //! so it does not change that reading: the pin is the LEDC output only while a beep plays and
 //! floats the rest of the time.
@@ -17,22 +20,27 @@ use esp_idf_svc::sys::{
 };
 use matecrew_core::flow::Beep;
 use std::{
+    sync::{
+        mpsc::{self, Sender},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const PIN: i32 = 6;
 
+/// Plays beeps one after another; cheap to clone, each clone queues on the same piezo.
+#[derive(Clone)]
 pub struct Buzzer {
-    channel: LedcDriver<'static>,
-    /// When the last beep ended: the piezo then charges back to the divider's voltage.
-    quiet_since: Instant,
-    /// A key press already beeped: the key beep its screen asks for is that one.
-    pressed: bool,
+    beeps: Sender<Beep>,
+    /// When the last beep ended, `None` while one plays: the piezo then charges back to the
+    /// divider's voltage.
+    quiet_since: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Buzzer {
-    pub fn new(
+    pub fn start(
         timer: TIMER0<'static>,
         channel: CHANNEL0<'static>,
         pin: Gpio6<'static>,
@@ -41,60 +49,54 @@ impl Buzzer {
         let mut channel = LedcDriver::new(channel, timer, pin)?;
         channel.set_duty(0)?;
         release()?;
-        Ok(Self { channel, quiet_since: Instant::now(), pressed: false })
-    }
-
-    /// Every key press beeps as soon as it is read, whatever the screen does with it, until
-    /// `handled`.
-    pub fn press(&mut self) {
-        self.beep(Beep::Key);
-        self.pressed = true;
-    }
-
-    pub fn handled(&mut self) {
-        self.pressed = false;
-    }
-
-    pub fn beep(&mut self, beep: Beep) {
-        if self.pressed && beep == Beep::Key {
-            return;
-        }
-        // SAFETY: LEDC channel 0 drives GPIO 6 again; nothing else outputs on it.
-        unsafe { esp_rom_gpio_connect_out_signal(PIN as u32, LEDC_LS_SIG_OUT0_IDX, false, false) };
-        for &(hz, ms) in beep.tones() {
-            if let Err(e) = self.tone(hz, ms) {
-                log::warn!("buzzer: {e}");
-                break;
+        let (beeps, queue) = mpsc::channel::<Beep>();
+        let quiet_since = Arc::new(Mutex::new(Some(Instant::now())));
+        let quiet = quiet_since.clone();
+        thread::Builder::new().stack_size(3072).spawn(move || {
+            for beep in queue {
+                *quiet.lock().unwrap() = None;
+                play(&mut channel, beep);
+                *quiet.lock().unwrap() = Some(Instant::now());
             }
-        }
-        if let Err(e) = release() {
-            log::warn!("buzzer: {e}");
-        }
-        self.quiet_since = Instant::now();
+        })?;
+        Ok(Self { beeps, quiet_since })
     }
 
-    /// How long the piezo has been silent.
+    /// Queues `beep`; returns at once.
+    pub fn beep(&self, beep: Beep) {
+        let _ = self.beeps.send(beep);
+    }
+
+    /// How long the piezo has been silent: zero while it plays.
     pub fn quiet(&self) -> Duration {
-        self.quiet_since.elapsed()
+        self.quiet_since.lock().unwrap().map_or(Duration::ZERO, |at| at.elapsed())
     }
+}
 
-    /// Plays `hz` for `ms`; 0 Hz is a silence.
-    fn tone(&mut self, hz: u32, ms: u64) -> Result<()> {
-        if hz > 0 {
-            // The timer belongs to the channel driver, so its frequency is set through ESP-IDF.
-            unsafe {
-                ledc_set_freq(
-                    ledc_mode_t_LEDC_LOW_SPEED_MODE,
-                    ledc_timer_t_LEDC_TIMER_0,
-                    hz,
-                )
-            };
-            self.channel.set_duty(self.channel.get_max_duty() / 2)?;
+fn play(channel: &mut LedcDriver<'static>, beep: Beep) {
+    // SAFETY: LEDC channel 0 drives GPIO 6 again; nothing else outputs on it.
+    unsafe { esp_rom_gpio_connect_out_signal(PIN as u32, LEDC_LS_SIG_OUT0_IDX, false, false) };
+    for &(hz, ms) in beep.tones() {
+        if let Err(e) = tone(channel, hz, ms) {
+            log::warn!("buzzer: {e}");
+            break;
         }
-        thread::sleep(Duration::from_millis(ms));
-        self.channel.set_duty(0)?;
-        Ok(())
     }
+    if let Err(e) = release() {
+        log::warn!("buzzer: {e}");
+    }
+}
+
+/// Plays `hz` for `ms`; 0 Hz is a silence.
+fn tone(channel: &mut LedcDriver<'static>, hz: u32, ms: u64) -> Result<()> {
+    if hz > 0 {
+        // The timer belongs to the channel driver, so its frequency is set through ESP-IDF.
+        unsafe { ledc_set_freq(ledc_mode_t_LEDC_LOW_SPEED_MODE, ledc_timer_t_LEDC_TIMER_0, hz) };
+        channel.set_duty(channel.get_max_duty() / 2)?;
+    }
+    thread::sleep(Duration::from_millis(ms));
+    channel.set_duty(0)?;
+    Ok(())
 }
 
 /// Lets D5 float, as the battery reading needs it.

@@ -25,6 +25,7 @@ import {
   EmptyMedia,
   EmptyTitle,
   EmptyDescription,
+  OwtMark,
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, HandPlatterIcon, PackageOpenIcon, TriangleAlertIcon } from "@matecrew/device-ui/icons/lucide";
 import { Frame, Product, useT, view } from "./shared";
@@ -47,7 +48,7 @@ const Week = ({ index, height }: { index: number; height: number }) => (
 export function dashboardOne() {
   const t = useT();
   return (
-    <Frame title={view("title")} keys primary="left" gap={20}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={20}>
       <HStack gap={40} height="fill">
         <Product value={item(0, "bits", [])} size={192} scale={6} />
         <VStack gap={12} width="fill">
@@ -88,7 +89,7 @@ export function dashboardTwo() {
     </Card>
   );
   return (
-    <Frame title={view("title")} keys primary="left" direction="row" gap={20}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" direction="row" gap={20}>
       {column(0)}
       {column(1)}
     </Frame>
@@ -112,7 +113,7 @@ export function dashboard() {
     </VStack>
   );
   return (
-    <Frame title={view("title")} keys primary="left" direction="row" gap={28}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" direction="row" gap={28}>
       <VStack gap={12} width="fill">
         <HStack gap={20}>
           <Product value={item(0, "bits", [])} size={112} scale={4} />
@@ -157,7 +158,7 @@ export function catalogue() {
     </Show>
   );
   return (
-    <Frame title={view("title")} keys primary="left" gap={16}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={16}>
       <HStack gap={16} align="stretch" height="fill">{[0, 1, 2].map(tile)}</HStack>
       <HStack gap={16} align="stretch" height="fill">{[3, 4, 5].map(tile)}</HStack>
       <Muted align="right">{t("more", { count: view("moreCount", 0) })}</Muted>
@@ -169,7 +170,7 @@ export function catalogue() {
 export function empty() {
   const t = useT();
   return (
-    <Frame title={view("title")} keys primary="left">
+    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left">
       <Empty>
         <EmptyMedia><PackageOpenIcon size={56} strokeWidth={3} /></EmptyMedia>
         <EmptyTitle>{t("empty.heading")}</EmptyTitle>

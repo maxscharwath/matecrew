@@ -87,7 +87,8 @@ export type ArtLayer = Omit<Paint, "stroke"> & { stroke?: number };
 export function createArt(layers: ArtLayer[], viewBox: [number, number, number, number] = [0, 0, 24, 24]): IconComponent {
   const drawn = new Map<string, Sprite>();
   return ({ x = 0, y = 0, size, width, height, inverted = false }) => {
-    const w = width ?? size ?? viewBox[2];
+    // Given one side, the other follows the art's proportions.
+    const w = width ?? size ?? (height !== undefined ? Math.round((height * viewBox[2]) / viewBox[3]) : viewBox[2]);
     const h = height ?? size ?? Math.round((w * viewBox[3]) / viewBox[2]);
     if (![w, h].every((value) => Number.isInteger(value) && value > 0))
       throw new Error("Art dimensions must be positive integer pixels");

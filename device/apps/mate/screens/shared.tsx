@@ -36,6 +36,7 @@ export const useT = () => useI18n(messages);
  */
 export function Frame({
   title,
+  leading,
   trailing,
   keys = false,
   primary,
@@ -44,6 +45,8 @@ export function Frame({
   ...layout
 }: LayoutProps & {
   title: TextChildren;
+  /** Before the title: the main screens show OWT's mark. */
+  leading?: Children;
   trailing?: Children;
   keys?: boolean;
   primary?: "left" | "right";
@@ -53,7 +56,7 @@ export function Frame({
   const t = useT();
   return (
     <Screen theme="paper">
-      <StatusBar trailing={trailing}>{title}</StatusBar>
+      <StatusBar leading={leading} trailing={trailing}>{title}</StatusBar>
       <Main {...layout}>{children}</Main>
       {keys && (
         <Keys reader={reader ? t("reader") : false}>

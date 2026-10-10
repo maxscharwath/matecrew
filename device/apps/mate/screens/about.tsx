@@ -6,7 +6,7 @@ import {
   Keys,
   Key,
   Surface,
-  MateCrewMark,
+  OwtMark,
   H3,
   Large,
   Footnote,
@@ -46,7 +46,7 @@ export function about() {
       <StatusBar>{t("about.title")}</StatusBar>
       <Main direction="row" gap={24}>
         <Surface variant="ink" radius={16} width={232} height="fill" align="center" justify="center" gap={12} padding={[16, 16]}>
-          <MateCrewMark size={80} />
+          <OwtMark size={80} />
           <H3 align="center">{t("about.terminal")}</H3>
           <Large align="center">{t("about.version", { version: device("firmware.version", "--") })}</Large>
           <Footnote align="center">{device("firmware.build", "--")}</Footnote>
