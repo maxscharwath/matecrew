@@ -37,6 +37,13 @@ describe("a terminal's office hours", () => {
     expect(never.weekend).toBe(true);
   });
 
+  test("a day without opening is still the weekend, its evening included", () => {
+    const sunday = new Date("2026-10-18T12:00:00Z"); // Sunday 14:00
+    expect(hoursAt(WEEKDAYS, ZURICH, sunday)).toEqual({ open: false, until: new Date("2026-10-19T05:30:00Z"), weekend: true });
+    const thursday = new Date("2026-10-15T19:00:00Z"); // Thursday 21:00: only a night
+    expect(hoursAt(WEEKDAYS, ZURICH, thursday).weekend).toBe(false);
+  });
+
   test("the night screen names the day only beyond the next morning", () => {
     const monday = new Date("2026-10-19T05:30:00Z"); // Monday 07:30 in Zurich
     // From Friday evening: "Réveil lundi à 07:30".

@@ -52,7 +52,10 @@ export type HoursNow = {
   open: boolean;
   /** When `open` changes: the closing while open, the next opening while closed. */
   until: Date;
-  /** Closed for at least a whole day ahead (a weekend, a bridge): the night screen says so. */
+  /**
+   * Closed for at least a whole day ahead, or all day today (a weekend, a bridge): the night
+   * screen says so rather than "good night".
+   */
   weekend: boolean;
 };
 
@@ -79,7 +82,8 @@ export function hoursAt(hours: OfficeHours, timezone: string, now = new Date()):
     const closes = zonedInstant(day, hours.until, timezone);
     if (closes <= opens || now >= closes) continue;
     if (now >= opens) return { open: true, until: closes, weekend: false };
-    return { open: false, until: opens, weekend: ahead >= 2 };
+    const closedToday = !hours.days.includes(today.getUTCDay());
+    return { open: false, until: opens, weekend: ahead >= 2 || (ahead === 1 && closedToday) };
   }
   return { open: false, until: new Date(now.getTime() + 7 * DAY_MS), weekend: true };
 }
