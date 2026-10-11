@@ -12,6 +12,7 @@ import {
   StatsSectionFallback,
   SettlementSection,
   SettlementSectionFallback,
+  TerminalSection,
 } from "./_sections";
 
 interface Props {
@@ -51,6 +52,10 @@ export default async function DashboardPage({ params }: Props) {
 
       <Suspense fallback={<SettlementSectionFallback />}>
         <SettlementSection officeId={officeId} userId={userId} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <TerminalSection officeId={officeId} userId={userId} />
       </Suspense>
     </div>
   );

@@ -86,6 +86,10 @@
     "createOffice": "Créer un bureau"
   },
   "dashboard": {
+    "terminal3d": {
+      "title": "Le terminal",
+      "subtitle": "Le terminal du bureau en 3D. Son écran affiche le vrai stock ; une prise faite ici reste une simulation."
+    },
     "title": "Tableau de bord",
     "welcome": "Bienvenue, {name} · {office}",
     "thisMonth": "Ce mois",
@@ -1659,6 +1663,104 @@
         "dark": "Encre claire sur noir",
         "flipper": "Typo pixel",
         "macos": "Mac classique"
+      }
+    },
+    "terminal3d": {
+      "title": "Le terminal en 3D",
+      "subtitle": "Le boîtier tel qu'il est imprimé et monté, avec ses vraies cartes. L'écran affiche le firmware du terminal en direct.",
+      "loading": "Chargement du modèle 3D",
+      "explode": "Vue éclatée",
+      "assemble": "Assembler",
+      "slider": "Décomposition du terminal",
+      "hint": "Touchez les pastilles noires ou le pavé NFC.",
+      "live": "Écran en direct",
+      "keyLeft": "Touche gauche",
+      "keyRight": "Touche droite",
+      "badge": "Badger",
+      "mute": "Couper le buzzer",
+      "unmute": "Activer le buzzer",
+      "layers": {
+        "facade": {
+          "title": "Façade",
+          "detail": "PLA blanc, 5 inserts laiton"
+        },
+        "inlays": {
+          "title": "Incrustations",
+          "detail": "Cadre, pastilles et pavé NFC en PLA noir"
+        },
+        "keys": {
+          "title": "Touches et buzzer",
+          "detail": "2 modules TTP223, buzzer piézo 16 mm"
+        },
+        "screen": {
+          "title": "Écran",
+          "detail": "E-paper 7,5 pouces, 800 × 480"
+        },
+        "driver": {
+          "title": "Carte driver",
+          "detail": "ePaper Driver Board, connecteur 24 broches"
+        },
+        "xiao": {
+          "title": "XIAO ESP32-S3",
+          "detail": "Wi-Fi, BLE, USB-C, sur ses barrettes"
+        },
+        "chassis": {
+          "title": "Châssis",
+          "detail": "PLA noir, plaque la dalle, cage de batterie"
+        },
+        "nfc": {
+          "title": "Lecteur NFC",
+          "detail": "PN532 en I2C, vissé dans un insert"
+        },
+        "battery": {
+          "title": "Batterie",
+          "detail": "LiPo 654060, 2000 mAh"
+        },
+        "cover": {
+          "title": "Capot",
+          "detail": "PLA blanc, 2 trous de serrure"
+        },
+        "screws": {
+          "title": "Vis",
+          "detail": "4 vis M2 × 5 Torx T6"
+        },
+        "magnets": {
+          "title": "Aimants",
+          "detail": "6 aimants néodyme 10 × 1,6"
+        },
+        "stand": {
+          "title": "Socle",
+          "detail": "Incliné à 15°, 2 aimants"
+        }
+      },
+      "demo": {
+        "take": "Prendre",
+        "account": "Mon compte",
+        "lowLabel": "Stock bas",
+        "moreLabel": "autres",
+        "chartLabel": "Stock · 7 jours",
+        "holder": "Alex"
+      },
+      "os": {
+        "title": "L'OS du terminal",
+        "intro": "Les écrans et le parcours de prise du terminal, écrits en Rust, tournent ici en WebAssembly : l'écran du modèle est celui de l'appareil, pixel pour pixel.",
+        "screens": {
+          "title": "Écrans",
+          "text": "Écrits en TSX, compilés en bytecode et dessinés par un moteur Rust sur l'e-paper 800 × 480 noir et blanc. Rafraîchissement partiel, sans flash."
+        },
+        "take": {
+          "title": "Prendre un maté",
+          "text": "Une touche réveille le terminal et demande le badge. Le PN532 lit son UID, on choisit l'article, et la prise part dans une file locale. Elle s'annule depuis le compte."
+        },
+        "sleep": {
+          "title": "Sommeil profond",
+          "text": "Entre deux usages, le XIAO passe en sommeil profond et ne garde que son horloge. L'e-paper garde son image sans courant."
+        },
+        "sync": {
+          "title": "Synchronisation",
+          "text": "Réveillé, il se synchronise toutes les 2 min ou dès que le site le prévient. Endormi, il se réveille toutes les 15 min le jour et toutes les 2 h la nuit : prises en attente, stock, badges, réglages et mises à jour du firmware."
+        },
+        "try": "Essayez : la pastille de gauche, puis le pavé NFC."
       }
     }
   },

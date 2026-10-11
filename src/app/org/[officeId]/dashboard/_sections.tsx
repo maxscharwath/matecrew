@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TodayConsumptionsCard } from "@/components/today-consumptions-card";
 import { MateCrewLogo } from "@/components/matecrew-logo";
 import { TakeCanButton } from "@/components/take-can-button";
+import { Device3D } from "@/components/device-3d";
 import {
   MateActivityHeatmap,
   type HeatmapCell,
@@ -41,6 +42,7 @@ import { calculateReimbursements } from "@/lib/reimbursement-calc";
 import { getActiveItems } from "@/lib/items";
 import { effectiveLowStockThreshold } from "@/lib/stock";
 import { cn } from "@/lib/utils";
+import { memberTerminal } from "@/lib/device/member-terminal";
 
 interface SectionProps {
   officeId: string;
@@ -967,5 +969,25 @@ function StreakTrail({
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * The office's terminal in 3D, its screen drawn by the firmware from the office's real stock. Last on
+ * the page, and its WebGL only loads once it is scrolled near (Device3D): the hero keeps its flat tile.
+ * Offices without a terminal do not get one.
+ */
+export async function TerminalSection({ officeId, userId }: SectionProps) {
+  const office = await memberTerminal(officeId, userId);
+  if (!office) return null;
+  const t = await getTranslations();
+  return (
+    <Card className="gap-0 overflow-hidden pb-0">
+      <CardHeader>
+        <CardTitle>{t('dashboard.terminal3d.title')}</CardTitle>
+        <CardDescription>{t('dashboard.terminal3d.subtitle')}</CardDescription>
+      </CardHeader>
+      <Device3D className="h-[420px] sm:h-[480px]" office={office} />
+    </Card>
   );
 }

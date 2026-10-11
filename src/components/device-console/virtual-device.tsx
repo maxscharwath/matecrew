@@ -39,6 +39,7 @@ import type { DeviceTheme } from "@/lib/device/contract";
 import { ScreenControl } from "./screen-control";
 import { FrameCanvas } from "./frame-canvas";
 import { BuzzerEmulator, useBuzzerEmulator } from "./buzzer-emulator";
+import { Device3D } from "@/components/device-3d";
 import { DeviceWasm, WASM_URL } from "@/lib/device/virtual/wasm";
 import {
   VirtualDevice,
@@ -321,6 +322,13 @@ function Running({
           <p className="text-center text-xs text-muted-foreground">
             {t("hint", { id: snapshot.hardwareId })} {tc("shortcuts")}
           </p>
+          {/* The same terminal in its case: its frames, its keys and its reader. */}
+          <Card className="overflow-hidden py-0">
+            <Device3D
+              className="h-[420px]"
+              screen={{ bits: snapshot.bits, onKey: shortcuts.key, onBadge: shortcuts.badge }}
+            />
+          </Card>
         </div>
 
         <div className="space-y-4">

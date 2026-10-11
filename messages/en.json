@@ -86,6 +86,10 @@
     "createOffice": "Create an office"
   },
   "dashboard": {
+    "terminal3d": {
+      "title": "The terminal",
+      "subtitle": "The office terminal in 3D. Its screen shows the real stock; a take made here is only a simulation."
+    },
     "title": "Dashboard",
     "welcome": "Welcome, {name} · {office}",
     "thisMonth": "This month",
@@ -1659,6 +1663,104 @@
         "dark": "Light ink on black",
         "flipper": "Pixel type",
         "macos": "Classic Mac"
+      }
+    },
+    "terminal3d": {
+      "title": "The terminal in 3D",
+      "subtitle": "The case as printed and assembled, with its real boards. The screen runs the terminal's firmware live.",
+      "loading": "Loading the 3D model",
+      "explode": "Exploded view",
+      "assemble": "Assemble",
+      "slider": "Take the terminal apart",
+      "hint": "Tap the black key dots or the NFC pad.",
+      "live": "Live screen",
+      "keyLeft": "Left key",
+      "keyRight": "Right key",
+      "badge": "Tap a badge",
+      "mute": "Mute the buzzer",
+      "unmute": "Unmute the buzzer",
+      "layers": {
+        "facade": {
+          "title": "Front",
+          "detail": "White PLA, 5 brass inserts"
+        },
+        "inlays": {
+          "title": "Inlays",
+          "detail": "Frame, key dots and NFC pad in black PLA"
+        },
+        "keys": {
+          "title": "Keys and buzzer",
+          "detail": "2 TTP223 modules, 16 mm piezo buzzer"
+        },
+        "screen": {
+          "title": "Screen",
+          "detail": "7.5 inch e-paper, 800 × 480"
+        },
+        "driver": {
+          "title": "Driver board",
+          "detail": "ePaper Driver Board, 24-pin connector"
+        },
+        "xiao": {
+          "title": "XIAO ESP32-S3",
+          "detail": "Wi-Fi, BLE, USB-C, on its headers"
+        },
+        "chassis": {
+          "title": "Chassis",
+          "detail": "Black PLA, holds the panel and the battery"
+        },
+        "nfc": {
+          "title": "NFC reader",
+          "detail": "PN532 over I2C, screwed into an insert"
+        },
+        "battery": {
+          "title": "Battery",
+          "detail": "LiPo 654060, 2000 mAh"
+        },
+        "cover": {
+          "title": "Back cover",
+          "detail": "White PLA, 2 keyholes"
+        },
+        "screws": {
+          "title": "Screws",
+          "detail": "4 M2 × 5 Torx T6 screws"
+        },
+        "magnets": {
+          "title": "Magnets",
+          "detail": "6 neodymium magnets, 10 × 1.6"
+        },
+        "stand": {
+          "title": "Stand",
+          "detail": "15° tilt, 2 magnets"
+        }
+      },
+      "demo": {
+        "take": "Take",
+        "account": "My account",
+        "lowLabel": "Low stock",
+        "moreLabel": "more",
+        "chartLabel": "Stock · 7 days",
+        "holder": "Alex"
+      },
+      "os": {
+        "title": "The terminal's OS",
+        "intro": "The terminal's screens and take flow, written in Rust, run here in WebAssembly: the model's screen is the device's own, pixel for pixel.",
+        "screens": {
+          "title": "Screens",
+          "text": "Written in TSX, compiled to bytecode and drawn by a Rust engine on the 800 × 480 black and white e-paper. Partial refreshes, no flashing."
+        },
+        "take": {
+          "title": "Taking a maté",
+          "text": "A key wakes the terminal, which asks for a badge. The PN532 reads its UID, you pick the item, and the take joins a local queue. It can be cancelled from the account."
+        },
+        "sleep": {
+          "title": "Deep sleep",
+          "text": "Between uses the XIAO goes into deep sleep and keeps only its clock running. The e-paper keeps its image without power."
+        },
+        "sync": {
+          "title": "Sync",
+          "text": "Awake, it syncs every 2 min or as soon as the site tells it to. Asleep, it wakes every 15 min by day and every 2 h at night: queued takes, stock, badges, settings and firmware updates."
+        },
+        "try": "Try it: the left key dot, then the NFC pad."
       }
     }
   },

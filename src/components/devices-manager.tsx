@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BatteryLow, BatteryMedium, Bluetooth, Cpu, Nfc, Plus, Trash2 } from "lucide-react";
+import { BatteryLow, BatteryMedium, Bluetooth, Box, Cpu, Moon, Nfc, PanelsTopLeft, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { assignBadge, deleteBadge } from "@/app/org/[officeId]/admin/devices/actions";
 import { FrameThumbnail } from "@/components/device-console/frame-canvas";
+import { Device3D } from "@/components/device-3d";
 
 const LOW_BATTERY_MV = 3500;
 
@@ -82,8 +83,50 @@ export function DevicesManager({ officeId, linkUrl, members, badges, devices }: 
         </div>
       )}
 
+      <Terminal3D />
+
       <Badges officeId={officeId} badges={badges} members={members} />
     </div>
+  );
+}
+
+/** The terminal as built, in 3D, its screen run by the firmware with made-up data, and what that firmware does. */
+function Terminal3D() {
+  const t = useTranslations("devices.terminal3d");
+  const points = [
+    { key: "screens", icon: <PanelsTopLeft /> },
+    { key: "take", icon: <Nfc /> },
+    { key: "sleep", icon: <Moon /> },
+    { key: "sync", icon: <RefreshCw /> },
+  ] as const;
+  return (
+    <Card className="gap-0 overflow-hidden pb-0">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Box className="size-5" /> {t("title")}
+        </CardTitle>
+        <CardDescription>{t("subtitle")}</CardDescription>
+      </CardHeader>
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_17rem]">
+        <Device3D className="h-[440px] sm:h-[520px]" />
+        <section className="space-y-3 border-t p-4 text-sm lg:border-t-0 lg:border-l">
+          <h3 className="font-semibold">{t("os.title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("os.intro")}</p>
+          <ul className="space-y-3">
+            {points.map((point) => (
+              <li key={point.key} className="flex gap-2.5">
+                <span className="mt-0.5 text-muted-foreground [&_svg]:size-4">{point.icon}</span>
+                <span>
+                  <span className="block font-medium">{t(`os.${point.key}.title`)}</span>
+                  <span className="block text-xs text-muted-foreground">{t(`os.${point.key}.text`)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="rounded-md bg-muted px-2.5 py-2 text-xs">{t("os.try")}</p>
+        </section>
+      </div>
+    </Card>
   );
 }
 
