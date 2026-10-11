@@ -96,5 +96,8 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA=n
 CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 CONFIG_ESP_WIFI_GMAC_SUPPORT=n
 CONFIG_LWIP_IPV6=n
+# After a deep sleep, ask for the last address again instead of discovering a server: the
+# terminal is on the network sooner. Kept in NVS, written only when it changes.
+CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
 # printf from the ROM's newlib-nano: ESP-IDF's C logs do not print floats or 64-bit integers.
 CONFIG_LIBC_NEWLIB_NANO_FORMAT=y

@@ -136,6 +136,16 @@ export const deviceState = z.object({
   realtime: z.object({ url: z.string() }).nullable().default(null),
   /** When this state changes by itself (a session's cutoff, a preparation ending), ISO 8601: sync then. */
   refreshAt: z.string().nullable().default(null),
+  /**
+   * Its office hours now: open (it sleeps between uses, the stock on its screen, the sleep icon
+   * in its status bar) or closed (its night screen, asleep until `until`, ISO 8601). Closed, it
+   * wakes up at `time` ("07:30", the office's time), on `day` (its name in the office's language)
+   * when that is not the next morning; `weekend` when it is more than a night away.
+   */
+  hours: z
+    .object({ open: z.boolean(), until: z.string(), weekend: z.boolean(), day: z.string(), time: z.string() })
+    .nullable()
+    .default(null),
 });
 
 export const deviceTake = z.object({

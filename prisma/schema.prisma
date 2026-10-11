@@ -645,6 +645,13 @@ model Device {
   locale      String?
   /// Its screens' theme (`deviceTheme` in src/lib/device/contract.ts); null is the site's default.
   theme       String?
+  /// Its office hours, local ("HH:MM", office timezone) on `openDays` (0 = Sunday ... 6 =
+  /// Saturday, comma-separated, as `MateSession.dayOfWeek`). Inside them the terminal sleeps
+  /// between uses with the stock on its screen; outside them it shows its night screen until
+  /// it opens (`hours` in src/lib/device/state.ts).
+  openFrom    String          @default("07:30")
+  openUntil   String          @default("19:00")
+  openDays    String          @default("1,2,3,4,5")
 
   firmwareVersion String?
   batteryMv       Int?

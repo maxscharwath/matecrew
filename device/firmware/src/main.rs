@@ -20,6 +20,7 @@ mod ota;
 mod portal;
 mod power;
 mod remote;
+mod sleep;
 mod socket;
 mod store;
 mod viewers;
@@ -63,8 +64,8 @@ const FIRMWARE_BUILD: &str = env!("MATECREW_BUILD");
 const FIRMWARE_COMMIT: &str = env!("MATECREW_COMMIT");
 /// Failed connections in a row before the device forgets the network and opens setup again.
 const MAX_WIFI_FAILURES: u8 = 3;
-/// Until deep sleep is wired, the device stays awake and syncs on a timer, as long as no relay
-/// tells it when to.
+/// Awake without the relay (a console watches over the long poll, a computer on USB), the
+/// terminal syncs on a timer.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
 /// With the relay's socket open, the site says when what the terminal shows changed: the timer
 /// is only a safety net.
@@ -105,6 +106,8 @@ pub enum Input {
     Changed(f64),
     /// The relay's socket opened or closed.
     Live(bool),
+    /// The serial console's `sleep`: deep sleep now, the timer capped at this.
+    Doze(Option<Duration>),
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -116,6 +119,21 @@ const CLEAN_WHEN_IDLE: Duration = Duration::from_secs(60);
 /// A sync waits this long after the last key or tap: it holds the keys while the site answers,
 /// up to `api::TIMEOUT` when it does not.
 const SYNC_WHEN_IDLE: Duration = Duration::from_secs(30);
+/// Unused this long, the terminal goes to deep sleep (`doze`).
+const DOZE_AFTER: Duration = Duration::from_secs(120);
+/// Woken by its timer, it sleeps again this long after it started at the latest...
+const DOZE_AGAIN: Duration = Duration::from_secs(10);
+/// ... or this long after the relay's socket opened: the relay hands over the commands that
+/// waited and says whether a console watches right after the hello.
+const LINGER: Duration = Duration::from_millis(1500);
+/// Kept awake (a console, the USB cable, a message on screen), it asks again this often.
+const DOZE_RECHECK: Duration = Duration::from_secs(30);
+/// Asleep inside office hours, it wakes up this often to sync: what the site changed shows.
+const DAY_WAKE: Duration = Duration::from_secs(15 * 60);
+/// Asleep outside them, this often to set its clock: the RTC drifts by a minute or so an hour.
+const NIGHT_WAKE: Duration = Duration::from_secs(2 * 60 * 60);
+/// Not worth a deep sleep: it would wake up again at once.
+const MIN_DOZE: Duration = Duration::from_secs(60);
 
 fn main() {
     // The terminal has no button and no switch: whatever fails, it starts over
@@ -132,6 +150,13 @@ fn app() -> Result<()> {
     // The log goes to the serial port and to a browser paired over Bluetooth.
     ble::init_logging();
     log::info!("matecrew device {FIRMWARE_VERSION}");
+    // First, before anything else: a cold start clears what the RTC kept.
+    let wake = sleep::woke();
+    let kept = sleep::shown();
+    // From deep sleep the panel shows the stock or the night screen: nothing on the way shows,
+    // flashes or plays the boot melody.
+    let warm = kept.is_some();
+    log::info!("start: {wake:?}");
 
     let p = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
@@ -163,7 +188,9 @@ fn app() -> Result<()> {
     boot.start("screen", &[]);
     boot.done("screenReady", &[]);
     boot.start("reader", &[]);
-    screen.show(|d| boot.render(d))?;
+    if !warm {
+        screen.show(|d| boot.render(d))?;
+    }
     if let Err(e) = console::watch(sender.clone()) {
         log::warn!("no serial console commands: {e:#}");
     }
@@ -197,9 +224,17 @@ fn app() -> Result<()> {
             Box::new(|| None)
         }
     });
-    buzzer.beep(matecrew_core::flow::Beep::Boot);
+    if !warm {
+        buzzer.beep(matecrew_core::flow::Beep::Boot);
+    }
+    // The key that woke it: a press over the stock, only a wake over the night screen.
+    let woken = match (wake, kept.as_ref().map(|kept| kept.night.is_none())) {
+        (sleep::Wake::Key(side), Some(true)) => keys::Woken::Press(side),
+        (sleep::Wake::Key(side), _) => keys::Woken::Ignore(side),
+        _ => keys::Woken::No,
+    };
     cores::on(Core::Core1, || {
-        keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone())
+        keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone(), woken)
     })?;
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio43, p.pins.gpio44) {
         Ok(nfc) => Some(nfc),
@@ -232,12 +267,20 @@ fn app() -> Result<()> {
 
     let linked = store.token()?.is_some();
     boot.start("wifiJoining", &[("ssid", &creds.ssid)]);
-    screen.show(|d| boot.render(d))?;
+    if !warm {
+        screen.show(|d| boot.render(d))?;
+    }
     if !linked {
         // Setting up: say what happens at each step.
         screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
     }
-    if let Err(e) = wifi::connect(&mut wifi, &creds) {
+    let joined = if warm && matches!(wake, sleep::Wake::Key(_)) {
+        // A key woke it: the key first, the network meanwhile.
+        wifi::start_joining(&mut wifi, &creds, sleep::access_point())
+    } else {
+        wifi::connect(&mut wifi, &creds, sleep::access_point())
+    };
+    if let Err(e) = joined {
         if linked {
             // A paired terminal must still boot and accept badges using cached state.
             log::warn!("Wi-Fi unavailable, starting from cached state: {e:#}");
@@ -294,7 +337,9 @@ fn app() -> Result<()> {
     boot.start("site", &[]);
     boot.done("siteReady", &[("host", api::host(&site))]);
     boot.start("apps", &[]);
-    screen.show(|d| boot.render(d))?;
+    if !warm {
+        screen.show(|d| boot.render(d))?;
+    }
     let live = remote::Live::new(
         token.clone(),
         matecrew_core::live::Status { firmware: Some(FIRMWARE_VERSION.to_owned()), ..Default::default() },
@@ -334,7 +379,9 @@ fn app() -> Result<()> {
     boot.done(if app.is_some() { "appsLoaded" } else { "mateLoaded" }, &[]);
     boot.start("ready", &[]);
     boot.done("allReady", &[]);
-    screen.show(|d| boot.render(d))?;
+    if !warm {
+        screen.show(|d| boot.render(d))?;
+    }
     Terminal {
         site: site.clone(),
         claim_key,
@@ -372,6 +419,14 @@ fn app() -> Result<()> {
         offline: false,
         live,
         synced: None,
+        wake,
+        kept,
+        // Woken by its timer, it is still asleep for the office: the moon stays.
+        dozing: wake == sleep::Wake::Timer,
+        touched: Instant::now(),
+        doze_at: Instant::now() + if wake == sleep::Wake::Timer { DOZE_AGAIN } else { DOZE_AFTER },
+        device_drawn: serde_json::Value::Null,
+        kept_awake: None,
     }
     .run()
 }
@@ -611,10 +666,27 @@ struct Terminal {
     live: remote::Live,
     /// When the last sync worked.
     synced: Option<Instant>,
+    /// Why it started: a cold start, or its timer or a key after a deep sleep.
+    wake: sleep::Wake,
+    /// What the panel kept through the deep sleep, drawn again first (`assume`).
+    kept: Option<sleep::Shown>,
+    /// Asleep for the office: the moon instead of the clock in the status bar, and no arrows. Set
+    /// before a deep sleep and through a timer wake; any key or command clears it.
+    dozing: bool,
+    /// The last key, tap, badge or command.
+    touched: Instant,
+    /// When to go to deep sleep, if nothing keeps the terminal awake then.
+    doze_at: Instant,
+    /// `$device` as the last screen was drawn with it, kept through a deep sleep.
+    device_drawn: serde_json::Value,
+    /// Why it stayed awake at the last try, logged when that changes.
+    kept_awake: Option<&'static str>,
 }
 
 enum Next {
     OverlayDue,
+    /// Idle long enough to go to deep sleep.
+    DozeDue,
     Input(Input),
     /// The flow's deadline passed.
     Tick,
@@ -624,12 +696,27 @@ enum Next {
 
 impl Terminal {
     fn run(mut self) -> Result<()> {
-        // Keys touched during setup or linking do not count.
-        while self.inputs.try_recv().is_ok() {}
-        self.sync(false);
-        self.maybe_update();
-        let mut touched = Instant::now();
-        let mut sync_at = self.next_sync();
+        if let Some(kept) = self.kept.take() {
+            let night = kept.night.is_some();
+            self.assume(kept);
+            if night && self.wake != sleep::Wake::Timer {
+                // A key over the night screen: the stock, awake.
+                self.draw_main()?;
+            }
+        }
+        let mut sync_at = match self.wake {
+            sleep::Wake::Cold | sleep::Wake::Timer => {
+                if self.wake == sleep::Wake::Cold {
+                    // Keys touched during setup or linking do not count.
+                    while self.inputs.try_recv().is_ok() {}
+                }
+                self.sync(false);
+                self.maybe_update();
+                self.next_sync()
+            }
+            // The key first (it is in the channel); the sync once the terminal is idle again.
+            sleep::Wake::Key(_) => Instant::now(),
+        };
         loop {
             if self.flow.is_idle() {
                 if let Some(mode) = self.pending_app.take() {
@@ -678,22 +765,22 @@ impl Terminal {
                     }
                 }
                 Next::Input(Input::BadgeSeen(uid)) => {
-                    touched = Instant::now();
+                    self.touch();
                     self.badge_seen(&uid)?
                 }
                 Next::Input(Input::Tap(x, y)) => {
-                    touched = Instant::now();
+                    self.touch();
                     self.tap_screen(x, y)?
                 }
                 Next::Input(Input::Pressed(event)) => {
-                    touched = Instant::now();
+                    self.touch();
                     self.pressed = true;
                     let stepped = self.step(event);
                     self.pressed = false;
                     stepped?
                 }
                 Next::Input(Input::Flow(event)) => {
-                    touched = Instant::now();
+                    self.touch();
                     // Keys from the console or the site beep here, the touch keys did already.
                     self.pressed = matches!(event, Event::Key { .. } | Event::LongKey { .. } | Event::BothKeys);
                     if self.pressed {
@@ -704,13 +791,31 @@ impl Terminal {
                     stepped?
                 }
                 Next::Tick => self.step(Event::Tick)?,
-                Next::SyncDue if touched.elapsed() < SYNC_WHEN_IDLE => {
-                    sync_at = touched + SYNC_WHEN_IDLE;
+                Next::DozeDue => {
+                    let awake_for = self.awake_for();
+                    match awake_for {
+                        None => self.doze(None)?,
+                        Some(reason) if self.kept_awake != awake_for => log::info!("sleep: not now, {reason}"),
+                        Some(_) => {}
+                    }
+                    self.kept_awake = awake_for;
+                    // Still here: something kept it awake.
+                    self.doze_at = self.doze_at.max(Instant::now() + DOZE_RECHECK);
+                }
+                Next::Input(Input::Doze(cap)) => {
+                    if self.flow.is_idle() {
+                        self.doze(Some(cap.unwrap_or(DAY_WAKE)))?;
+                    } else {
+                        log::warn!("sleep: not while the screen waits for someone");
+                    }
+                }
+                Next::SyncDue if self.touched.elapsed() < SYNC_WHEN_IDLE => {
+                    sync_at = self.touched + SYNC_WHEN_IDLE;
                 }
                 Next::Input(Input::Sync) | Next::SyncDue => {
                     if self.flow.is_idle() {
                         self.sync(false);
-                        if touched.elapsed() >= CLEAN_WHEN_IDLE {
+                        if self.touched.elapsed() >= CLEAN_WHEN_IDLE {
                             self.screen.clean()?;
                         }
                         self.screen.rest()?;
@@ -728,6 +833,9 @@ impl Terminal {
                 Next::Input(Input::Live(true)) => {
                     if self.synced.is_none_or(|at| at.elapsed() >= RESYNC_AFTER) {
                         sync_at = sync_at.min(Instant::now());
+                    }
+                    if self.dozing {
+                        self.doze_at = self.doze_at.min(Instant::now() + LINGER);
                     }
                 }
                 Next::Input(Input::Live(false)) => {
@@ -767,11 +875,14 @@ impl Terminal {
             if net::shown() != self.net_drawn {
                 return Ok(Next::Input(Input::Net));
             }
+            let now = Instant::now();
+            if self.flow.is_idle() && now >= self.doze_at {
+                return Ok(Next::DozeDue);
+            }
             let mut deadline = self
                 .flow
                 .deadline()
-                .map_or(sync_at, |ms| self.started + Duration::from_millis(ms));
-            let now = Instant::now();
+                .map_or(sync_at.min(self.doze_at), |ms| self.started + Duration::from_millis(ms));
             if let Some(at) = [
                 self.app.as_ref().and_then(|app| app.overlay_deadline()),
                 ui::notifications::deadline(),
@@ -1164,7 +1275,9 @@ impl Terminal {
             .trim_start_matches("https://")
             .trim_start_matches("http://")
             .trim_end_matches('/');
-        ui::device_info::set(serde_json::json!({
+        // Asleep for the office, the status bar keeps still: a sync's arrows would refresh it.
+        let net = if self.dozing { (false, false) } else { self.net_drawn };
+        self.device_drawn = serde_json::json!({
             "board":{"name":"XIAO ESP32-S3","simulated":false},
             "pins":{"left":5,"right":8,"buzzer":6,"nfcSda":43,"nfcScl":44,"battery":6},
             "firmware":{
@@ -1184,12 +1297,14 @@ impl Terminal {
                 "mac":wifi::hardware_id(&self.wifi).ok()
             },
             "battery":self.supply.read(self.buzzer.quiet()).json(),
-            "net":{"up":self.net_drawn.0,"down":self.net_drawn.1},
+            "net":{"up":net.0,"down":net.1},
+            "sleeping":self.dozing,
             "ble":{"connected":self.ble_drawn.0,"paired":self.ble_drawn.1},
             "memory":memory::json(),
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
             "clock":ui::device_info::clock(self.state.as_ref(), now())
-        }))
+        });
+        ui::device_info::set(self.device_drawn.clone())
     }
 
     fn draw_main(&mut self) -> Result<()> {
@@ -1200,6 +1315,10 @@ impl Terminal {
         let gathered = Instant::now();
         let info = self.device_info();
         log::info!("draw: device info in {} ms", gathered.elapsed().as_millis());
+        if let Some(night) = self.night() {
+            self.screen.show(|d| ui::sleep_screen(d, night.weekend, &night.day, &night.time))?;
+            return Ok(());
+        }
         if let Some(app) = &mut self.app {
             app.update_device(info);
         }
@@ -1283,7 +1402,9 @@ impl Terminal {
         // A sync holds this loop, so the arrows are drawn before it starts (the panel refreshes
         // meanwhile); they go out a few seconds after (`net`).
         let shown = net::transfer(true);
-        let _ = self.redraw_current();
+        if !self.dozing {
+            let _ = self.redraw_current();
+        }
         let synced = self.try_sync(redraw);
         drop(shown);
         match synced {
@@ -1312,6 +1433,7 @@ impl Terminal {
     /// Sends queued takes and badges, then fetches state and draws its screen data.
     fn try_sync(&mut self, redraw: bool) -> Result<()> {
         wifi::reconnect(&mut self.wifi)?;
+        sleep::keep_access_point(wifi::access_point());
         if !self.queue.takes().is_empty() {
             let reply = self.api.takes(self.queue.takes())?;
             for rejected in &reply.rejected {
@@ -1452,6 +1574,148 @@ impl Terminal {
         if let Err(e) = self.store.set_queue(&self.queue) {
             log::error!("queue not saved: {e:#}");
         }
+    }
+
+    /// A key, a tap, a badge or a command: awake, the clock back in the status bar, and deep
+    /// sleep DOZE_AFTER from now.
+    fn touch(&mut self) {
+        self.dozing = false;
+        self.touched = Instant::now();
+        self.doze_at = self.touched + DOZE_AFTER;
+    }
+
+    /// Why the terminal stays awake now; `None` when it may go to deep sleep.
+    fn awake_for(&self) -> Option<&'static str> {
+        if self.state.as_ref().and_then(|state| state.hours.as_ref()).is_none() {
+            return Some("the site gives no office hours");
+        }
+        // SAFETY: reads whether a USB host sent start-of-frame packets lately.
+        if unsafe { esp_idf_svc::sys::usb_serial_jtag_is_connected() } {
+            return Some("a computer on USB (the serial console's `sleep` sleeps anyway)");
+        }
+        if remote::watching() {
+            return Some("a console watches");
+        }
+        if ble::linked().0 {
+            return Some("a browser is connected over Bluetooth");
+        }
+        if !self.flow.is_idle() || self.pending_app.is_some() || !self.pending.is_empty() {
+            return Some("in use");
+        }
+        let overlay = ui::notifications::deadline().or_else(|| self.app.as_ref().and_then(|app| app.overlay_deadline()));
+        overlay.map(|_| "a message on screen")
+    }
+
+    /// While asleep through closed hours: the night screen's words. `None` awake, inside the
+    /// hours, or when the hours the site gave are out of date.
+    fn night(&self) -> Option<sleep::Night> {
+        let hours = self.state.as_ref()?.hours.as_ref()?;
+        let ahead = time::parse_iso(&hours.until).is_some_and(|until| until > now());
+        (self.dozing && !hours.open && ahead).then(|| sleep::Night {
+            weekend: hours.weekend,
+            day: hours.day.clone(),
+            time: hours.time.clone(),
+        })
+    }
+
+    /// After a deep sleep: draws again the screen the panel kept, without refreshing it, so the
+    /// next screen is a partial refresh from it rather than a flash.
+    fn assume(&mut self, kept: sleep::Shown) {
+        let drawn: serde_json::Value = serde_json::from_str(&kept.device).unwrap_or_default();
+        self.offline = drawn["offline"].as_bool().unwrap_or(false);
+        // The night screen comes before any main screen, which sets the theme otherwise.
+        if let Some(state) = &self.state {
+            ui::set_theme(ui::Theme::from_name(&state.theme));
+        }
+        self.device_drawn = drawn["device"].clone();
+        let info = ui::device_info::set(self.device_drawn.clone());
+        if let Some(app) = &mut self.app {
+            app.update_device(info);
+        }
+        let offline = self.offline;
+        let (screen, app, state) = (&mut self.screen, self.app.as_ref(), self.state.as_ref());
+        let same = match (&kept.night, app, state) {
+            (Some(night), _, _) => screen.assume(|d| ui::sleep_screen(d, night.weekend, &night.day, &night.time), kept.digest, kept.wear),
+            (None, Some(app), _) => {
+                screen.assume(|d| ui::render_app(d, app, ui::app_scale(app.scene())), kept.digest, kept.wear)
+            }
+            (None, None, Some(state)) => screen.assume(|d| ui::state_screen(d, state, offline), kept.digest, kept.wear),
+            (None, None, None) => false,
+        };
+        if same {
+            log::info!("wake: the panel's screen drawn again, {:?}", kept.wear);
+        } else {
+            log::warn!("wake: the screen drawn again is not the panel's: the next one takes a full refresh");
+        }
+    }
+
+    /// Deep sleep, with the stock and the moon inside office hours (waking up every DAY_WAKE to
+    /// sync, when the site's state changes by itself, and at closing), with the night screen
+    /// outside them (waking up when they open). A key wakes it. `cap`: the serial console's.
+    /// Returns only when it did not sleep: a key meanwhile, or too soon to be worth it.
+    fn doze(&mut self, cap: Option<Duration>) -> Result<()> {
+        let stale = |terminal: &Self| {
+            let until = terminal.state.as_ref().and_then(|s| s.hours.as_ref()).and_then(|h| time::parse_iso(&h.until));
+            until.is_some_and(|until| until <= now())
+        };
+        if stale(self) {
+            // The office opened or closed since the last sync: what now?
+            self.sync(false);
+        }
+        let Some(hours) = self.state.as_ref().and_then(|s| s.hours.clone()) else { return Ok(()) };
+        let open = hours.open || stale(self);
+        let mut wake_in = if open { DAY_WAKE } else { NIGHT_WAKE };
+        let ahead = |at: Option<i64>| at.map(|at| at - now()).filter(|&s| s > 0).map(|s| Duration::from_secs(s as u64));
+        if let Some(until) = ahead(time::parse_iso(&hours.until)) {
+            wake_in = wake_in.min(until);
+        }
+        if open {
+            let refresh = self.state.as_ref().and_then(|s| s.refresh_at.as_deref()).and_then(time::parse_iso);
+            if let Some(refresh) = ahead(refresh) {
+                wake_in = wake_in.min(refresh);
+            }
+        }
+        if let Some(cap) = cap {
+            wake_in = wake_in.min(cap);
+        } else if wake_in < MIN_DOZE {
+            log::info!("sleep: not for {} s", wake_in.as_secs());
+            return Ok(());
+        }
+
+        self.dozing = true;
+        self.draw_main()?;
+        if self.dirty || self.input_waiting() {
+            self.dozing = false;
+            return Ok(());
+        }
+        self.save_app_cache()?;
+        self.screen.clean()?;
+        self.screen.rest()?;
+        // Once the panel shows it, its controller asleep: a refresh takes 1 to 2 s.
+        let wear = self.screen.wear();
+        if self.input_waiting() {
+            // Touched meanwhile: the loop handles it.
+            self.dozing = false;
+            self.dirty = true;
+            return Ok(());
+        }
+        let shown = sleep::Shown {
+            device: serde_json::json!({ "device": self.device_drawn, "offline": self.offline }).to_string(),
+            night: self.night(),
+            digest: sleep::digest(self.screen.sent()),
+            wear,
+        };
+        self.live.sleep(Some((now() + wake_in.as_secs() as i64) * 1000));
+        if let Some(nfc) = &mut self.nfc {
+            if let Err(e) = nfc.power_down() {
+                log::warn!("NFC: {e:#}");
+            }
+        }
+        // The relay's close frame on its way before the radio stops.
+        thread::sleep(Duration::from_millis(100));
+        let _ = self.wifi.disconnect();
+        let _ = self.wifi.stop();
+        sleep::sleep(shown, Some(wake_in))
     }
 }
 

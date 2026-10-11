@@ -109,7 +109,9 @@ export type View =
   | { type: "link"; code: string; url: string; urlWithCode: string }
   | { type: "linked"; office: string; name: string }
   | { type: "error"; title: string; detail: string }
-  | { type: "flow"; screen: FlowScreen };
+  | { type: "flow"; screen: FlowScreen }
+  /** Outside the office's hours: asleep until `day` (empty for the next morning) at `time`. */
+  | { type: "sleep"; weekend: boolean; day: string; time: string };
 
 export type ImageRequest = {
   src: string;

@@ -399,6 +399,18 @@ pub fn failure_screen<D: DrawTarget<Color = BinaryColor>>(
     )
 }
 
+/// Outside the office's hours: someone asleep, and when the terminal wakes. `day` names the day
+/// in the office's language ("lundi"), empty for the next morning; `time` is "07:30".
+pub fn sleep_screen<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    weekend: bool,
+    day: &str,
+    time: &str,
+) -> Result<(), D::Error> {
+    let title = if weekend { "weekend" } else { "night" };
+    render(d, "sleep", json!({"title":title,"day":day,"time":time}))
+}
+
 pub fn update_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     version: &str,

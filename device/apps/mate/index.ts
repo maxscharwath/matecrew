@@ -4,6 +4,7 @@ export { badge, pick, leave, taken } from "./screens/consumption";
 export { accountLoading, account } from "./screens/account";
 export { failure } from "./screens/failure";
 export { update } from "./screens/update";
+export { sleep } from "./screens/sleep";
 export { about } from "./screens/about";
 export { purchases } from "./screens/purchases";
 export {

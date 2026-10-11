@@ -1315,6 +1315,8 @@
       "back": "Devices",
       "live": "Live",
       "offline": "Offline",
+      "asleep": "Asleep",
+      "asleepUntil": "Asleep · wakes at {time}",
       "lastSeen": "seen {when}",
       "neverSeen": "never seen",
       "sync": "Sync",
@@ -1373,6 +1375,7 @@
         "link": "Link",
         "linkLive": "Commands arrive within a second",
         "linkQueued": "Commands wait for its next connection",
+        "linkAsleep": "Asleep: a key wakes it, commands go when it wakes up",
         "lastSeen": "Last contact",
         "batteryLow": "low",
         "signal": {
@@ -1604,6 +1607,14 @@
     "badgeLastPass": "last tap {when}",
     "badgeTakes": "{count, plural, =0 {no takes} one {# take} other {# takes}}",
     "badgeFirstSeen": "seen since {when}",
+    "hours": {
+      "title": "Opening hours",
+      "hint": "During these hours the terminal sleeps between uses, the stock on its screen and a moon in its status bar; a key wakes it. Outside them it shows its night screen and wakes up when the office opens.",
+      "from": "Opens",
+      "until": "Closes",
+      "days": "Days",
+      "invalid": "Opening must come before closing, as HH:MM."
+    },
     "display": {
       "title": "Display",
       "hint": "Its language and the look of its screens. Saving sends a sync, so the terminal switches right away (or at its next connection).",

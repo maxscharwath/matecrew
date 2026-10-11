@@ -26,7 +26,17 @@ export type Take = { id: string; who: string; item: string | null; rejectedReaso
 
 export type DeviceSettingsProps = {
   officeId: string;
-  device: { id: string; name: string; firstItemId: string | null; locale: string | null; theme: string | null };
+  device: {
+    id: string;
+    name: string;
+    firstItemId: string | null;
+    locale: string | null;
+    theme: string | null;
+    /** Office hours: "HH:MM", and days 0 = Sunday ... 6 = Saturday, comma-separated. */
+    openFrom: string;
+    openUntil: string;
+    openDays: string;
+  };
   /** What a terminal without its own language and theme shows. */
   display: { officeLocale: string; defaultTheme: DeviceTheme };
   items: { id: string; name: string }[];
@@ -80,6 +90,7 @@ export function DeviceSettings({ officeId, device, display, items }: Readonly<De
               </Select>
             </div>
             <DisplayFields device={device} display={display} />
+            <HoursFields device={device} locale={display.officeLocale} />
             <Button type="submit" disabled={pending}>
               {t("save")}
             </Button>
@@ -126,6 +137,55 @@ export function DeviceSettings({ officeId, device, display, items }: Readonly<De
 function autonym(code: string): string {
   const name = new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
   return name.charAt(0).toLocaleUpperCase(code) + name.slice(1);
+}
+
+/** Monday first, as offices think of their week; 0 = Sunday as the site stores it. */
+const WEEK = [1, 2, 3, 4, 5, 6, 0] as const;
+
+/**
+ * When the office is open: the terminal sleeps between uses inside these hours, the stock on its
+ * screen, and shows its night screen outside them. Saved with the rest of the form.
+ */
+function HoursFields({ device, locale }: Readonly<{ device: DeviceSettingsProps["device"]; locale: string }>) {
+  const t = useTranslations("devices.hours");
+  const open = new Set(device.openDays.split(",").map(Number));
+  // The days' names in the office's language: 4 to 10 January 2027 run Monday to Sunday.
+  const dayName = useMemo(() => {
+    const format = new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" });
+    return (day: number) => format.format(new Date(Date.UTC(2027, 0, 3 + (day === 0 ? 7 : day))));
+  }, [locale]);
+  return (
+    <div className="space-y-4 border-t pt-4">
+      <div>
+        <div className="text-sm font-medium">{t("title")}</div>
+        <p className="text-xs text-muted-foreground">{t("hint")}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label htmlFor="device-open-from">{t("from")}</Label>
+          <Input id="device-open-from" name="openFrom" type="time" step={300} required defaultValue={device.openFrom} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="device-open-until">{t("until")}</Label>
+          <Input id="device-open-until" name="openUntil" type="time" step={300} required defaultValue={device.openUntil} />
+        </div>
+      </div>
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">{t("days")}</legend>
+        <div className="flex flex-wrap gap-1.5">
+          {WEEK.map((day) => (
+            <label
+              key={day}
+              className="cursor-pointer rounded-md border px-2.5 py-1 text-sm capitalize transition-colors has-[:checked]:border-foreground/40 has-[:checked]:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50"
+            >
+              <input type="checkbox" name="openDays" value={day} defaultChecked={open.has(day)} className="sr-only" />
+              {dayName(day)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </div>
+  );
 }
 
 /** The terminal's language and its screens' theme, saved with the rest of the form. */

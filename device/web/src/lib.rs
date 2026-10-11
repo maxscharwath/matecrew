@@ -87,6 +87,12 @@ pub enum View {
     Flow {
         screen: Screen,
     },
+    /// Outside the office's hours: asleep until `day` (empty for the next morning) at `time`.
+    Sleep {
+        weekend: bool,
+        day: String,
+        time: String,
+    },
 }
 
 /// An event for the flow, with what the page knows when it happens.
@@ -168,6 +174,7 @@ pub fn draw(frame: &mut Frame, view: &View) {
         View::Linked { office, name } => ui::linked_screen(frame, office, name),
         View::Error { title, detail } => ui::error_screen(frame, title, detail),
         View::Flow { screen } => ui::flow_screen(frame, screen),
+        View::Sleep { weekend, day, time } => ui::sleep_screen(frame, *weekend, day, time),
     };
 }
 

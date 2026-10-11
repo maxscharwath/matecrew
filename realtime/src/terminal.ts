@@ -46,6 +46,9 @@ type Attachment =
 /** A command waiting for the terminal to connect, until `until`. */
 type Pending = { command: Command; until: number };
 
+/** The terminal said it sleeps, until `until` (null: until a key wakes it). */
+type Sleep = { until: number | null };
+
 /** How long a console ticket (`ticket`) can be used, once. */
 const TICKET_TTL_MS = 60_000;
 /** While consoles are open, how often the relay looks whether the terminal still pings. */
@@ -117,13 +120,23 @@ export class Terminal extends DurableObject<RelayEnv> {
 
   async presence(): Promise<Presence> {
     const terminal = this.terminal();
-    const [status, statusAt, drawnAt] = await Promise.all([
+    const [status, statusAt, drawnAt, sleep] = await Promise.all([
       this.ctx.storage.get<TerminalStatus>("status"),
       this.ctx.storage.get<number>("statusAt"),
       this.ctx.storage.get<number>("drawnAt"),
+      this.ctx.storage.get<Sleep>("sleep"),
     ]);
     const since = terminal ? (attachment(terminal) as { since: number }).since : null;
-    return { online: !!terminal, since, status: status ?? null, statusAt: statusAt ?? null, drawnAt: drawnAt ?? null };
+    const asleep = !terminal && !!sleep;
+    return {
+      online: !!terminal,
+      since,
+      status: status ?? null,
+      statusAt: statusAt ?? null,
+      drawnAt: drawnAt ?? null,
+      asleep,
+      asleepUntil: asleep ? sleep.until : null,
+    };
   }
 
   /** The last screen the terminal sent, packed 1 bit (`FRAME_BYTES`), and when. */
@@ -171,7 +184,7 @@ export class Terminal extends DurableObject<RelayEnv> {
   }
 
   async webSocketClose(socket: WebSocket, code: number, reason: string) {
-    this.left(socket);
+    await this.left(socket);
     try {
       // 1005 and 1006 say no code came; they cannot be sent back.
       socket.close(code === 1005 || code === 1006 ? 1000 : code, reason);
@@ -181,7 +194,7 @@ export class Terminal extends DurableObject<RelayEnv> {
   }
 
   async webSocketError(socket: WebSocket) {
-    this.left(socket);
+    await this.left(socket);
   }
 
   /** Looks whether the terminal still pings while consoles watch; drops expired commands and tickets. */
@@ -223,6 +236,7 @@ export class Terminal extends DurableObject<RelayEnv> {
   /** The commands kept for it, whether a console watches; consoles hear it is online. */
   private async terminalJoined(socket: WebSocket) {
     const now = Date.now();
+    await this.ctx.storage.delete("sleep");
     const pending = ((await this.ctx.storage.get<Pending[]>("pending")) ?? []).filter((p) => p.until > now);
     await this.ctx.storage.delete("pending");
     for (const { command } of pending) {
@@ -235,7 +249,7 @@ export class Terminal extends DurableObject<RelayEnv> {
 
   private async fromTerminal(message: string | ArrayBuffer) {
     if (typeof message !== "string") return this.screenPatch(message);
-    const sent = parse<FromTerminal>(message, ["hello", "status", "ack", "log", "beep"]);
+    const sent = parse<FromTerminal>(message, ["hello", "status", "ack", "log", "beep", "sleep"]);
     switch (sent?.t) {
       case "hello":
       case "status":
@@ -257,6 +271,12 @@ export class Terminal extends DurableObject<RelayEnv> {
         const tones = parseTones(sent.tones);
         if (tones) this.toConsoles({ t: "beep", tones, at: Date.now() });
         return;
+      }
+      case "sleep": {
+        // Its socket closes next: consoles hear why it is offline, and until when.
+        const until = typeof sent.until === "number" && Number.isFinite(sent.until) ? sent.until : null;
+        await this.ctx.storage.put("sleep", { until } satisfies Sleep);
+        return this.toConsoles({ t: "online", online: false, since: null, asleepUntil: until });
       }
     }
   }
@@ -295,7 +315,8 @@ export class Terminal extends DurableObject<RelayEnv> {
   private async consoleJoined(socket: WebSocket) {
     const terminal = this.terminal();
     const since = terminal ? (attachment(terminal) as { since: number }).since : null;
-    this.send([socket], { t: "online", online: !!terminal, since });
+    const sleep = terminal ? undefined : await this.ctx.storage.get<Sleep>("sleep");
+    this.send([socket], { t: "online", online: !!terminal, since, asleepUntil: sleep ? sleep.until : undefined });
     const [status, statusAt, history] = await Promise.all([
       this.ctx.storage.get<TerminalStatus>("status"),
       this.ctx.storage.get<number>("statusAt"),
@@ -346,11 +367,12 @@ export class Terminal extends DurableObject<RelayEnv> {
     if (terminal) this.send([terminal], { t: "live", watching: this.watching(leaving) });
   }
 
-  private left(socket: WebSocket) {
+  private async left(socket: WebSocket) {
     const joined = attachment(socket);
     if (joined?.role === "device") {
       if (this.ctx.getWebSockets("device").every((s) => s === socket)) {
-        this.toConsoles({ t: "online", online: false, since: null });
+        const sleep = await this.ctx.storage.get<Sleep>("sleep");
+        this.toConsoles({ t: "online", online: false, since: null, asleepUntil: sleep ? sleep.until : undefined });
       }
     } else if (joined?.role === "console") {
       this.live(socket);

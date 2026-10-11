@@ -16,10 +16,13 @@ pub enum Command {
     BothKeys,
     /// The same site at a new address (a dev Mac whose IP changed); the token stays.
     Site(String),
+    /// Deep sleep now, as after two idle minutes, even with the USB cable in; with a number, the
+    /// timer wakes it after that many seconds at the latest. To try sleep and wake at the desk.
+    Sleep(Option<u32>),
     Help,
 }
 
-pub const HELP: &str = "l: touche gauche, r: touche droite, both: les deux (a propos), b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>, site <url>";
+pub const HELP: &str = "l: touche gauche, r: touche droite, both: les deux (a propos), b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>, site <url>, sleep [s]: veille (reveil apres s secondes)";
 
 pub fn parse(line: &str) -> Option<Command> {
     if let Some(message) = line.trim().strip_prefix("notify ") {
@@ -34,6 +37,10 @@ pub fn parse(line: &str) -> Option<Command> {
         "b" | "badge" => Command::Badge(normalize_uid(words.next()?)?),
         "s" | "sync" => Command::Sync,
         "both" | "lr" => Command::BothKeys,
+        "sleep" => match words.next() {
+            None => Command::Sleep(None),
+            Some(seconds) => Command::Sleep(Some(seconds.parse::<u32>().ok().filter(|s| (1..=86_400).contains(s))?)),
+        },
         "site" => {
             let url = words.next()?.trim_end_matches('/');
             let scheme = url.starts_with("http://") || url.starts_with("https://");
@@ -82,6 +89,14 @@ mod tests {
         assert_eq!(parse("site http://192.168.1.110:3000/"), Some(Command::Site("http://192.168.1.110:3000".into())));
         assert_eq!(parse("site ftp://x"), None);
         assert_eq!(parse("site"), None);
+    }
+
+    #[test]
+    fn reads_a_sleep_with_its_timer() {
+        assert_eq!(parse("sleep"), Some(Command::Sleep(None)));
+        assert_eq!(parse("sleep 60"), Some(Command::Sleep(Some(60))));
+        assert_eq!(parse("sleep 0"), None);
+        assert_eq!(parse("sleep soon"), None);
     }
 
     #[test]

@@ -9,19 +9,57 @@ use crate::store::WifiCredentials;
 
 pub type Wifi = BlockingWifi<EspWifi<'static>>;
 
-pub fn connect(wifi: &mut Wifi, creds: &WifiCredentials) -> Result<()> {
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: creds.ssid.as_str().try_into().ok().context("SSID too long")?,
-        password: creds.password.as_str().try_into().ok().context("password too long")?,
-        auth_method: if creds.password.is_empty() { AuthMethod::None } else { AuthMethod::WPA2Personal },
-        ..Default::default()
-    }))?;
+/// An access point by its channel and BSSID: joined without scanning every channel first.
+pub type AccessPoint = (u8, [u8; 6]);
+
+/// Joins the office network. `known`: the access point joined before a deep sleep, tried first
+/// (no scan, half a second sooner); a scan of every channel if it does not answer.
+pub fn connect(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
+    if known.is_some() {
+        configure(wifi, creds, known)?;
+        wifi.start()?;
+        if wifi.connect().and_then(|()| wifi.wait_netif_up()).is_ok() {
+            return Ok(());
+        }
+        log::warn!("wifi: the last access point did not answer, scanning");
+        let _ = wifi.disconnect();
+    }
+    configure(wifi, creds, None)?;
     wifi.start()?;
     let joined = wifi.connect().and_then(|()| wifi.wait_netif_up());
     if joined.is_err() {
         log_signal(wifi, &creds.ssid);
     }
     Ok(joined?)
+}
+
+/// Starts joining without waiting: a key woke the terminal, which answers it first. A later sync
+/// finds the network up (`reconnect`), or joins again with a scan.
+pub fn start_joining(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
+    configure(wifi, creds, known)?;
+    wifi.start()?;
+    wifi.wifi_mut().connect()?;
+    Ok(())
+}
+
+fn configure(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+        ssid: creds.ssid.as_str().try_into().ok().context("SSID too long")?,
+        password: creds.password.as_str().try_into().ok().context("password too long")?,
+        auth_method: if creds.password.is_empty() { AuthMethod::None } else { AuthMethod::WPA2Personal },
+        bssid: known.map(|(_, bssid)| bssid),
+        channel: known.map(|(channel, _)| channel),
+        ..Default::default()
+    }))?;
+    Ok(())
+}
+
+/// The access point joined, for the next wake.
+pub fn access_point() -> Option<AccessPoint> {
+    let mut info = esp_idf_svc::sys::wifi_ap_record_t::default();
+    // SAFETY: plain query of the connected AP into a zeroed record.
+    let ok = unsafe { esp_idf_svc::sys::esp_wifi_sta_get_ap_info(&mut info) } == 0;
+    ok.then_some((info.primary, info.bssid))
 }
 
 /// How strongly `ssid` is heard, in the log: why joining it failed (a weak signal is usually
@@ -48,6 +86,14 @@ pub fn reconnect(wifi: &mut Wifi) -> Result<()> {
         return Ok(());
     }
     log::info!("Wi-Fi lost, joining again in the background");
+    // The access point of the last wake may be gone (`start_joining`): any of the network's now.
+    if let Configuration::Client(mut client) = wifi.get_configuration()? {
+        if client.bssid.is_some() {
+            (client.bssid, client.channel) = (None, None);
+            crate::sleep::keep_access_point(None);
+            wifi.set_configuration(&Configuration::Client(client))?;
+        }
+    }
     if let Err(e) = wifi.wifi_mut().connect() {
         log::warn!("Wi-Fi: {e}");
     }

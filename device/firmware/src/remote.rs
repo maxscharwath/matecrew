@@ -63,6 +63,8 @@ struct Shared {
     status: Mutex<Status>,
     /// The screen the relay has from this connection: patches start from it.
     relayed: Mutex<Option<Vec<u8>>>,
+    /// The terminal goes to sleep: no connection any more.
+    asleep: AtomicBool,
 }
 
 impl Live {
@@ -73,6 +75,7 @@ impl Live {
             socket: Mutex::new(None),
             status: Mutex::new(status),
             relayed: Mutex::new(None),
+            asleep: AtomicBool::new(false),
         }))
     }
 
@@ -105,6 +108,18 @@ impl Live {
         }
         if let Ok(mut kept) = self.0.status.lock() {
             *kept = status;
+        }
+    }
+
+    /// Before a deep sleep: tells the relay until when (ms since 1970; `None`: until a key), then
+    /// closes the socket, so the consoles say it sleeps. Nothing connects again.
+    pub fn sleep(&self, until: Option<i64>) {
+        self.0.asleep.store(true, Ordering::Relaxed);
+        if let Some(socket) = self.socket() {
+            let told = socket.send_text(&FromTerminal::Sleep { until }.json(), SEND_TIMEOUT);
+            if let Err(e) = told.and_then(|()| socket.close(SEND_TIMEOUT)) {
+                log::warn!("relay sleep: {e:#}");
+            }
         }
     }
 
@@ -205,6 +220,11 @@ pub fn screen(bits: &[u8]) {
     }
 }
 
+/// Whether a console watches the terminal: it stays awake meanwhile.
+pub fn watching() -> bool {
+    WATCHED.load(Ordering::Relaxed)
+}
+
 /// Whether a console watches; when one just started, the screen goes now.
 fn watched(watching: bool) {
     if watching && !WATCHED.swap(true, Ordering::Relaxed) {
@@ -252,6 +272,11 @@ impl Downlink {
         let mut failures = 0u32;
         let mut retry_at = Instant::now();
         loop {
+            if self.live.0.asleep.load(Ordering::Relaxed) {
+                // Deep sleep comes in a moment.
+                thread::sleep(LOOK_EVERY);
+                continue;
+            }
             let url = self.live.url();
             if let Some(url) = url.as_deref().filter(|_| Instant::now() >= retry_at) {
                 match Socket::connect(url, &self.live.0.token, live::SUBPROTOCOL, CONNECT_TIMEOUT) {
@@ -305,7 +330,7 @@ impl Downlink {
         let mut pinged = Instant::now();
         let mut awaiting: Option<Instant> = None;
         while alive {
-            if self.live.url().as_deref() != Some(url) {
+            if self.live.url().as_deref() != Some(url) || self.live.0.asleep.load(Ordering::Relaxed) {
                 break;
             }
             if awaiting.is_some_and(|at| at.elapsed() > Duration::from_millis(live::PONG_WITHIN_MS)) {

@@ -826,6 +826,7 @@ mod tests {
             theme: "paper".into(),
             realtime: None,
             refresh_at: None,
+            hours: None,
         }
     }
 

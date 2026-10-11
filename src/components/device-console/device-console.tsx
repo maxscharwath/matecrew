@@ -31,6 +31,7 @@ import {
   History,
   LoaderCircle,
   MonitorSmartphone,
+  Moon,
   Radio,
   Settings2,
   SquareTerminal,
@@ -384,10 +385,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
         </Button>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold">{device.name}</h1>
-          <Badge variant={live.reachable ? "outline" : "secondary"} className="gap-1.5">
-            <span className={cn("size-1.5 rounded-full", live.reachable ? "bg-emerald-500" : "bg-zinc-400")} />
-            {live.reachable ? t("live") : t("offline")}
-          </Badge>
+          <LinkBadge live={live} timeZone={timeZone} />
           {ble.supported && <BleButton ble={ble} live={bleLive} />}
           {buzzer.available && <SoundButton buzzer={buzzer} />}
           {waiting > 0 && <Badge variant="secondary">{t("waiting", { count: waiting })}</Badge>}
@@ -571,10 +569,12 @@ function useLiveRelay({
     relay,
     renew,
     {
-      online: (online) =>
+      online: (online, _since, asleepUntil) =>
         setLive((current) => ({
           ...current,
           reachable: online,
+          asleep: !online && asleepUntil !== undefined,
+          asleepUntil: typeof asleepUntil === "number" ? new Date(asleepUntil).toISOString() : null,
           lastSeenAt: online ? new Date().toISOString() : current.lastSeenAt,
         })),
       status: (status, at) => setLive((current) => withStatus(current, status, at)),
@@ -607,6 +607,40 @@ function useLiveRelay({
     tell.current(link.connected);
   }, [link.connected]);
   return { link, logs, memory, clearLogs };
+}
+
+/** "En direct", "En veille · réveil à 14:30" or "Hors ligne", times in the office's zone. */
+function linkLabel(
+  t: ReturnType<typeof useTranslations<"devices.console">>,
+  format: ReturnType<typeof useFormatter>,
+  live: LiveStatus,
+  timeZone: string,
+): string {
+  if (live.reachable) return t("live");
+  if (!live.asleep) return t("offline");
+  if (!live.asleepUntil) return t("asleep");
+  return t("asleepUntil", { time: format.dateTime(new Date(live.asleepUntil), { hour: "2-digit", minute: "2-digit", timeZone }) });
+}
+
+function linkDetail(t: ReturnType<typeof useTranslations<"devices.console">>, live: LiveStatus): string {
+  if (live.reachable) return t("strip.linkLive");
+  return live.asleep ? t("strip.linkAsleep") : t("strip.linkQueued");
+}
+
+/** Its link at a glance: live, asleep (until when), or offline. */
+function LinkBadge({ live, timeZone }: Readonly<{ live: LiveStatus; timeZone: string }>) {
+  const t = useTranslations("devices.console");
+  const format = useFormatter();
+  return (
+    <Badge variant={live.reachable ? "outline" : "secondary"} className="gap-1.5">
+      {live.asleep ? (
+        <Moon className="size-3" />
+      ) : (
+        <span className={cn("size-1.5 rounded-full", live.reachable ? "bg-emerald-500" : "bg-zinc-400")} />
+      )}
+      {linkLabel(t, format, live, timeZone)}
+    </Badge>
+  );
 }
 
 /** The status bar's battery icon for a charge, or a plain one when there is no battery reading. */
@@ -646,10 +680,10 @@ function statusFacts({
       value: (
         <span className="inline-flex items-center gap-1.5">
           <span className={cn("size-1.5 rounded-full", live.reachable ? "bg-emerald-500" : "bg-zinc-400")} />
-          {live.reachable ? t("live") : t("offline")}
+          {linkLabel(t, format, live, timeZone)}
         </span>
       ),
-      detail: live.reachable ? t("strip.linkLive") : t("strip.linkQueued"),
+      detail: linkDetail(t, live),
     },
     {
       icon: <Clock />,

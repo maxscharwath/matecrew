@@ -69,6 +69,9 @@ fn previews() -> Value {
     let mut all = Collector(Map::new());
     all.add("stock", "Three items, the usual office", |d| dashboard_screen(d, &dashboard, false));
     all.add("stock-offline", "Same, without network", |d| dashboard_screen(d, &dashboard, true));
+    // Between two uses in the office's hours: the stock stays, a moon in the status bar.
+    all.add("stock-sleeping", "Asleep between two uses: a key wakes it", |d| dashboard_screen(d, &dashboard, false));
+    all.0["stock-sleeping"]["data"]["$device"]["sleeping"] = json!(true);
     for count in [0, 1, 2, 4, 5, 6, 9, 20] {
         let mut layout = dashboard.clone();
         layout.items = (0..count)
@@ -121,6 +124,9 @@ fn previews() -> Value {
     all.add("leave", "Nothing for me", |d| leave_screen(d, "Alex"));
     all.add("taken", "Confirmation: what was taken, then the stock again", |d| taken_screen(d, "Alex", "Maté Classic", &picture));
     all.add("update", "Installing a firmware update", |d| update_screen(d, "0.2.0", 50));
+    // Outside the office's hours: asleep until the next opening, a key wakes it.
+    all.add("sleep-night", "Asleep for the night, awake again in the morning", |d| sleep_screen(d, false, "", "07:30"));
+    all.add("sleep-weekend", "Asleep for the weekend, awake again on Monday", |d| sleep_screen(d, true, "lundi", "07:30"));
     all.add("unknown-badge", "Badge not assigned yet", |d| unknown_badge_screen(d, "04A1B2C3D4E5F6", None));
     let claim = "https://matecrew.vercel.app/badge?d=cmv1eex25001zieyucz0rillv&u=04A1B2C3D4E5F6&t=1791570300&s=1XA8_wdH3MGEW6rDCHsTew";
     all.add("claim-badge", "Badge not assigned yet, with a claim link", |d| unknown_badge_screen(d, "04A1B2C3D4E5F6", Some(claim)));
@@ -249,12 +255,15 @@ fn previews() -> Value {
         ("account-site-error-en", "account-site-error"),
         ("about-en", "about"),
         ("purchases-en", "purchases"),
+        ("sleep-night-en", "sleep-night"),
+        ("sleep-weekend-en", "sleep-weekend"),
     ] {
         let mut preview = all.0[from].clone();
         preview["data"]["$device"]["locale"] = json!("en");
         preview["description"] = json!(format!("{} (English)", preview["description"].as_str().unwrap_or(from)));
         all.0.insert(name.into(), preview);
     }
+    all.0["sleep-weekend-en"]["data"]["view"]["day"] = json!("Monday");
     // The site names the days in the office's language.
     for (i, day) in ["Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"].iter().enumerate() {
         all.0["account-en"]["data"]["view"]["days"][i]["day"] = json!(day);
@@ -280,7 +289,7 @@ fn flow(previews: &mut Map<String, Value>) {
             }
         }
     };
-    let home = ["stock", "stock-offline", "stock-0", "stock-1", "stock-2", "stock-4", "stock-5", "stock-6", "stock-9", "stock-20", "preparation"];
+    let home = ["stock", "stock-offline", "stock-sleeping", "stock-0", "stock-1", "stock-2", "stock-4", "stock-5", "stock-6", "stock-9", "stock-20", "preparation"];
     on(&home, &[("left", "badge"), ("right", "account-badge"), ("rightLong", "purchases-badge")]);
     // The loading screens stand for the site's answer: a key shows it.
     on(&["account-badge"], &[("badge", "account-loading"), ("left", "stock"), ("right", "stock")]);
@@ -305,6 +314,8 @@ fn flow(previews: &mut Map<String, Value>) {
     on(&["pick"], &[("left", "leave"), ("right", "taken")]);
     on(&["leave"], &[("left", "pick"), ("right", "stock")]);
     on(&["taken", "unknown-badge", "claim-badge", "error"], &[("left", "stock"), ("right", "stock")]);
+    // Asleep: a key wakes it on the stock.
+    on(&["sleep-night", "sleep-weekend", "sleep-night-en", "sleep-weekend-en"], &[("left", "stock"), ("right", "stock")]);
     on(&home, &[("badge", "unknown-badge")]);
     // Both keys, from any screen once the terminal runs: its about page; a key goes back.
     let running = ["badge", "pick", "leave", "taken", "unknown-badge", "claim-badge", "error", "badge-serve", "served", "served-no-avatar"];

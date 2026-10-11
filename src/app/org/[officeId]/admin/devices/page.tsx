@@ -80,6 +80,7 @@ export default async function DevicesPage({ params }: Props) {
             batteryMv: seen.batteryMv,
             lastSeenAt: seen.lastSeenAt?.toISOString() ?? null,
             online: seen.reachable,
+            asleep: live?.asleep ?? false,
             frameHash: live?.drawnAt ? `r${live.drawnAt}` : (d.frame?.hash ?? null),
           };
         })}

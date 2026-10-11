@@ -6,6 +6,10 @@ import type { Presence } from "../../../realtime/src/protocol";
 /** What the console shows about a terminal, refreshed every second. */
 export type LiveStatus = {
   reachable: boolean;
+  /** Offline because it sleeps (deep sleep between uses, or its night): not gone. */
+  asleep: boolean;
+  /** When it wakes up by itself, ISO 8601; null without a time (a key wakes it). */
+  asleepUntil: string | null;
   lastSeenAt: string | null;
   batteryMv: number | null;
   wifiRssi: number | null;
@@ -71,6 +75,8 @@ export async function loadLiveStatus(deviceId: string, now = new Date(), { watch
   const frame = presence?.drawnAt ? { hash: `r${presence.drawnAt}`, drawnAt: new Date(presence.drawnAt) } : stored;
   return {
     reachable: device.reachable,
+    asleep: presence?.asleep ?? false,
+    asleepUntil: presence?.asleepUntil ? new Date(presence.asleepUntil).toISOString() : null,
     lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
     batteryMv: device.batteryMv,
     wifiRssi: device.wifiRssi,

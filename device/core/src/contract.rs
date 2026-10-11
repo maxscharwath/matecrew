@@ -103,6 +103,28 @@ pub struct DeviceState {
     /// the terminal syncs then.
     #[serde(default)]
     pub refresh_at: Option<String>,
+    /// Its office hours now: open, it sleeps between uses with the stock up; closed, its night
+    /// screen until they open. Absent (an older site), it never sleeps.
+    #[serde(default)]
+    pub hours: Option<Hours>,
+}
+
+/// Whether the office is open, and until when (`until`, ISO 8601: the closing while open, the
+/// next opening while closed).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Hours {
+    pub open: bool,
+    pub until: String,
+    /// Closed for more than a night: the night screen says "weekend".
+    #[serde(default)]
+    pub weekend: bool,
+    /// The day it wakes up, named in the office's language ("lundi"), empty for the next morning.
+    #[serde(default)]
+    pub day: String,
+    /// When it wakes up, "07:30" in the office's time.
+    #[serde(default)]
+    pub time: String,
 }
 
 /// Where the terminal's live channel opens: `wss://…/terminals/socket`, with its token.

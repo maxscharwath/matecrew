@@ -25,7 +25,8 @@ import type { MirrorFrame } from "./frame-bits";
 export type RelaySocket = { url: string; ticket: string };
 
 export type RelayEvents = {
-  online(online: boolean, since: number | null): void;
+  /** `asleepUntil` when it is offline because it sleeps (null: until a key wakes it). */
+  online(online: boolean, since: number | null, asleepUntil?: number | null): void;
   status(status: TerminalStatus, at: number): void;
   /** Every command the relay lists, at once when the socket opens, one by one after. */
   commands(entries: CommandEntry[]): void;
@@ -92,7 +93,7 @@ export function useRelay(
       const on = handlers.current;
       switch (message.t) {
         case "online":
-          on.online(message.online, message.since);
+          on.online(message.online, message.since, message.asleepUntil);
           break;
         case "status":
           on.status(message.status, message.at);

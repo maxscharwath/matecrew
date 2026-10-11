@@ -2,7 +2,7 @@
  * A terminal's live channel, through its relay (one Durable Object per terminal, `./terminal.ts`).
  * The terminal keeps one WebSocket open; the site's consoles open theirs; nothing polls.
  *
- *   terminal → relay   hello, status, ack, log, beep  + binary screen patch (`writePatch`)
+ *   terminal → relay   hello, status, ack, log, beep, sleep  + binary screen patch (`writePatch`)
  *   relay → terminal   command, live, sync
  *   console → relay    command, watch
  *   relay → console    online, status, log, beep, commands, command  + binary screen patch, with `drawnAt`
@@ -80,6 +80,8 @@ export type FromTerminal =
   | { t: "status"; status: TerminalStatus }
   | { t: "ack"; id: string }
   | { t: "log"; level: LogLevel; target: string; msg: string }
+  /** It goes to sleep until `until` (ms since 1970; null: until a key wakes it), its socket closing. */
+  | { t: "sleep"; until: number | null }
   /** The piezo plays these tones, [Hz, ms] (0 Hz is a silence): consoles play them too. */
   | { t: "beep"; tones: Tone[] };
 
@@ -99,7 +101,8 @@ export type FromConsole =
   | { t: "watch"; screen: boolean };
 
 export type ToConsole =
-  | { t: "online"; online: boolean; since: number | null }
+  /** `asleepUntil`: offline because it sleeps, until then (null: until a key wakes it). */
+  | { t: "online"; online: boolean; since: number | null; asleepUntil?: number | null }
   | { t: "status"; status: TerminalStatus; at: number }
   | { t: "log"; level: LogLevel; target: string; msg: string; at: number }
   | { t: "beep"; tones: Tone[]; at: number }
@@ -115,6 +118,10 @@ export type Presence = {
   statusAt: number | null;
   /** When its last screen arrived, null without one. */
   drawnAt: number | null;
+  /** Offline because it sleeps: until then (ms since 1970); null when awake, gone, or sleeping until a key. */
+  asleepUntil: number | null;
+  /** Offline because it sleeps (until `asleepUntil`, or until a key). */
+  asleep: boolean;
 };
 
 /** A text frame as one of `kinds`, or null for anything else. */

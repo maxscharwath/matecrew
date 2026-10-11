@@ -182,6 +182,12 @@ impl Socket {
         self.send(PONG, payload, timeout)
     }
 
+    /// A close frame, 1000 "normal closure": the relay hears it at once rather than when the
+    /// heartbeat stops.
+    pub fn close(&self, timeout: Duration) -> Result<()> {
+        self.send(CLOSE, 1000u16.to_be_bytes().to_vec(), timeout)
+    }
+
     /// One unfragmented message. The transport masks the payload in place, then restores it: it
     /// gets a buffer of its own.
     fn send(&self, opcode: ws_transport_opcodes_t, mut data: Vec<u8>, timeout: Duration) -> Result<()> {

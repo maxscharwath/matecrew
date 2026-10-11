@@ -78,6 +78,9 @@ pub enum FromTerminal<'a> {
     Status { status: &'a Status },
     /// The command `id` arrived; the console marks it delivered.
     Ack { id: &'a str },
+    /// It goes to sleep until `until` (ms since 1970; `None`: until a key wakes it), its socket
+    /// closing next: the consoles say it sleeps rather than that it is gone.
+    Sleep { until: Option<i64> },
 }
 
 impl FromTerminal<'_> {
@@ -209,6 +212,8 @@ mod tests {
             r#"{"t":"hello","status":{"firmware":"0.4.0","batteryMv":3900,"rssi":-61}}"#
         );
         assert_eq!(FromTerminal::Ack { id: "c1" }.json(), r#"{"t":"ack","id":"c1"}"#);
+        assert_eq!(FromTerminal::Sleep { until: Some(1_800_000_000_000) }.json(), r#"{"t":"sleep","until":1800000000000}"#);
+        assert_eq!(FromTerminal::Sleep { until: None }.json(), r#"{"t":"sleep","until":null}"#);
         // The log and the beeps, as over Bluetooth.
         let log = crate::link::Event::Log { level: 'I', target: "api".into(), msg: "ok".into() };
         assert_eq!(serde_json::to_string(&log).unwrap(), r#"{"t":"log","level":"I","target":"api","msg":"ok"}"#);

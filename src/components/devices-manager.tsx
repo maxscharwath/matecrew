@@ -24,6 +24,8 @@ interface DeviceRow {
   batteryMv: number | null;
   lastSeenAt: string | null;
   online: boolean;
+  /** Offline because it sleeps between uses or for the night. */
+  asleep: boolean;
   /** Set once the terminal has sent what its panel shows. */
   frameHash: string | null;
 }
@@ -114,6 +116,7 @@ function DeviceTile({ officeId, device }: Readonly<{ officeId: string; device: D
   const lowBattery = device.batteryMv != null && device.batteryMv < LOW_BATTERY_MV;
   let seen = t("console.neverSeen");
   if (device.online) seen = t("console.live");
+  else if (device.asleep) seen = t("console.asleep");
   else if (device.lastSeenAt) seen = t("console.lastSeen", { when: format.relativeTime(new Date(device.lastSeenAt), now) });
 
   return (

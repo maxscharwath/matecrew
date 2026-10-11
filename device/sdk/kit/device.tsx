@@ -15,7 +15,7 @@ import { Button as Pressable, Group, HStack, Image, Show, Stack, VStack, bind, t
 import type { Element, Node } from "../runtime/types";
 import type { LayoutProps } from "../runtime/layout";
 import { and, not } from "../runtime/expr";
-import { ArrowDownIcon, ArrowDownUpIcon, ArrowUpIcon, BluetoothConnectedIcon, BluetoothIcon, NfcIcon } from "../icons/lucide";
+import { ArrowDownIcon, ArrowDownUpIcon, ArrowUpIcon, BluetoothConnectedIcon, BluetoothIcon, MoonIcon, NfcIcon } from "../icons/lucide";
 import { KEYS, MARGIN, SCREEN, STATUS, TABS } from "./tokens";
 import { Overlay, Separator, Surface } from "./surface";
 import { Label, Large, Muted, Small, inline } from "./typography";
@@ -54,7 +54,15 @@ export function StatusBar({
             <Show when={and(bind("$device.net.up", false), bind("$device.net.down", false))}>
               <ArrowDownUpIcon size={22} />
             </Show>
-            <Large>{bind("$device.clock", "--:--")}</Large>
+            {/* Asleep between two uses (`$device.sleeping`), a key wakes it: the moon in place
+                of the clock, which would be wrong between the timer's wakes and cost a refresh at
+                each. The bar stays the same from one sleep to the next. */}
+            <Show when={bind("$device.sleeping", false)}>
+              <MoonIcon size={22} />
+            </Show>
+            <Show when={not(bind("$device.sleeping", false))}>
+              <Large>{bind("$device.clock", "--:--")}</Large>
+            </Show>
             {/* A computer or phone linked over Bluetooth (`$device.ble`): paired with the code, or
                 only connected. */}
             <Show when={bind("$device.ble.paired", false)}>

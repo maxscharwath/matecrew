@@ -187,6 +187,8 @@ fn main() {
         )
     });
     save(&out, "update", |d| ui::update_screen(d, "0.2.0", 50));
+    save(&out, "sleep-night", |d| ui::sleep_screen(d, false, "", "07:30"));
+    save(&out, "sleep-weekend", |d| ui::sleep_screen(d, true, "lundi", "07:30"));
     save(&out, "unknown-badge", |d| {
         ui::unknown_badge_screen(d, "04A1B2C3D4E5F6", None)
     });

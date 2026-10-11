@@ -11,6 +11,7 @@ pub const GET_FIRMWARE_VERSION: u8 = 0x02;
 pub const SAM_CONFIGURATION: u8 = 0x14;
 pub const RF_CONFIGURATION: u8 = 0x32;
 pub const IN_LIST_PASSIVE_TARGET: u8 = 0x4A;
+pub const POWER_DOWN: u8 = 0x16;
 
 const HOST_TO_PN532: u8 = 0xD4;
 const PN532_TO_HOST: u8 = 0xD5;
@@ -23,6 +24,8 @@ pub const SAM_NORMAL: [u8; 3] = [0x01, 0x14, 0x00];
 pub const FEW_RETRIES: [u8; 4] = [0x05, 0xFF, 0x01, 0x02];
 /// One target at 106 kbit/s, ISO 14443 type A: MIFARE, DESFire.
 pub const ONE_TYPE_A_TARGET: [u8; 2] = [0x01, 0x00];
+/// PowerDown's WakeUpEnable (§7.2.11): only the I2C bus wakes it, the next transfer to its address.
+pub const WAKE_ON_I2C: [u8; 1] = [0x80];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FrameError {

@@ -9,6 +9,7 @@ import { AVATAR_SIDE, avatarPicture, initials } from "@/lib/device/avatar";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
 import { deviceTheme, type DeviceState, type DeviceScreen, type DeviceTheme } from "@/lib/device/contract";
 import { parseSyncTimes } from "@/lib/device/sync-times";
+import { hoursAt, parseDays, wakeWords } from "@/lib/device/hours";
 
 /** The theme of terminals that have none of their own: `DEVICE_UI_THEME`, else paper. */
 export function defaultDeviceTheme(): DeviceTheme {
@@ -117,7 +118,17 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     },
     realtime: relayUrl ? { url: relayUrl } : null,
     refreshAt: await refreshAt(office.id, office.timezone),
+    hours: officeHours(device),
   };
+}
+
+/** Its office hours now; closed, when its night screen says it wakes up. */
+function officeHours(device: AuthenticatedDevice): DeviceState["hours"] {
+  const { timezone, locale } = device.office;
+  const now = new Date();
+  const hours = hoursAt({ from: device.openFrom, until: device.openUntil, days: parseDays(device.openDays) }, timezone, now);
+  const { day, time } = wakeWords(hours.until, timezone, locale, now);
+  return { open: hours.open, until: hours.until.toISOString(), weekend: hours.weekend, day, time };
 }
 
 /**

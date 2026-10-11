@@ -115,6 +115,13 @@ impl Nfc {
         &self.version
     }
 
+    /// Before a deep sleep: the PN532 draws about 10 µA instead of 100 mA with its field off.
+    /// The next transfer on its address wakes it (`new` sends one first).
+    pub fn power_down(&mut self) -> Result<()> {
+        self.command(pn532::POWER_DOWN, &pn532::WAKE_ON_I2C, Duration::from_millis(100))?;
+        Ok(())
+    }
+
     /// UID of the badge on the reader, in uppercase hex, or `None` if there is none.
     pub fn read_uid(&mut self) -> Result<Option<String>> {
         let data = self.command(pn532::IN_LIST_PASSIVE_TARGET, &pn532::ONE_TYPE_A_TARGET, Duration::from_millis(500))?;

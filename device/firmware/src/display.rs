@@ -42,10 +42,25 @@ const FULL_AFTER: Duration = Duration::from_secs(60 * 60);
 enum Order {
     /// Show this frame; `drawn` is how long it took to draw, for the log.
     Show { bits: Vec<u8>, drawn: Duration },
+    /// The panel shows this frame already, worn this much: kept from before a deep sleep
+    /// (`sleep`). The next one is a partial refresh from it.
+    Assume { bits: Vec<u8>, wear: Wear },
+    /// Answers how worn the image is, once every order before it is done.
+    Wear(Sender<Wear>),
     Clean,
     Rest,
     /// Answers once every order before it is done.
     Flush(Sender<()>),
+}
+
+/// How much the panel's image has worn since its last full refresh, kept through deep sleep: the
+/// ghosting is cleared on schedule however often the terminal sleeps.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Wear {
+    pub partials: u32,
+    pub ghost: u32,
+    /// Seconds awake since the last full refresh.
+    pub age: u32,
 }
 
 /// The screen loop's side: draws frames and hands them to the panel's task.
@@ -93,6 +108,7 @@ impl Screen {
             partials: 0,
             ghost: 0,
             last_full: None,
+            aged: Duration::ZERO,
         };
         thread::Builder::new().stack_size(8 * 1024).spawn(move || panel.run(queue))?;
         Ok(Self { orders, next: Frame::new(), sent: vec![0; frame::BYTES] })
@@ -112,6 +128,33 @@ impl Screen {
             self.order(Order::Show { bits: self.next.bits.clone(), drawn });
         }
         Ok(())
+    }
+
+    /// After a deep sleep: draws again the screen the panel kept, without refreshing it, so the
+    /// next one is a partial refresh from it rather than a flash. Only if it is the same frame
+    /// (`digest`); false otherwise, and the next screen takes the full refresh.
+    pub fn assume(&mut self, draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>, digest: u32, wear: Wear) -> bool {
+        let _ = self.next.clear(BinaryColor::Off);
+        let _ = draw(&mut self.next);
+        if crate::sleep::digest(&self.next.bits) != digest {
+            return false;
+        }
+        self.sent.copy_from_slice(&self.next.bits);
+        crate::viewers::screen(&self.sent);
+        self.order(Order::Assume { bits: self.next.bits.clone(), wear });
+        true
+    }
+
+    /// How worn the image is, once the panel shows what was handed to it: before a deep sleep.
+    pub fn wear(&self) -> Wear {
+        let (done, wait) = mpsc::channel();
+        self.order(Order::Wear(done));
+        wait.recv().unwrap_or_default()
+    }
+
+    /// The last frame handed to the panel.
+    pub fn sent(&self) -> &[u8] {
+        &self.sent
     }
 
     /// Draws the idle screen.
@@ -162,6 +205,8 @@ struct Panel {
     /// Pixels partial refreshes turned since the last full one: their ghosting adds up.
     ghost: u32,
     last_full: Option<Instant>,
+    /// Awake time since the last full refresh before the last deep sleep.
+    aged: Duration,
 }
 
 impl Panel {
@@ -189,10 +234,23 @@ impl Panel {
     fn carry_out(&mut self, order: Order) -> Result<()> {
         match order {
             Order::Show { bits, drawn } => self.present(&bits, false, drawn),
+            Order::Assume { bits, wear } => {
+                self.shown = bits;
+                self.partials = wear.partials;
+                self.ghost = wear.ghost;
+                self.last_full = Some(Instant::now());
+                self.aged = Duration::from_secs(wear.age.into());
+                Ok(())
+            }
+            Order::Wear(answer) => {
+                let age = self.last_full.map_or(Duration::ZERO, |at| at.elapsed() + self.aged);
+                let _ = answer.send(Wear { partials: self.partials, ghost: self.ghost, age: age.as_secs() as u32 });
+                Ok(())
+            }
             Order::Clean => {
                 let due = self.partials >= FULL_EVERY
                     || frame::worn(self.ghost)
-                    || self.last_full.is_some_and(|at| at.elapsed() > FULL_AFTER);
+                    || self.last_full.is_some_and(|at| at.elapsed() + self.aged > FULL_AFTER);
                 if due {
                     let shown = self.shown.clone();
                     self.present(&shown, true, Duration::ZERO)?;
@@ -222,6 +280,7 @@ impl Panel {
             self.partials = 0;
             self.ghost = 0;
             self.last_full = Some(Instant::now());
+            self.aged = Duration::ZERO;
             log::info!(
                 "display: {} refresh in {} ms",
                 if fast { "fast" } else { "full" },

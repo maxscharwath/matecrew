@@ -23,6 +23,7 @@ pub const DEFINITIONS: &[(&str, &[u8])] = &[
     ("purchases", include_bytes!("../../dist/mate/purchases.dui")),
     ("served", include_bytes!("../../dist/mate/served.dui")),
     ("setup", include_bytes!("../../dist/mate/setup.dui")),
+    ("sleep", include_bytes!("../../dist/mate/sleep.dui")),
     ("taken", include_bytes!("../../dist/mate/taken.dui")),
     ("update", include_bytes!("../../dist/mate/update.dui")),
 ];
