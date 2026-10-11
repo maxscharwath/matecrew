@@ -828,6 +828,7 @@ mod tests {
             refresh_at: None,
             hours: None,
             sounds: None,
+            clock: None,
         }
     }
 

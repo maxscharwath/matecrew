@@ -11,6 +11,7 @@ import { deviceTheme, type DeviceState, type DeviceScreen, type DeviceTheme } fr
 import { parseSyncTimes } from "@/lib/device/sync-times";
 import { hoursAt, parseDays, wakeWords } from "@/lib/device/hours";
 import { parseSounds } from "@/lib/device/sounds";
+import { deviceClock, deviceTimeZone, formatTime, timeFormatOf } from "@/lib/device/clock";
 
 /** The theme of terminals that have none of their own: `DEVICE_UI_THEME`, else paper. */
 export function defaultDeviceTheme(): DeviceTheme {
@@ -121,15 +122,17 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     refreshAt: await refreshAt(office.id, office.timezone),
     hours: officeHours(device),
     sounds: parseSounds(device.sounds),
+    clock: deviceClock(device),
   };
 }
 
-/** Its office hours now; closed, when its night screen says it wakes up. */
+/** Its office hours now, in its time zone; closed, when its night screen says it wakes up. */
 function officeHours(device: AuthenticatedDevice): DeviceState["hours"] {
-  const { timezone, locale } = device.office;
+  const { locale } = device.office;
+  const timezone = deviceTimeZone(device);
   const now = new Date();
   const hours = hoursAt({ from: device.openFrom, until: device.openUntil, days: parseDays(device.openDays) }, timezone, now);
-  const { day, time } = wakeWords(hours.until, timezone, locale, now);
+  const { day, time } = wakeWords(hours.until, timezone, locale, now, timeFormatOf(device));
   return { open: hours.open, until: hours.until.toISOString(), weekend: hours.weekend, day, time };
 }
 
@@ -235,11 +238,9 @@ export async function buildScreenData(
     getTranslations({ locale: office.locale, namespace: "devices.screen" }),
     preparation(office.id, office.timezone),
   ]);
-  const time = new Intl.DateTimeFormat(office.locale, {
-    timeZone: office.timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date());
+  // Always "HH:MM": firmware before 0.5 reads its clock from it (an English locale's "02:05 PM"
+  // left it at "--:--"); newer ones read `clock`.
+  const time = formatTime(new Date(), deviceTimeZone(device), "24");
 
   const thresholds = items.map((i) => effectiveLowStockThreshold(i.lowStockThreshold, office.lowStockThreshold));
   // One line per item the main screen shows, each on its tile; the rest are only counted.

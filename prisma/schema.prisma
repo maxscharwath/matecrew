@@ -656,6 +656,11 @@ model Device {
   /// (also when a key wakes it), keys, badges and takes, errors, notifications. A sound left out
   /// is silent on the terminal and in its console.
   sounds      String          @default("boot,key,badge,error,notification")
+  /// How it shows the time: "24" (14:05) or "12" (2:05 PM).
+  timeFormat  String          @default("24")
+  /// Its time zone ("Europe/Zurich") for the times it shows and its office hours; null follows
+  /// its office's. Sessions stay in the office's.
+  timezone    String?
 
   firmwareVersion String?
   batteryMv       Int?

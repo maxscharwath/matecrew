@@ -1,3 +1,4 @@
+import { deviceTimeZone, formatTime, timeFormatOf } from "@/lib/device/clock";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import type { CostingLedger } from "@/lib/costing";
@@ -49,10 +50,11 @@ export async function latestPurchases(
   for (const draw of ledger?.draws ?? []) {
     if (draw.kind === "CONSUMPTION") costs.set(draw.sourceId, (costs.get(draw.sourceId) ?? 0) + draw.cost);
   }
-  const zone = { timeZone: office.timezone };
+  // Days and times as the terminal shows them: its time zone, its 24- or 12-hour figures.
+  const timeZone = deviceTimeZone(device);
+  const zone = { timeZone };
   // Days compared as the office sees them.
   const day = new Intl.DateTimeFormat("en-CA", { ...zone, year: "numeric", month: "2-digit", day: "2-digit" });
-  const clock = new Intl.DateTimeFormat(office.locale, { ...zone, hour: "2-digit", minute: "2-digit" });
   const date = new Intl.DateTimeFormat(office.locale, { ...zone, weekday: "short", day: "numeric", month: "short" });
   const today = day.format(new Date());
   const yesterday = day.format(new Date(Date.now() - 86_400_000));
@@ -61,7 +63,7 @@ export async function latestPurchases(
 
   /** "Aujourd'hui · 14:05", "Hier · 09:12", or the date for older ones. */
   const when = (at: Date) => {
-    const time = plain(clock.format(at));
+    const time = formatTime(at, timeZone, timeFormatOf(device));
     const on = day.format(at);
     if (on === today) return t("purchaseToday", { time });
     if (on === yesterday) return t("purchaseYesterday", { time });

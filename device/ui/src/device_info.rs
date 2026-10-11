@@ -87,6 +87,9 @@ pub fn clock(state: Option<&DeviceState>, unix: i64) -> String {
     let Some(reference) = time::parse_iso(&state.server_time) else {
         return "--:--".into();
     };
+    if let Some(clock) = &state.clock {
+        return clock.text(unix);
+    }
     let Some((hours, minutes)) = state.screen.time.split_once(':') else {
         return "--:--".into();
     };

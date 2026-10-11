@@ -110,6 +110,64 @@ pub struct DeviceState {
     /// The sounds it plays; absent (an older site), all of them.
     #[serde(default)]
     pub sounds: Option<Sounds>,
+    /// How it tells the time; absent (an older site), `screen.time` and the time since
+    /// `server_time` (`ui::device_info::clock`).
+    #[serde(default)]
+    pub clock: Option<Clock>,
+}
+
+/// How the terminal tells the time (its settings on the site): its UTC offset now, the next
+/// change of it (summer or winter time), and 24- or 12-hour figures. It reads the clock from its
+/// own UTC time, to the second, and switches offset by itself, even asleep.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Clock {
+    /// Minutes east of UTC.
+    pub offset: i32,
+    #[serde(default)]
+    pub next: Option<OffsetChange>,
+    #[serde(default)]
+    pub format: TimeFormat,
+}
+
+/// From `at` (ISO 8601) on, `offset` minutes east of UTC.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OffsetChange {
+    pub at: String,
+    pub offset: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub enum TimeFormat {
+    /// 14:05
+    #[default]
+    #[serde(rename = "24")]
+    H24,
+    /// 2:05 PM
+    #[serde(rename = "12")]
+    H12,
+}
+
+impl Clock {
+    /// Minutes east of UTC at `unix` (seconds since 1970).
+    pub fn offset_at(&self, unix: i64) -> i32 {
+        match &self.next {
+            Some(next) if crate::time::parse_iso(&next.at).is_some_and(|at| unix >= at) => next.offset,
+            _ => self.offset,
+        }
+    }
+
+    /// The time at `unix` as the panel shows it: "14:05", or "2:05 PM".
+    pub fn text(&self, unix: i64) -> String {
+        let minute = (unix + i64::from(self.offset_at(unix)) * 60).div_euclid(60).rem_euclid(1440);
+        let (hour, minute) = (minute / 60, minute % 60);
+        match self.format {
+            TimeFormat::H24 => format!("{hour:02}:{minute:02}"),
+            TimeFormat::H12 => {
+                let twelve = if hour % 12 == 0 { 12 } else { hour % 12 };
+                format!("{twelve}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
+            }
+        }
+    }
 }
 
 /// The sounds an admin turns on or off for the terminal (`Device.sounds` on the site).
@@ -484,6 +542,26 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"firmwareVersion":"0.1.0","wifiRssi":-61,"unknownBadges":[]}"#);
+    }
+
+    #[test]
+    fn the_clock_turns_at_the_minute_and_at_the_change_of_time() {
+        let clock: Clock = serde_json::from_str(
+            r#"{"offset":120,"next":{"at":"2026-10-25T01:00:00Z","offset":60},"format":"24"}"#,
+        )
+        .unwrap();
+        let noon = crate::time::parse_iso("2026-10-11T12:05:00Z").unwrap();
+        assert_eq!(clock.text(noon - 1), "14:04");
+        assert_eq!(clock.text(noon), "14:05");
+        // 03:00 summer time is 02:00 winter time, at 01:00 UTC.
+        let change = crate::time::parse_iso("2026-10-25T01:00:00Z").unwrap();
+        assert_eq!(clock.text(change - 60), "02:59");
+        assert_eq!(clock.text(change), "02:00");
+        let twelve = Clock { format: TimeFormat::H12, ..clock };
+        assert_eq!(twelve.text(noon), "2:05 PM");
+        assert_eq!(twelve.text(crate::time::parse_iso("2026-10-11T22:30:00Z").unwrap()), "12:30 AM");
+        let old: Clock = serde_json::from_str(r#"{"offset":-240}"#).unwrap();
+        assert_eq!((old.next, old.format), (None, TimeFormat::H24));
     }
 
     #[test]

@@ -154,6 +154,20 @@ export const deviceState = z.object({
     .object({ boot: z.boolean(), key: z.boolean(), badge: z.boolean(), error: z.boolean(), notification: z.boolean() })
     .nullable()
     .default(null),
+  /**
+   * How it tells the time, from its settings: its UTC offset now in minutes, the next change of
+   * it within a week (summer or winter time: when, ISO 8601, and the offset after), and 24- or
+   * 12-hour figures. It reads the clock itself from its UTC time (NTP), to the second. Null (an
+   * older site): `screen.time` and the time since `serverTime`.
+   */
+  clock: z
+    .object({
+      offset: z.number().int(),
+      next: z.object({ at: z.string(), offset: z.number().int() }).nullable(),
+      format: z.enum(["24", "12"]),
+    })
+    .nullable()
+    .default(null),
 });
 
 export const deviceTake = z.object({

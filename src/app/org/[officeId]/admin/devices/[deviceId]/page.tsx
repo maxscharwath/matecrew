@@ -31,6 +31,8 @@ export default async function DevicePage({ params }: Props) {
       openUntil: true,
       openDays: true,
       sounds: true,
+      timeFormat: true,
+      timezone: true,
       office: { select: { timezone: true, locale: true } },
     },
   });
@@ -71,8 +73,10 @@ export default async function DevicePage({ params }: Props) {
           openUntil: device.openUntil,
           openDays: device.openDays,
           sounds: device.sounds,
+          timeFormat: device.timeFormat,
+          timezone: device.timezone,
         }}
-        display={{ officeLocale: device.office.locale, defaultTheme: defaultDeviceTheme() }}
+        display={{ officeLocale: device.office.locale, officeTimeZone: device.office.timezone, defaultTheme: defaultDeviceTheme() }}
         items={items}
         badges={badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? null }))}
         takes={takes.map((take) => ({

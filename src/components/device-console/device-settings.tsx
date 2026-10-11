@@ -1,6 +1,7 @@
 "use client";
 
 import { SOUNDS, parseSounds } from "@/lib/device/sounds";
+import { TIME_FORMATS } from "@/lib/device/clock";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -39,9 +40,13 @@ export type DeviceSettingsProps = {
     openDays: string;
     /** The sounds it plays, comma-separated (`SOUNDS`). */
     sounds: string;
+    /** "24" or "12". */
+    timeFormat: string;
+    /** Its own time zone; null follows the office's. */
+    timezone: string | null;
   };
   /** What a terminal without its own language and theme shows. */
-  display: { officeLocale: string; defaultTheme: DeviceTheme };
+  display: { officeLocale: string; officeTimeZone: string; defaultTheme: DeviceTheme };
   items: { id: string; name: string }[];
 };
 
@@ -94,6 +99,7 @@ export function DeviceSettings({ officeId, device, display, items }: Readonly<De
             </div>
             <DisplayFields device={device} display={display} />
             <HoursFields device={device} locale={display.officeLocale} />
+            <TimeFields device={device} officeTimeZone={display.officeTimeZone} />
             <SoundFields sounds={device.sounds} />
             <Button type="submit" disabled={pending}>
               {t("save")}
@@ -188,6 +194,53 @@ function HoursFields({ device, locale }: Readonly<{ device: DeviceSettingsProps[
           ))}
         </div>
       </fieldset>
+    </div>
+  );
+}
+
+/** The settings' "the office's time zone". */
+const OFFICE_ZONE = "office";
+
+/** How the terminal shows the time: its figures and its time zone; saved with the rest of the form. */
+function TimeFields({ device, officeTimeZone }: Readonly<{ device: DeviceSettingsProps["device"]; officeTimeZone: string }>) {
+  const t = useTranslations("devices.time");
+  const zones = useMemo(() => Intl.supportedValuesOf("timeZone"), []);
+  return (
+    <div className="space-y-4 border-t pt-4">
+      <div>
+        <div className="text-sm font-medium">{t("title")}</div>
+        <p className="text-xs text-muted-foreground">{t("hint")}</p>
+      </div>
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">{t("format")}</legend>
+        <div className="flex flex-wrap gap-1.5">
+          {TIME_FORMATS.map((format) => (
+            <label
+              key={format}
+              className="cursor-pointer rounded-md border px-2.5 py-1 text-sm transition-colors has-[:checked]:border-foreground/40 has-[:checked]:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50"
+            >
+              <input type="radio" name="timeFormat" value={format} defaultChecked={(device.timeFormat === "12" ? "12" : "24") === format} className="sr-only" />
+              {t(`formats.${format}`)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div className="space-y-2">
+        <Label htmlFor="device-timezone">{t("zone")}</Label>
+        <Select name="timezone" defaultValue={device.timezone ?? OFFICE_ZONE}>
+          <SelectTrigger id="device-timezone" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={OFFICE_ZONE}>{t("officeZone", { zone: officeTimeZone })}</SelectItem>
+            {zones.map((zone) => (
+              <SelectItem key={zone} value={zone}>
+                {zone.replaceAll("_", " ")}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

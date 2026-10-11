@@ -1610,6 +1610,18 @@
     "badgeLastPass": "dernier passage {when}",
     "badgeTakes": "{count, plural, =0 {aucune prise} one {# prise} other {# prises}}",
     "badgeFirstSeen": "vu depuis le {when}",
+    "time": {
+      "title": "Heure",
+      "hint": "Comment le terminal affiche l'heure : barre d'état, écran de nuit, achats.",
+      "format": "Format",
+      "formats": {
+        "24": "24 h · 14:05",
+        "12": "12 h · 2:05 PM"
+      },
+      "zone": "Fuseau horaire",
+      "officeZone": "Celui du bureau ({zone})",
+      "invalidZone": "Ce fuseau horaire n'existe pas."
+    },
     "sounds": {
       "title": "Sons",
       "hint": "Les sons que le terminal joue ; un son coupé ne joue pas non plus dans la console.",

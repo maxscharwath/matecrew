@@ -135,6 +135,14 @@ const DAY_WAKE: Duration = Duration::from_secs(15 * 60);
 const NIGHT_WAKE: Duration = Duration::from_secs(2 * 60 * 60);
 /// Not worth a deep sleep: it would wake up again at once.
 const MIN_DOZE: Duration = Duration::from_secs(60);
+/// The clock is redrawn this long before the minute turns: drawing it and the panel's partial
+/// refresh take about that, so the new minute shows as it starts.
+const CLOCK_LEAD: Duration = Duration::from_millis(1100);
+/// NTP set the clock this recently: it is right to the second, the site's time is not.
+const NTP_TRUSTED: i64 = 3 * 60 * 60;
+/// When NTP last set the clock, seconds since 1970; 0 before.
+/// (32 bits: the ESP32-S3 has no 64-bit atomics; seconds fit until 2106.)
+static NTP_AT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn main() {
     // The terminal has no button and no switch: whatever fails, it starts over
@@ -325,6 +333,7 @@ fn app() -> Result<()> {
     let sntp = cores::on(Core::Core0, || {
         EspSntp::new_with_callback(&SntpConf::default(), |since_epoch| {
             net::pulse(false);
+            NTP_AT.store(since_epoch.as_secs() as u32, std::sync::atomic::Ordering::Relaxed);
             log::info!("clock set by NTP: {} s since 1970", since_epoch.as_secs())
         })
     })
@@ -434,6 +443,8 @@ fn app() -> Result<()> {
         doze_at: Instant::now() + if wake == sleep::Wake::Timer { DOZE_AGAIN } else { DOZE_AFTER },
         device_drawn: serde_json::Value::Null,
         kept_awake: None,
+        clock_drawn: 0,
+        clock_for: None,
     }
     .run()
 }
@@ -688,12 +699,18 @@ struct Terminal {
     device_drawn: serde_json::Value,
     /// Why it stayed awake at the last try, logged when that changes.
     kept_awake: Option<&'static str>,
+    /// The minute the clock was last redrawn for, seconds since 1970.
+    clock_drawn: i64,
+    /// While the clock is redrawn ahead of the minute: the time it shows.
+    clock_for: Option<i64>,
 }
 
 enum Next {
     OverlayDue,
     /// Idle long enough to go to deep sleep.
     DozeDue,
+    /// The minute turns: the clock is redrawn for it (seconds since 1970).
+    ClockDue(i64),
     Input(Input),
     /// The flow's deadline passed.
     Tick,
@@ -798,6 +815,13 @@ impl Terminal {
                     stepped?
                 }
                 Next::Tick => self.step(Event::Tick)?,
+                Next::ClockDue(minute) => {
+                    self.clock_drawn = minute;
+                    self.clock_for = Some(minute);
+                    let drawn = self.redraw_current();
+                    self.clock_for = None;
+                    drawn?
+                }
                 Next::DozeDue => {
                     let awake_for = self.awake_for();
                     match awake_for {
@@ -891,10 +915,17 @@ impl Terminal {
             if self.flow.is_idle() && now >= self.doze_at {
                 return Ok(Next::DozeDue);
             }
+            let clock = self.next_minute(now);
+            if let Some((_, minute)) = clock.filter(|&(at, _)| now >= at) {
+                return Ok(Next::ClockDue(minute));
+            }
             let mut deadline = self
                 .flow
                 .deadline()
                 .map_or(sync_at.min(self.doze_at), |ms| self.started + Duration::from_millis(ms));
+            if let Some((at, _)) = clock {
+                deadline = deadline.min(at);
+            }
             if let Some(at) = [
                 self.app.as_ref().and_then(|app| app.overlay_deadline()),
                 ui::notifications::deadline(),
@@ -1314,7 +1345,7 @@ impl Terminal {
             "ble":{"connected":self.ble_drawn.0,"paired":self.ble_drawn.1},
             "memory":memory::json(),
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
-            "clock":ui::device_info::clock(self.state.as_ref(), now())
+            "clock":ui::device_info::clock(self.state.as_ref(), self.clock_for.unwrap_or_else(now))
         });
         ui::device_info::set(self.device_drawn.clone())
     }
@@ -1594,6 +1625,24 @@ impl Terminal {
         }
     }
 
+    /// When to redraw the clock for the next minute (`CLOCK_LEAD` ahead), and that minute; `None`
+    /// while it shows none (asleep for the office) or does not know the time yet.
+    fn next_minute(&self, now: Instant) -> Option<(Instant, i64)> {
+        if self.dozing || self.state.is_none() {
+            return None;
+        }
+        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis() as i64;
+        if now_ms / 1000 <= CLOCK_SET_AFTER {
+            return None;
+        }
+        let mut minute = (now_ms / 60_000 + 1) * 60;
+        if minute <= self.clock_drawn {
+            minute += 60;
+        }
+        let ahead = (minute * 1000 - CLOCK_LEAD.as_millis() as i64 - now_ms).max(0);
+        Some((now + Duration::from_millis(ahead as u64), minute))
+    }
+
     /// A key, a tap, a badge or a command: awake, the clock back in the status bar, and deep
     /// sleep DOZE_AFTER from now.
     fn touch(&mut self) {
@@ -1766,9 +1815,13 @@ fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-/// The site's clock is the reference: takes are stamped with it.
+/// The site's clock is the reference for takes, unless NTP set the clock lately: NTP is right to
+/// the millisecond, `server_time` only to the second, a request's time later. Two seconds apart,
+/// the site's wins anyway.
 fn set_clock(server_time: &str) {
-    if let Some(seconds) = time::parse_iso(server_time) {
+    use std::sync::atomic::Ordering;
+    let ntp = now() - i64::from(NTP_AT.load(Ordering::Relaxed)) < NTP_TRUSTED;
+    if let Some(seconds) = time::parse_iso(server_time).filter(|&seconds| !ntp || (seconds - now()).abs() > 2) {
         let tv = timeval {
             tv_sec: seconds as _,
             tv_usec: 0,

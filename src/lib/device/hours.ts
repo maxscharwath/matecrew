@@ -1,4 +1,5 @@
 import { getDateInTimezone } from "@/lib/date";
+import { formatTime, type TimeFormat } from "@/lib/device/clock";
 
 /**
  * A terminal's office hours (`Device.openFrom`, `openUntil`, `openDays`): inside them it sleeps
@@ -23,7 +24,7 @@ export function parseDays(text: string): number[] {
 }
 
 /** How far `timezone`'s clock is ahead of UTC at `instant`, in ms. */
-function offset(instant: number, timezone: string): number {
+export function zoneOffset(instant: number, timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     hourCycle: "h23",
@@ -44,8 +45,8 @@ export function zonedInstant(day: Date, hhmm: string, timezone: string): Date {
   const [hour, minute] = hhmm.split(":").map(Number);
   const wall = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute);
   // Twice: the offset at the guess, not at the wall time read as UTC, around a DST change.
-  const guess = wall - offset(wall, timezone);
-  return new Date(wall - offset(guess, timezone));
+  const guess = wall - zoneOffset(wall, timezone);
+  return new Date(wall - zoneOffset(guess, timezone));
 }
 
 export type HoursNow = {
@@ -60,14 +61,20 @@ export type HoursNow = {
 };
 
 /**
- * When the night screen says the terminal wakes up: `time` ("07:30", office time), and `day`, the
+ * When the night screen says the terminal wakes up: `time` ("07:30" or "7:30 AM", its time), and `day`, the
  * weekday's name in `locale`, when that is not today or the next morning (the terminal's catalog
  * words "Réveil lundi à 07:30", or "Réveil à 07:30" without a day).
  */
-export function wakeWords(at: Date, timezone: string, locale: string, now = new Date()): { day: string; time: string } {
+export function wakeWords(
+  at: Date,
+  timezone: string,
+  locale: string,
+  now = new Date(),
+  format: TimeFormat = "24",
+): { day: string; time: string } {
   const midnight = (instant: Date) => getDateInTimezone(instant, timezone).getTime();
   const daysAhead = Math.round((midnight(at) - midnight(now)) / DAY_MS);
-  const time = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit" }).format(at);
+  const time = formatTime(at, timezone, format);
   const day = daysAhead > 1 ? new Intl.DateTimeFormat(locale, { timeZone: timezone, weekday: "long" }).format(at) : "";
   return { day, time };
 }

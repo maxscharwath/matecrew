@@ -11,6 +11,7 @@ import { toRow, withId, type ConsoleCommand } from "@/lib/device/console-command
 import { notifyTerminals } from "@/lib/device/push";
 import { HHMM } from "@/lib/device/hours";
 import { SOUNDS, soundsText } from "@/lib/device/sounds";
+import { TIME_FORMATS, isTimeZone } from "@/lib/device/clock";
 import { deviceTheme } from "@/lib/device/contract";
 import type { LiveStatus } from "@/lib/device/live";
 import { defaultDeviceTheme } from "@/lib/device/state";
@@ -18,6 +19,8 @@ import { locales } from "@/i18n/request";
 
 /** The language choice that follows the office's. */
 const OFFICE_LOCALE = "office";
+/** The settings' "the office's time zone": stored as null. */
+const OFFICE_ZONE = "office";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -43,6 +46,8 @@ export async function updateDevice(
       openUntil: z.string().regex(HHMM, t("hours.invalid")),
       openDays: z.array(z.coerce.number().int().min(0).max(6)),
       sounds: z.array(z.enum(SOUNDS)),
+      timeFormat: z.enum(TIME_FORMATS),
+      timezone: z.string().refine((zone) => zone === OFFICE_ZONE || isTimeZone(zone), t("time.invalidZone")),
     })
     .refine((hours) => hours.openFrom < hours.openUntil, { message: t("hours.invalid") })
     .safeParse({
@@ -54,17 +59,21 @@ export async function updateDevice(
       openUntil: formData.get("openUntil") ?? "19:00",
       openDays: formData.getAll("openDays"),
       sounds: formData.getAll("sounds"),
+      timeFormat: formData.get("timeFormat") ?? "24",
+      timezone: formData.get("timezone") ?? OFFICE_ZONE,
     });
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
 
   const device = await prisma.device.findFirst({
     where: { id: deviceId, officeId },
-    select: { name: true, leftItemId: true, locale: true, theme: true, openFrom: true, openUntil: true, openDays: true, sounds: true },
+    select: { name: true, leftItemId: true, locale: true, theme: true, openFrom: true, openUntil: true, openDays: true, sounds: true, timeFormat: true, timezone: true },
   });
   if (!device) return { success: false, error: t("notFound") };
   const { name, firstItemId, openFrom, openUntil } = parsed.data;
   const openDays = [...new Set(parsed.data.openDays)].sort((a, b) => a - b).join(",");
   const sounds = soundsText(parsed.data.sounds);
+  const { timeFormat } = parsed.data;
+  const timezone = parsed.data.timezone === OFFICE_ZONE ? null : parsed.data.timezone;
   if (firstItemId && !(await prisma.item.count({ where: { id: firstItemId, officeId } }))) {
     return { success: false, error: t("notFound") };
   }
@@ -75,12 +84,12 @@ export async function updateDevice(
   // The picker opens on the left key's item; that is all the keys still have to set.
   await prisma.device.update({
     where: { id: deviceId },
-    data: { name, leftItemId: firstItemId, locale, theme, openFrom, openUntil, openDays, sounds },
+    data: { name, leftItemId: firstItemId, locale, theme, openFrom, openUntil, openDays, sounds, timeFormat, timezone },
   });
   // What the terminal shows changed: a sync, as the console's button sends, redraws it now (or
   // at its next connection).
-  const before = [device.name, device.leftItemId, device.locale, device.theme, device.openFrom, device.openUntil, device.openDays, device.sounds];
-  const changed = before.some((value, i) => value !== [name, firstItemId, locale, theme, openFrom, openUntil, openDays, sounds][i]);
+  const before = [device.name, device.leftItemId, device.locale, device.theme, device.openFrom, device.openUntil, device.openDays, device.sounds, device.timeFormat, device.timezone];
+  const changed = before.some((value, i) => value !== [name, firstItemId, locale, theme, openFrom, openUntil, openDays, sounds, timeFormat, timezone][i]);
   if (changed && platform.relay.terminalUrl()) {
     notifyTerminals([deviceId]);
   } else if (changed) {

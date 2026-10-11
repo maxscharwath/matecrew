@@ -1610,6 +1610,18 @@
     "badgeLastPass": "last tap {when}",
     "badgeTakes": "{count, plural, =0 {no takes} one {# take} other {# takes}}",
     "badgeFirstSeen": "seen since {when}",
+    "time": {
+      "title": "Time",
+      "hint": "How the terminal shows the time: status bar, night screen, purchases.",
+      "format": "Format",
+      "formats": {
+        "24": "24-hour · 14:05",
+        "12": "12-hour · 2:05 PM"
+      },
+      "zone": "Time zone",
+      "officeZone": "The office's ({zone})",
+      "invalidZone": "This time zone does not exist."
+    },
     "sounds": {
       "title": "Sounds",
       "hint": "The sounds the terminal plays; a sound turned off does not play in the console either.",
