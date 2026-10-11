@@ -1318,6 +1318,11 @@ impl Terminal {
             self.dirty = true;
             return Ok(());
         }
+        self.draw_main_now()
+    }
+
+    /// The idle screen, even with more inputs waiting.
+    fn draw_main_now(&mut self) -> Result<()> {
         let gathered = Instant::now();
         let info = self.device_info();
         log::info!("draw: device info in {} ms", gathered.elapsed().as_millis());
@@ -1598,6 +1603,16 @@ impl Terminal {
         }
     }
 
+    /// Whether someone did something the loop has not handled yet: a key, a badge, a command.
+    /// What the terminal does by itself does not count: the network's arrows (a console's
+    /// command lights them, a sleep among them), Bluetooth's state, the relay's socket, a fetch.
+    fn someone_waiting(&mut self) -> bool {
+        self.pending.extend(self.inputs.try_iter());
+        self.pending.iter().any(|input| {
+            !matches!(input, Input::Net | Input::Bluetooth | Input::Live(_) | Input::Changed(_) | Input::Fetched(_) | Input::Doze(_))
+        })
+    }
+
     /// Why the terminal stays awake now; `None` when it may go to deep sleep.
     fn awake_for(&self) -> Option<&'static str> {
         if self.state.as_ref().and_then(|state| state.hours.as_ref()).is_none() {
@@ -1702,20 +1717,19 @@ impl Terminal {
             return Ok(());
         }
 
-        self.dozing = true;
-        self.draw_main()?;
-        if self.dirty || self.input_waiting() {
-            self.dozing = false;
+        if self.someone_waiting() {
             return Ok(());
         }
+        self.dozing = true;
+        self.draw_main_now()?;
         self.save_app_cache()?;
         self.screen.clean()?;
         self.screen.rest()?;
         // Once the panel shows it, its controller asleep: a refresh takes 1 to 2 s.
         let wear = self.screen.wear();
-        if self.input_waiting() {
-            // Touched meanwhile: the loop handles it.
-            self.dozing = false;
+        if self.someone_waiting() {
+            // Touched meanwhile: the loop handles it, the clock back.
+            self.wake_up();
             self.dirty = true;
             return Ok(());
         }
