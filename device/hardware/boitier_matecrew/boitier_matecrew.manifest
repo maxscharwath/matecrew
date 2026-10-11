@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "author": "matécrew",
+  "description": {
+    "": "Boîtier e-ink matécrew : façade, châssis, capot mural et socle, paramétriques."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
