@@ -678,6 +678,8 @@ enum DeviceCommandKind {
   SYNC
   RESTART
   FORGET_WIFI
+  /// Deep sleep now (`sleep`): dropped like a key if the terminal picks it up late.
+  SLEEP
 }
 
 /// Something an admin did to a terminal from the site's console, waiting for

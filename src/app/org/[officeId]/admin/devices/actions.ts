@@ -123,6 +123,7 @@ const consoleCommand = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),
   z.object({ kind: z.literal("restart") }),
   z.object({ kind: z.literal("forgetWifi") }),
+  z.object({ kind: z.literal("sleep") }),
 ]);
 
 /**

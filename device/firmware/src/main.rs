@@ -106,7 +106,8 @@ pub enum Input {
     Changed(f64),
     /// The relay's socket opened or closed.
     Live(bool),
-    /// The serial console's `sleep`: deep sleep now, the timer capped at this.
+    /// Deep sleep now, whatever keeps it awake (the serial console's `sleep`, a console's); the
+    /// timer capped at this.
     Doze(Option<Duration>),
 }
 
@@ -794,7 +795,7 @@ impl Terminal {
                 Next::DozeDue => {
                     let awake_for = self.awake_for();
                     match awake_for {
-                        None => self.doze(None)?,
+                        None => self.doze(false, None)?,
                         Some(reason) if self.kept_awake != awake_for => log::info!("sleep: not now, {reason}"),
                         Some(_) => {}
                     }
@@ -809,7 +810,7 @@ impl Terminal {
                 }
                 Next::Input(Input::Doze(cap)) => {
                     if self.flow.is_idle() {
-                        self.doze(Some(cap.unwrap_or(DAY_WAKE)))?;
+                        self.doze(true, cap)?;
                     } else {
                         log::warn!("sleep: not while the screen waits for someone");
                     }
@@ -1664,9 +1665,10 @@ impl Terminal {
 
     /// Deep sleep, with the stock and the moon inside office hours (waking up every DAY_WAKE to
     /// sync, when the site's state changes by itself, and at closing), with the night screen
-    /// outside them (waking up when they open). A key wakes it. `cap`: the serial console's.
-    /// Returns only when it did not sleep: a key meanwhile, or too soon to be worth it.
-    fn doze(&mut self, cap: Option<Duration>) -> Result<()> {
+    /// outside them (waking up when they open). A key wakes it. `forced`: asked for (a console,
+    /// the serial one), even without office hours or for a short while; `cap`: its timer at the
+    /// latest. Returns only when it did not sleep: a key meanwhile, or too soon to be worth it.
+    fn doze(&mut self, forced: bool, cap: Option<Duration>) -> Result<()> {
         let stale = |terminal: &Self| {
             let until = terminal.state.as_ref().and_then(|s| s.hours.as_ref()).and_then(|h| time::parse_iso(&h.until));
             until.is_some_and(|until| until <= now())
@@ -1676,10 +1678,10 @@ impl Terminal {
             self.sync(false);
         }
         let hours = self.state.as_ref().and_then(|s| s.hours.clone());
-        if hours.is_none() && cap.is_none() {
+        if hours.is_none() && !forced {
             return Ok(());
         }
-        // Without hours from the site, only the serial console's: as inside them.
+        // Without hours from the site, only when asked for: as inside them.
         let open = hours.as_ref().is_none_or(|hours| hours.open) || stale(self);
         let mut wake_in = if open { DAY_WAKE } else { NIGHT_WAKE };
         let ahead = |at: Option<i64>| at.map(|at| at - now()).filter(|&s| s > 0).map(|s| Duration::from_secs(s as u64));
@@ -1694,7 +1696,8 @@ impl Terminal {
         }
         if let Some(cap) = cap {
             wake_in = wake_in.min(cap);
-        } else if wake_in < MIN_DOZE {
+        }
+        if !forced && wake_in < MIN_DOZE {
             log::info!("sleep: not for {} s", wake_in.as_secs());
             return Ok(());
         }

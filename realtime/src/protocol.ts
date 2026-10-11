@@ -159,9 +159,12 @@ export function tones(value: unknown): Tone[] | null {
   return valid ? (value as Tone[]) : null;
 }
 
-/** Keys, badges and taps: worth running only right away. */
+/**
+ * Keys, badges, taps and a sleep: worth running only right away (a sleep delivered when the
+ * terminal wakes up would put it straight back to sleep).
+ */
 export function isInput(command: Command): boolean {
-  return ["key", "both", "badge", "tap"].includes(command.kind);
+  return ["key", "longKey", "both", "badge", "tap", "sleep"].includes(command.kind);
 }
 
 /**

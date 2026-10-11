@@ -15,11 +15,13 @@ export type ConsoleCommand =
   | { kind: "sync"; app?: "mate" | "showcase" }
   | { kind: "tap"; x: number; y: number }
   | { kind: "restart" }
-  | { kind: "forgetWifi" };
+  | { kind: "forgetWifi" }
+  /** Deep sleep now, whatever keeps it awake; a key or its timer wakes it. */
+  | { kind: "sleep" };
 
 /** As a `DeviceCommand` row stores it (`prisma/schema.prisma`), and as the console lists it. */
 export type CommandRow = {
-  kind: "KEY" | "BADGE" | "SYNC" | "RESTART" | "FORGET_WIFI";
+  kind: "KEY" | "BADGE" | "SYNC" | "RESTART" | "FORGET_WIFI" | "SLEEP";
   arg: string | null;
 };
 
@@ -32,6 +34,7 @@ const KIND_TO_ROW = {
   tap: "KEY",
   restart: "RESTART",
   forgetWifi: "FORGET_WIFI",
+  sleep: "SLEEP",
 } as const;
 
 /** What a row stores besides its kind: the side, the UID, the point or the app. */
@@ -86,6 +89,8 @@ export function fromRow(row: CommandRow): ConsoleCommand | null {
       return { kind: "restart" };
     case "FORGET_WIFI":
       return { kind: "forgetWifi" };
+    case "SLEEP":
+      return { kind: "sleep" };
   }
 }
 
@@ -119,6 +124,8 @@ export function toRemote(command: ConsoleCommand): RemoteCommand | null {
       return command.app ? null : { cmd: "sync" };
     case "restart":
       return { cmd: "restart" };
+    case "sleep":
+      return { cmd: "sleep" };
     case "forgetWifi":
       return null;
   }

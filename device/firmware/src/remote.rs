@@ -255,6 +255,7 @@ pub fn input(action: Action) -> Input {
         Action::Tap { x, y } => Input::Tap(x, y),
         Action::Restart => Input::Restart,
         Action::ForgetWifi => Input::ForgetWifi,
+        Action::Sleep => Input::Doze(None),
         Action::Notify(text) => Input::Notify(text),
     }
 }

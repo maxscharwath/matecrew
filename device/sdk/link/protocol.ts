@@ -61,6 +61,8 @@ export type RemoteCommand =
   | { cmd: "badge"; uid: string }
   | { cmd: "sync" }
   | { cmd: "restart" }
+  /** Deep sleep now: the link closes with it, a key wakes the terminal. */
+  | { cmd: "sleep" }
   | { cmd: "notify"; text: string }
   /** A touch on the screen at (x, y) of a 200 × 120 grid, whatever the screen's size. */
   | { cmd: "tap"; x: number; y: number };

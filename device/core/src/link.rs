@@ -133,6 +133,8 @@ pub enum Control {
     /// A point of the remote's 200 × 120 grid (`action::TAP_WIDTH`, `TAP_HEIGHT`).
     Tap { x: i32, y: i32 },
     Restart,
+    /// Deep sleep now: the link closes with it.
+    Sleep,
     Notify { text: String },
 }
 

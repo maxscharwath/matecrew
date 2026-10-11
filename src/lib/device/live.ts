@@ -17,7 +17,7 @@ export type LiveStatus = {
   frame: { hash: string; drawnAt: string } | null;
   commands: {
     id: string;
-    kind: "KEY" | "BADGE" | "SYNC" | "RESTART" | "FORGET_WIFI";
+    kind: "KEY" | "BADGE" | "SYNC" | "RESTART" | "FORGET_WIFI" | "SLEEP";
     arg: string | null;
     createdAt: string;
     status: "waiting" | "delivered" | "dropped";

@@ -21,6 +21,8 @@ pub enum Action {
     Tap { x: i32, y: i32 },
     Restart,
     ForgetWifi,
+    /// Deep sleep now, whatever keeps the terminal awake otherwise.
+    Sleep,
     /// A toast on the panel.
     Notify(String),
 }
@@ -47,6 +49,7 @@ impl Action {
             Command::Tap { x, y, .. } => return tap(x, y),
             Command::Restart { .. } => Self::Restart,
             Command::ForgetWifi { .. } => Self::ForgetWifi,
+            Command::Sleep { .. } => Self::Sleep,
             Command::Unknown => return None,
         })
     }
@@ -61,6 +64,7 @@ impl Action {
             Control::Sync => Self::Sync,
             Control::Tap { x, y } => return tap(x, y),
             Control::Restart => Self::Restart,
+            Control::Sleep => Self::Sleep,
             Control::Notify { text } => Self::Notify(text),
         })
     }
@@ -89,5 +93,9 @@ mod tests {
         assert_eq!(Action::from_command(held), Some(Action::LongKey(Side::Right)));
         let nearby = Control::parse(br#"{"cmd":"longKey","side":"left"}"#).unwrap();
         assert_eq!(Action::from_control(nearby), Some(Action::LongKey(Side::Left)));
+        let relayed: Command = serde_json::from_str(r#"{"id":"c4","kind":"sleep"}"#).unwrap();
+        let nearby = Control::parse(br#"{"cmd":"sleep"}"#).unwrap();
+        assert_eq!(Action::from_command(relayed), Some(Action::Sleep));
+        assert_eq!(Action::from_control(nearby), Some(Action::Sleep));
     }
 }

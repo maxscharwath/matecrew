@@ -50,6 +50,8 @@ export function useCommandLabels() {
           return t("kind.restart");
         case "forgetWifi":
           return t("kind.forgetWifi");
+        case "sleep":
+          return t("kind.sleep");
       }
     },
     [t],

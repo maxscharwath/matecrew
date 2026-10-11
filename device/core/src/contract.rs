@@ -321,6 +321,9 @@ pub enum Command {
     Restart { id: String },
     /// Forget the Wi-Fi and start setup again; the token stays.
     ForgetWifi { id: String },
+    /// Deep sleep now, as after two idle minutes, even while a console watches; a key or its timer
+    /// wakes it.
+    Sleep { id: String },
     /// A kind this firmware does not know yet.
     #[serde(other)]
     Unknown,
@@ -459,6 +462,7 @@ mod tests {
                 {"id":"c1","kind":"key","side":"left"},
                 {"id":"c2","kind":"badge","uid":"04A1B2C3"},
                 {"id":"c3","kind":"forgetWifi"},
+                {"id":"c5","kind":"sleep"},
                 {"id":"c4","kind":"selfDestruct"}
             ]}"#,
         )
@@ -470,6 +474,7 @@ mod tests {
                 Command::Key { id: "c1".into(), side: Side::Left },
                 Command::Badge { id: "c2".into(), uid: "04A1B2C3".into() },
                 Command::ForgetWifi { id: "c3".into() },
+                Command::Sleep { id: "c5".into() },
                 Command::Unknown,
             ]
         );

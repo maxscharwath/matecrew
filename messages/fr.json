@@ -1352,6 +1352,7 @@
         "sync": "Synchro",
         "restart": "Redémarrage",
         "forgetWifi": "Oubli du Wi-Fi",
+        "sleep": "Mise en veille",
         "tap": "Appui à l'écran en {x}, {y}",
         "app": "Ouvrir {app}",
         "both": "Les deux touches"
@@ -1527,6 +1528,8 @@
         "restart": "Redémarrer",
         "about": "Page À propos",
         "aboutHint": "Les deux touches ensemble : la page À propos du terminal",
+        "sleep": "Mettre en veille",
+        "sleepHint": "Deep sleep tout de suite, même si une console regarde : le stock reste à l'écran, une touche le réveille, sinon son réveil prévu.",
         "openApp": "Ouvrir une app…",
         "forgetWifi": "Oublier le Wi-Fi",
         "forgetWifiConfirm": "{name} va oublier le Wi-Fi et revenir à l'écran de configuration. Continuer ?",

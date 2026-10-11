@@ -1352,6 +1352,7 @@
         "sync": "Sync",
         "restart": "Restart",
         "forgetWifi": "Forget Wi-Fi",
+        "sleep": "Sleep",
         "tap": "Tap at {x}, {y}",
         "app": "Open {app}",
         "both": "Both keys"
@@ -1527,6 +1528,8 @@
         "restart": "Restart",
         "about": "About page",
         "aboutHint": "Both keys together: the terminal's about page",
+        "sleep": "Put to sleep",
+        "sleepHint": "Deep sleep right away, even while a console watches: the stock stays on screen, a key wakes it, else its next planned wake-up.",
         "openApp": "Open an app…",
         "forgetWifi": "Forget Wi-Fi",
         "forgetWifiConfirm": "{name} will forget its Wi-Fi and go back to the setup screen. Continue?",

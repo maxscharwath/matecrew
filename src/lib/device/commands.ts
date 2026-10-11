@@ -3,7 +3,10 @@ import { prisma } from "@/lib/prisma";
 import type { DeviceCommand as CommandRow } from "@/generated/prisma/client";
 import type { DeviceCommand } from "@/lib/device/contract";
 
-/** A key or badge pressed from the console is dropped if the terminal picks it up later than this. */
+/**
+ * A key, a badge or a sleep from the console is dropped if the terminal picks it up later than
+ * this: a sleep delivered when it wakes up would put it straight back to sleep.
+ */
 export const COMMAND_INPUT_TTL_SECONDS = 60;
 /** Longest a terminal's command poll is held open. */
 export const COMMAND_WAIT_MAX_SECONDS = 25;
@@ -41,7 +44,7 @@ export async function takeCommands(
     .filter(
       (row) =>
         !(
-          (row.kind === "KEY" || row.kind === "BADGE") &&
+          (row.kind === "KEY" || row.kind === "BADGE" || row.kind === "SLEEP") &&
           row.createdAt.getTime() < staleBefore
         ),
     )

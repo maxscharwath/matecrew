@@ -448,6 +448,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
                 onBoth={() => send({ kind: "both" })}
                 onOpenApp={(app) => send({ kind: "sync", app })}
                 onRestart={() => send({ kind: "restart" })}
+                onSleep={() => send({ kind: "sleep" })}
                 onForgetWifi={() => send({ kind: "forgetWifi" })}
                 onFirmware={ble.device ? (image, progress) => updateOverBluetooth(image, progress) : undefined}
               />

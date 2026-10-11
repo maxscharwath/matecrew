@@ -258,6 +258,8 @@ export const deviceCommand = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("restart") }),
   /** Forget the Wi-Fi and start setup again; the token stays. */
   z.object({ id: z.string(), kind: z.literal("forgetWifi") }),
+  /** Deep sleep now, whatever keeps it awake; a key or its timer wakes it. */
+  z.object({ id: z.string(), kind: z.literal("sleep") }),
 ]);
 
 /**

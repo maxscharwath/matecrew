@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { useFormatter, useTranslations } from "next-intl";
-import { Info, LoaderCircle, Power, RefreshCw, Upload, WifiOff, X, Zap } from "lucide-react";
+import { Info, LoaderCircle, Moon, Power, RefreshCw, Upload, WifiOff, X, Zap } from "lucide-react";
 import { imageVersion } from "@matecrew/device-ui/link";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -14,8 +14,8 @@ type App = "mate" | "showcase";
 
 /**
  * What can be asked of the terminal besides its keys and reader: a sync, the about page, an app,
- * a restart, forgetting its Wi-Fi, and (over Bluetooth) a new firmware. Only the actions given
- * show.
+ * a restart, a deep sleep, forgetting its Wi-Fi, and (over Bluetooth) a new firmware. Only the
+ * actions given show.
  */
 export function ActionsCard({
   deviceName,
@@ -24,6 +24,7 @@ export function ActionsCard({
   onBoth,
   onOpenApp,
   onRestart,
+  onSleep,
   onForgetWifi,
   onFirmware,
 }: Readonly<{
@@ -34,6 +35,8 @@ export function ActionsCard({
   onBoth?: () => void;
   onOpenApp?: (app: App) => void;
   onRestart?: () => void;
+  /** Deep sleep now: the console loses it until a key or its timer wakes it. */
+  onSleep?: () => void;
   onForgetWifi?: () => void;
   /** Sends a firmware image, reporting its progress in percent; resolves once done or failed. */
   onFirmware?: (image: Uint8Array, progress: (percent: number) => void) => Promise<void>;
@@ -56,6 +59,11 @@ export function ActionsCard({
         {onBoth && (
           <Button variant="outline" size="sm" onClick={onBoth} title={t("aboutHint")}>
             <Info /> {t("about")}
+          </Button>
+        )}
+        {onSleep && (
+          <Button variant="outline" size="sm" onClick={onSleep} title={t("sleepHint")}>
+            <Moon /> {t("sleep")}
           </Button>
         )}
         {onOpenApp && (

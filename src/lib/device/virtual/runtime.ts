@@ -775,6 +775,9 @@ export class VirtualDevice {
       case "restart":
       case "forgetWifi":
         return "restart";
+      case "sleep":
+        // No deep sleep in a browser: it stays as it is.
+        break;
     }
     return "done";
   }

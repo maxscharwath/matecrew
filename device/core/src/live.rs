@@ -132,7 +132,8 @@ pub fn command_id(command: &Command) -> Option<&str> {
         | Command::Sync { id, .. }
         | Command::Tap { id, .. }
         | Command::Restart { id }
-        | Command::ForgetWifi { id } => Some(id),
+        | Command::ForgetWifi { id }
+        | Command::Sleep { id } => Some(id),
         Command::Unknown => None,
     }
 }
