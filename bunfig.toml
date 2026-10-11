@@ -8,5 +8,6 @@ preload = ["./scripts/bun/wasm-module.ts"]
 # One copy of each package, linked where it is used, as Bun has done by default for workspaces
 # since 1.3: said here so every Bun installs the same tree. A flat node_modules let Next trace
 # packages the Worker never runs (MediaPipe, PGlite, Prisma's CLI) into it, past Workers' 64 MiB.
-# Workers Builds needs BUN_VERSION=1.4.2: its default Bun, 1.2.15, installs a flat tree.
+# Workers Builds' default Bun (1.2.15) installs a flat tree whatever this says: `build:cloudflare`
+# installs again with Bun 1.4.2 first.
 linker = "isolated"
