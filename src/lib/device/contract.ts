@@ -143,7 +143,15 @@ export const deviceState = z.object({
    * when that is not the next morning; `weekend` when it is more than a night away.
    */
   hours: z
-    .object({ open: z.boolean(), until: z.string(), weekend: z.boolean(), day: z.string(), time: z.string() })
+    .object({
+      open: z.boolean(),
+      until: z.string(),
+      weekend: z.boolean(),
+      day: z.string(),
+      time: z.string(),
+      /** The day it wakes up, 0 = Sunday, when not the next morning: named from the terminal's messages. */
+      weekday: z.number().int().min(0).max(6).nullable(),
+    })
     .nullable()
     .default(null),
   /**
@@ -165,6 +173,8 @@ export const deviceState = z.object({
       offset: z.number().int(),
       next: z.object({ at: z.string(), offset: z.number().int() }).nullable(),
       format: z.enum(["24", "12"]),
+      /** The date beside the clock on its main screens. */
+      date: z.boolean(),
     })
     .nullable()
     .default(null),

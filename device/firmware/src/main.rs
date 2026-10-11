@@ -1345,7 +1345,8 @@ impl Terminal {
             "ble":{"connected":self.ble_drawn.0,"paired":self.ble_drawn.1},
             "memory":memory::json(),
             "uptimeMinutes":self.started.elapsed().as_secs() / 60,
-            "clock":ui::device_info::clock(self.state.as_ref(), self.clock_for.unwrap_or_else(now))
+            "clock":ui::device_info::clock(self.state.as_ref(), self.clock_for.unwrap_or_else(now)),
+            "date":ui::device_info::date(self.state.as_ref(), self.clock_for.unwrap_or_else(now))
         });
         ui::device_info::set(self.device_drawn.clone())
     }
@@ -1364,7 +1365,7 @@ impl Terminal {
         let info = self.device_info();
         log::info!("draw: device info in {} ms", gathered.elapsed().as_millis());
         if let Some(night) = self.night() {
-            self.screen.show(|d| ui::sleep_screen(d, night.weekend, &night.day, &night.time))?;
+            self.screen.show(|d| ui::sleep_screen(d, night.weekend, night.weekday, &night.time))?;
             return Ok(());
         }
         if let Some(app) = &mut self.app {
@@ -1698,7 +1699,7 @@ impl Terminal {
         let ahead = time::parse_iso(&hours.until).is_some_and(|until| until > now());
         (self.dozing && !hours.open && ahead).then(|| sleep::Night {
             weekend: hours.weekend,
-            day: hours.day.clone(),
+            weekday: hours.weekday,
             time: hours.time.clone(),
         })
     }
@@ -1720,7 +1721,7 @@ impl Terminal {
         let offline = self.offline;
         let (screen, app, state) = (&mut self.screen, self.app.as_ref(), self.state.as_ref());
         let same = match (&kept.night, app, state) {
-            (Some(night), _, _) => screen.assume(|d| ui::sleep_screen(d, night.weekend, &night.day, &night.time), kept.digest, kept.wear),
+            (Some(night), _, _) => screen.assume(|d| ui::sleep_screen(d, night.weekend, night.weekday, &night.time), kept.digest, kept.wear),
             (None, Some(app), _) => {
                 screen.assume(|d| ui::render_app(d, app, ui::app_scale(app.scene())), kept.digest, kept.wear)
             }

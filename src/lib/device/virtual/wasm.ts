@@ -110,8 +110,8 @@ export type View =
   | { type: "linked"; office: string; name: string }
   | { type: "error"; title: string; detail: string }
   | { type: "flow"; screen: FlowScreen }
-  /** Outside the office's hours: asleep until `day` (empty for the next morning) at `time`. */
-  | { type: "sleep"; weekend: boolean; day: string; time: string };
+  /** Outside the office's hours: asleep until `weekday` (0 = Sunday; null for the next morning) at `time`. */
+  | { type: "sleep"; weekend: boolean; weekday: number | null; time: string };
 
 export type ImageRequest = {
   src: string;

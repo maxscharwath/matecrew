@@ -1,5 +1,5 @@
 /** @jsxImportSource @matecrew/device-ui */
-import {
+import { useClock,
   Screen,
   StatusBar,
   Main,
@@ -72,6 +72,7 @@ export function Frame({
   primary,
   reader = false,
   hint,
+  dated = false,
   children,
   ...layout
 }: Readonly<LayoutProps & {
@@ -86,12 +87,22 @@ export function Frame({
   reader?: boolean;
   /** Between the tabs when no badge is read: a `KeyHint`, such as how to leave. */
   hint?: Children;
+  /** The date beside the clock (`useClock`), on the main screens, unless its settings hide it. */
+  dated?: boolean;
   children?: Children;
 }>) {
   const t = useT();
+  const clock = useClock();
+  const date = dated
+    ? t("date.short", {
+        weekday: t("date.weekday", { context: clock.weekday }),
+        day: clock.day,
+        month: t("date.month", { context: clock.month }),
+      })
+    : undefined;
   return (
     <Screen theme="paper">
-      <StatusBar leading={leading} trailing={trailing}>{title}</StatusBar>
+      <StatusBar leading={leading} trailing={trailing} date={date}>{title}</StatusBar>
       <Main {...layout}>{children}</Main>
       {keys && (
         <Keys reader={reader ? t("reader") : false} center={hint}>

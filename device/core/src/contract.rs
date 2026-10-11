@@ -127,6 +127,23 @@ pub struct Clock {
     pub next: Option<OffsetChange>,
     #[serde(default)]
     pub format: TimeFormat,
+    /// The date shows beside the clock on the main screens (`$device.date`).
+    #[serde(default = "yes")]
+    pub date: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A day as the terminal's clock reads it: the screens name it from their messages.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct LocalDate {
+    /// 0 = Sunday ... 6 = Saturday.
+    pub weekday: u8,
+    pub day: u8,
+    /// 1 = January.
+    pub month: u8,
 }
 
 /// From `at` (ISO 8601) on, `offset` minutes east of UTC.
@@ -154,6 +171,12 @@ impl Clock {
             Some(next) if crate::time::parse_iso(&next.at).is_some_and(|at| unix >= at) => next.offset,
             _ => self.offset,
         }
+    }
+
+    /// The day at `unix` where the terminal is.
+    pub fn date(&self, unix: i64) -> LocalDate {
+        let (_, month, day, weekday) = crate::time::local_day(unix + i64::from(self.offset_at(unix)) * 60);
+        LocalDate { weekday: weekday as u8, day: day as u8, month: month as u8 }
     }
 
     /// The time at `unix` as the panel shows it: "14:05", or "2:05 PM".
@@ -214,6 +237,10 @@ pub struct Hours {
     /// When it wakes up, "07:30" in the office's time.
     #[serde(default)]
     pub time: String,
+    /// The day it wakes up, 0 = Sunday, when that is not the next morning: the night screen names
+    /// it from the app's messages (`date.weekdayLong`). Absent from an older site: `day` only.
+    #[serde(default)]
+    pub weekday: Option<u8>,
 }
 
 /// Where the terminal's live channel opens: `wss://…/terminals/socket`, with its token.
@@ -557,11 +584,16 @@ mod tests {
         let change = crate::time::parse_iso("2026-10-25T01:00:00Z").unwrap();
         assert_eq!(clock.text(change - 60), "02:59");
         assert_eq!(clock.text(change), "02:00");
-        let twelve = Clock { format: TimeFormat::H12, ..clock };
+        let twelve = Clock { format: TimeFormat::H12, ..clock.clone() };
         assert_eq!(twelve.text(noon), "2:05 PM");
         assert_eq!(twelve.text(crate::time::parse_iso("2026-10-11T22:30:00Z").unwrap()), "12:30 AM");
         let old: Clock = serde_json::from_str(r#"{"offset":-240}"#).unwrap();
-        assert_eq!((old.next, old.format), (None, TimeFormat::H24));
+        assert_eq!((old.next, old.format, old.date), (None, TimeFormat::H24, true));
+        // Sunday 11 October 2026; the day turns at midnight local, 22:00 UTC in summer.
+        assert_eq!(clock.date(noon), LocalDate { weekday: 0, day: 11, month: 10 });
+        let midnight = crate::time::parse_iso("2026-10-11T22:00:00Z").unwrap();
+        assert_eq!(clock.date(midnight - 1).day, 11);
+        assert_eq!(clock.date(midnight), LocalDate { weekday: 1, day: 12, month: 10 });
     }
 
     #[test]

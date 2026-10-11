@@ -38,6 +38,15 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+/// The local calendar day of `seconds` (local time, seconds since 1970): (year, month 1-12, day
+/// 1-31, weekday 0 = Sunday).
+pub fn local_day(seconds: i64) -> (i64, i64, i64, i64) {
+    let days = seconds.div_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    // 1 January 1970 was a Thursday.
+    (year, month, day, (days + 4).rem_euclid(7))
+}
+
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let days = days + 719_468;
     let era = days.div_euclid(146_097);

@@ -6,9 +6,9 @@ import { Frame, useT, view } from "./shared";
 
 /**
  * Outside the office's hours the terminal sleeps and the panel keeps this: the night sky, and
- * when it wakes, the time large. `view.title`: night or weekend; `view.day` and `view.time`: when
- * it wakes, the day empty for the next morning, else named in the office's language. No clock in
- * the status bar: it would stay at the time it fell asleep. A key wakes it.
+ * when it wakes, the time large. `view.title`: night or weekend; `view.weekday` (0 = Sunday, -1
+ * for the next morning) and `view.time`: when it wakes, the day named from the messages. No clock
+ * in the status bar: it would stay at the time it fell asleep. A key wakes it.
  */
 export function sleep() {
   const t = useT();
@@ -16,7 +16,13 @@ export function sleep() {
     <Frame title={t("sleep.title", { context: view("title") })} trailing={<MoonIcon size={24} />} direction="row" align="center" gap={40}>
       <NightSky width={360} height={300} />
       <VStack gap={8} width="fill">
-        <Label>{cond(eq(view("day"), ""), t("sleep.wake"), t("sleep.wakeDay", { day: view("day") }))}</Label>
+        <Label>
+          {cond(
+            eq(view("weekday", -1), -1),
+            t("sleep.wake"),
+            t("sleep.wakeDay", { day: t("date.weekdayLong", { context: view("weekday") }) }),
+          )}
+        </Label>
         <Num size="2xl">{view("time")}</Num>
         <Muted>{t("sleep.hint")}</Muted>
       </VStack>

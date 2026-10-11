@@ -78,6 +78,14 @@ pub fn set(info: Value) -> Value {
     *storage().write().expect("device info lock") = info.clone();
     info
 }
+/// `$device.date`: today where the terminal is (weekday 0 = Sunday, day, month), or null when its
+/// settings hide the date or the site gives no clock.
+pub fn date(state: Option<&DeviceState>, unix: i64) -> Value {
+    match state.and_then(|state| state.clock.as_ref()).filter(|clock| clock.date) {
+        Some(clock) => serde_json::to_value(clock.date(unix)).unwrap_or(Value::Null),
+        None => Value::Null,
+    }
+}
 /// Advance the API's office-local clock using the device's UTC time.
 /// No extra redraw timer: e-ink shows the time at the last refresh.
 pub fn clock(state: Option<&DeviceState>, unix: i64) -> String {

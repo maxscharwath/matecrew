@@ -71,7 +71,7 @@ const Trend = ({ index, height }: { index: number; height: number }) => {
 export function dashboardOne() {
   const t = useT();
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={20}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left" gap={20}>
       <HStack gap={40} height="fill">
         <Picture value={item(0, "picture", [])} size={144} />
         <VStack gap={12} width="fill">
@@ -112,7 +112,7 @@ export function dashboardTwo() {
     </Card>
   );
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" direction="row" gap={20}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left" direction="row" gap={20}>
       {column(0)}
       {column(1)}
     </Frame>
@@ -136,7 +136,7 @@ export function dashboard() {
     </VStack>
   );
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" direction="row" gap={28}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left" direction="row" gap={28}>
       <VStack gap={12} width="fill">
         <HStack gap={20}>
           <Picture value={item(0, "picture", [])} size={112} />
@@ -186,7 +186,7 @@ export function catalogueFour() {
     </Card>
   );
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={16}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left" gap={16}>
       <HStack gap={16} align="stretch" height="fill">{[0, 1].map(tile)}</HStack>
       <HStack gap={16} align="stretch" height="fill">{[2, 3].map(tile)}</HStack>
     </Frame>
@@ -211,7 +211,7 @@ export function catalogue() {
     </Show>
   );
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left" gap={12}>
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left" gap={12}>
       <HStack gap={12} align="stretch" height="fill">{[0, 1, 2].map(tile)}</HStack>
       <HStack gap={12} align="stretch" height="fill">{[3, 4, 5].map(tile)}</HStack>
       <Show when={view("moreCount", 0)}>
@@ -225,7 +225,7 @@ export function catalogue() {
 export function empty() {
   const t = useT();
   return (
-    <Frame title={view("title")} leading={<OwtMark size={28} />} keys primary="left">
+    <Frame title={view("title")} leading={<OwtMark size={28} />} dated keys primary="left">
       <Empty>
         <EmptyMedia><PackageOpenIcon size={56} strokeWidth={3} /></EmptyMedia>
         <EmptyTitle>{t("empty.heading")}</EmptyTitle>

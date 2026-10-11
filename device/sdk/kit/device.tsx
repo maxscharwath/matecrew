@@ -29,12 +29,15 @@ export function StatusBar({
   leading,
   trailing,
   status = true,
+  date,
 }: Readonly<{
   children?: TextChildren;
   /** Before the title, such as a mark. */
   leading?: Children;
   trailing?: Children;
   status?: boolean;
+  /** Before the clock: today, worded by the app (`useClock`); hidden when the host gives no date. */
+  date?: TextChildren;
 }>): Element {
   return (
     <VStack padding={[0, MARGIN]} height={STATUS} width="fill">
@@ -60,6 +63,11 @@ export function StatusBar({
             <Show when={bind("$device.sleeping", false)}>
               <MoonIcon size={22} />
             </Show>
+            {date !== undefined && (
+              <Show when={bind("$device.date.day", 0)}>
+                <Large>{date}</Large>
+              </Show>
+            )}
             <Show when={not(bind("$device.sleeping", false))}>
               <Large>{bind("$device.clock", "--:--")}</Large>
             </Show>

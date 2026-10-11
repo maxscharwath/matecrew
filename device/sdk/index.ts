@@ -30,6 +30,7 @@ export {
   useDeviceTheme,
   useBuzzer,
   useDeviceInfo,
+  useClock,
   useI18n,
   useLocale,
 } from "./runtime/jsx-runtime";

@@ -47,10 +47,10 @@ describe("a terminal's office hours", () => {
   test("the night screen names the day only beyond the next morning", () => {
     const monday = new Date("2026-10-19T05:30:00Z"); // Monday 07:30 in Zurich
     // From Friday evening: "Réveil lundi à 07:30".
-    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-16T18:00:00Z"))).toEqual({ day: "lundi", time: "07:30" });
-    expect(wakeWords(monday, ZURICH, "en", new Date("2026-10-16T18:00:00Z"))).toEqual({ day: "Monday", time: "07:30" });
+    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-16T18:00:00Z"))).toEqual({ day: "lundi", time: "07:30", weekday: 1 });
+    expect(wakeWords(monday, ZURICH, "en", new Date("2026-10-16T18:00:00Z"))).toEqual({ day: "Monday", time: "07:30", weekday: 1 });
     // From Sunday evening, or early on Monday: "Réveil à 07:30".
-    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-18T20:00:00Z"))).toEqual({ day: "", time: "07:30" });
-    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-19T02:00:00Z"))).toEqual({ day: "", time: "07:30" });
+    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-18T20:00:00Z"))).toEqual({ day: "", time: "07:30", weekday: null });
+    expect(wakeWords(monday, ZURICH, "fr", new Date("2026-10-19T02:00:00Z"))).toEqual({ day: "", time: "07:30", weekday: null });
   });
 });

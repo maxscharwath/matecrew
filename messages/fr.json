@@ -1620,6 +1620,7 @@
       },
       "zone": "Fuseau horaire",
       "officeZone": "Celui du bureau ({zone})",
+      "showDate": "Afficher la date à côté de l'heure (« dim. 11 oct. »)",
       "invalidZone": "Ce fuseau horaire n'existe pas."
     },
     "sounds": {

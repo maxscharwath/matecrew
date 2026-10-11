@@ -71,12 +71,14 @@ export function wakeWords(
   locale: string,
   now = new Date(),
   format: TimeFormat = "24",
-): { day: string; time: string } {
+): { day: string; time: string; weekday: number | null } {
   const midnight = (instant: Date) => getDateInTimezone(instant, timezone).getTime();
   const daysAhead = Math.round((midnight(at) - midnight(now)) / DAY_MS);
   const time = formatTime(at, timezone, format);
+  // `day` for firmware before 0.5; newer ones name `weekday` from their messages.
   const day = daysAhead > 1 ? new Intl.DateTimeFormat(locale, { timeZone: timezone, weekday: "long" }).format(at) : "";
-  return { day, time };
+  const weekday = daysAhead > 1 ? new Date(midnight(at)).getUTCDay() : null;
+  return { day, time, weekday };
 }
 
 /** Whether the office is open at `now`, and until when; a week without opening is closed all week. */

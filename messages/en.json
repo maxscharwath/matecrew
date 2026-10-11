@@ -1620,6 +1620,7 @@
       },
       "zone": "Time zone",
       "officeZone": "The office's ({zone})",
+      "showDate": "Show the date beside the time (\"Sun, Oct 11\")",
       "invalidZone": "This time zone does not exist."
     },
     "sounds": {

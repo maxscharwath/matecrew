@@ -528,6 +528,22 @@ export function useBuzzer(): {
   return { beep: (tone = "key") => ({ kind: "beep", tone }) };
 }
 
+/**
+ * The terminal's clock, as its settings show it: `time` ("14:05" or "2:05 PM", redrawn as each
+ * minute starts, in its time zone), and today's `weekday` (0 = Sunday), `day` and `month`
+ * (1 = January), to name with the app's messages and a context (`date.weekday_1`: "lun.").
+ * `day` is 0 when the host hides the date or does not know it.
+ */
+export function useClock(): { time: Binding; weekday: Binding; day: Binding; month: Binding } {
+  context();
+  return {
+    time: bind("$device.clock", "--:--"),
+    weekday: bind("$device.date.weekday", 0),
+    day: bind("$device.date.day", 0),
+    month: bind("$device.date.month", 0),
+  };
+}
+
 /** Read-only host metadata and telemetry. Actual fields come from the device's board adapter. */
 export function useDeviceInfo(): (
   field: string,

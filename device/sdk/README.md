@@ -125,6 +125,19 @@ const info = useDeviceInfo();
 
 API hooks compile to same-origin resource descriptors. The host schedules them when awake, performs authenticated requests and updates the resource. `refreshMs` is a minimum interval checked on host ticks, not a background JavaScript timer. Failed requests retain cached data. `When` consumes boolean bindings; `List` provides an `item()` binding scope.
 
+`useClock()` gives the terminal's clock as its settings show it: `time` ("14:05" or "2:05 PM", in its
+time zone, redrawn as each minute starts) and today's `weekday` (0 = Sunday), `day` and `month`
+(1 = January). Name them with your messages and a context, so the words stay in the app's catalog:
+
+```ts
+const clock = useClock();
+const t = useI18n(messages); // "date.weekday_0": "dim.", ..., "date.month_10": "oct."
+<Large>{t("date.short", { weekday: t("date.weekday", { context: clock.weekday }), day: clock.day, month: t("date.month", { context: clock.month }) })}</Large>
+```
+
+`day` is 0 when the host hides the date (the terminal's settings) or does not know it: wrap the date in
+`<Show when={clock.day}>`. The kit's `StatusBar` takes it as `date`.
+
 `useDeviceInfo` reads host-supplied `$device` metadata: `board.name`, `pins.*`, `firmware.version`,
 `firmware.build`, `firmware.commit`, `firmware.slot` (the OTA slot), `site`, `device.id`,
 `device.name`, `chip.model`, `chip.id` (the eFuse base MAC), `wifi.rssi`, `wifi.ssid`, `wifi.ip`,

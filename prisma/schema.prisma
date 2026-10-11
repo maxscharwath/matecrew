@@ -661,6 +661,8 @@ model Device {
   /// Its time zone ("Europe/Zurich") for the times it shows and its office hours; null follows
   /// its office's. Sessions stay in the office's.
   timezone    String?
+  /// The date beside the clock on its main screens.
+  showDate    Boolean         @default(true)
 
   firmwareVersion String?
   batteryMv       Int?

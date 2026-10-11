@@ -9,7 +9,7 @@ import { zoneOffset } from "@/lib/device/hours";
 export const TIME_FORMATS = ["24", "12"] as const;
 export type TimeFormat = (typeof TIME_FORMATS)[number];
 
-type ClockSettings = { timezone: string | null; timeFormat: string; office: { timezone: string } };
+type ClockSettings = { timezone: string | null; timeFormat: string; showDate?: boolean; office: { timezone: string } };
 
 /** The time zone the terminal shows its times in: its own, else its office's. */
 export function deviceTimeZone(device: ClockSettings): string {
@@ -84,5 +84,6 @@ export function deviceClock(device: ClockSettings, now = new Date()) {
     offset: utcOffset(now, timeZone),
     next: next && { at: next.at.toISOString(), offset: next.offset },
     format: timeFormatOf(device),
+    date: device.showDate ?? true,
   };
 }

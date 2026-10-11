@@ -33,6 +33,7 @@ export default async function DevicePage({ params }: Props) {
       sounds: true,
       timeFormat: true,
       timezone: true,
+      showDate: true,
       office: { select: { timezone: true, locale: true } },
     },
   });
@@ -75,6 +76,7 @@ export default async function DevicePage({ params }: Props) {
           sounds: device.sounds,
           timeFormat: device.timeFormat,
           timezone: device.timezone,
+          showDate: device.showDate,
         }}
         display={{ officeLocale: device.office.locale, officeTimeZone: device.office.timezone, defaultTheme: defaultDeviceTheme() }}
         items={items}

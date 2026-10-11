@@ -25,8 +25,8 @@ describe("a terminal's clock", () => {
   test("its own time zone and format, else its office's", () => {
     const office = { timezone: ZURICH };
     const now = new Date("2026-10-11T12:00:00Z");
-    expect(deviceClock({ timezone: null, timeFormat: "24", office }, now)).toEqual({ offset: 120, next: null, format: "24" });
-    expect(deviceClock({ timezone: "America/New_York", timeFormat: "12", office }, now)).toEqual({ offset: -240, next: null, format: "12" });
+    expect(deviceClock({ timezone: null, timeFormat: "24", office }, now)).toEqual({ offset: 120, next: null, format: "24", date: true });
+    expect(deviceClock({ timezone: "America/New_York", timeFormat: "12", showDate: false, office }, now)).toEqual({ offset: -240, next: null, format: "12", date: false });
     expect(isTimeZone("Europe/Zurich")).toBe(true);
     expect(isTimeZone("Mars/Olympus")).toBe(false);
   });

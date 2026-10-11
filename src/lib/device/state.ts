@@ -132,8 +132,8 @@ function officeHours(device: AuthenticatedDevice): DeviceState["hours"] {
   const timezone = deviceTimeZone(device);
   const now = new Date();
   const hours = hoursAt({ from: device.openFrom, until: device.openUntil, days: parseDays(device.openDays) }, timezone, now);
-  const { day, time } = wakeWords(hours.until, timezone, locale, now, timeFormatOf(device));
-  return { open: hours.open, until: hours.until.toISOString(), weekend: hours.weekend, day, time };
+  const { day, time, weekday } = wakeWords(hours.until, timezone, locale, now, timeFormatOf(device));
+  return { open: hours.open, until: hours.until.toISOString(), weekend: hours.weekend, day, time, weekday };
 }
 
 /**

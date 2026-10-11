@@ -35,7 +35,8 @@ fn simulated_device() -> Value {
             "storage":{"used":41984,"total":282240}
         },
         "uptimeMinutes":134,
-        "clock":"10:42"
+        "clock":"10:42",
+        "date":{"weekday":0,"day":11,"month":10}
     }))
 }
 
@@ -125,8 +126,8 @@ fn previews() -> Value {
     all.add("taken", "Confirmation: what was taken, then the stock again", |d| taken_screen(d, "Alex", "Maté Classic", &picture));
     all.add("update", "Installing a firmware update", |d| update_screen(d, "0.2.0", 50));
     // Outside the office's hours: asleep until the next opening, a key wakes it.
-    all.add("sleep-night", "Asleep for the night, awake again in the morning", |d| sleep_screen(d, false, "", "07:30"));
-    all.add("sleep-weekend", "Asleep for the weekend, awake again on Monday", |d| sleep_screen(d, true, "lundi", "07:30"));
+    all.add("sleep-night", "Asleep for the night, awake again in the morning", |d| sleep_screen(d, false, None, "07:30"));
+    all.add("sleep-weekend", "Asleep for the weekend, awake again on Monday", |d| sleep_screen(d, true, Some(1), "07:30"));
     all.add("unknown-badge", "Badge not assigned yet", |d| unknown_badge_screen(d, "04A1B2C3D4E5F6", None));
     let claim = "https://matecrew.vercel.app/badge?d=cmv1eex25001zieyucz0rillv&u=04A1B2C3D4E5F6&t=1791570300&s=1XA8_wdH3MGEW6rDCHsTew";
     all.add("claim-badge", "Badge not assigned yet, with a claim link", |d| unknown_badge_screen(d, "04A1B2C3D4E5F6", Some(claim)));
@@ -141,7 +142,8 @@ fn previews() -> Value {
         "wifi":{"rssi":null},
         "battery":{"millivolts":4100,"usb":true},
         "uptimeMinutes":2,
-        "clock":"10:42"
+        "clock":"10:42",
+        "date":{"weekday":0,"day":11,"month":10}
     }));
     // "Mon compte": the right key, a badge, then the site's live answer. Its left key lists the
     // purchases, four to a page, the way back to the account last; the right key held goes
@@ -263,7 +265,6 @@ fn previews() -> Value {
         preview["description"] = json!(format!("{} (English)", preview["description"].as_str().unwrap_or(from)));
         all.0.insert(name.into(), preview);
     }
-    all.0["sleep-weekend-en"]["data"]["view"]["day"] = json!("Monday");
     // The site names the days in the office's language.
     for (i, day) in ["Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"].iter().enumerate() {
         all.0["account-en"]["data"]["view"]["days"][i]["day"] = json!(day);

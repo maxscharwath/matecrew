@@ -23,10 +23,9 @@ const LEFT_KEY: u32 = 5;
 const RIGHT_KEY: u32 = 8;
 /// `$device` as the screen was drawn with it: about 700 bytes.
 const DEVICE_MAX: usize = 2048;
-const DAY_MAX: usize = 32;
 const TIME_MAX: usize = 8;
 /// Written with what is kept: anything else in RTC memory is a cold boot's.
-const MAGIC: u32 = 0x5EE9_0002;
+const MAGIC: u32 = 0x5EE9_0003;
 
 /// Why the terminal started.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,7 +55,8 @@ pub struct Shown {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Night {
     pub weekend: bool,
-    pub day: String,
+    /// 0 = Sunday; `None` for the next morning.
+    pub weekday: Option<u8>,
     pub time: String,
 }
 
@@ -75,8 +75,8 @@ struct Kept {
     age: u32,
     device_len: u16,
     device: [u8; DEVICE_MAX],
-    day_len: u8,
-    day: [u8; DAY_MAX],
+    /// The night screen's wake-up day, 0 = Sunday; 255 for none.
+    weekday: u8,
     time_len: u8,
     time: [u8; TIME_MAX],
 }
@@ -93,8 +93,7 @@ const EMPTY: Kept = Kept {
     age: 0,
     device_len: 0,
     device: [0; DEVICE_MAX],
-    day_len: 0,
-    day: [0; DAY_MAX],
+    weekday: 255,
     time_len: 0,
     time: [0; TIME_MAX],
 };
@@ -132,7 +131,7 @@ pub fn shown() -> Option<Shown> {
     let device = text(&kept.device, kept.device_len.into());
     let night = Night {
         weekend: kept.weekend != 0,
-        day: text(&kept.day, kept.day_len.into()),
+        weekday: (kept.weekday < 7).then_some(kept.weekday),
         time: text(&kept.time, kept.time_len.into()),
     };
     let wear = Wear { partials: kept.partials, ghost: kept.ghost, age: kept.age };
@@ -173,7 +172,7 @@ pub fn sleep(shown: Shown, wake_in: Option<Duration>) -> ! {
     let night = shown.night.as_ref();
     let fits = (|| {
         kept.device_len = put(&mut kept.device, &shown.device)? as u16;
-        kept.day_len = put(&mut kept.day, night.map_or("", |n| &n.day))? as u8;
+        kept.weekday = night.and_then(|n| n.weekday).unwrap_or(255);
         kept.time_len = put(&mut kept.time, night.map_or("", |n| &n.time))? as u8;
         Some(())
     })();

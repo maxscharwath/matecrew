@@ -43,11 +43,13 @@ test("every committed .dui and generated registry matches its TSX source", async
       screens = artifacts.length;
     }
   }
-  // Native 800 × 480 screens carry packed art; compressed, they stay under 1 225 B each on average
+  // Native 800 × 480 screens carry packed art; compressed, they stay under 1 325 B each on average
   // (the account, failure and about screens carry sentences in every language; the night screen's
-  // halftone sky, a dithered glow and a crescent with curved edges on every row, about 1.3 KB).
-  // A guard against bloat such as unpacked bitmaps: the firmware has room to spare.
-  assert.ok(mate > 0 && mate < screens * 1_225, `maté screens exceed 1 225 B each on average: ${mate} B for ${screens}`);
+  // halftone sky, a dithered glow and a crescent with curved edges on every row, about 1.3 KB; the
+  // main screens' date, the weekdays' and months' names in every language, about 400 B each: a
+  // screen carries its own messages). A guard against bloat such as unpacked bitmaps: the
+  // firmware has room to spare.
+  assert.ok(mate > 0 && mate < screens * 1_325, `maté screens exceed 1 325 B each on average: ${mate} B for ${screens}`);
   const scene = compileScreen(example);
   assert.ok(encodeScene(scene).length < JSON.stringify(scene).length / 2);
 });

@@ -44,6 +44,8 @@ export type DeviceSettingsProps = {
     timeFormat: string;
     /** Its own time zone; null follows the office's. */
     timezone: string | null;
+    /** The date beside the clock on its main screens. */
+    showDate: boolean;
   };
   /** What a terminal without its own language and theme shows. */
   display: { officeLocale: string; officeTimeZone: string; defaultTheme: DeviceTheme };
@@ -241,6 +243,10 @@ function TimeFields({ device, officeTimeZone }: Readonly<{ device: DeviceSetting
           </SelectContent>
         </Select>
       </div>
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <input type="checkbox" name="showDate" defaultChecked={device.showDate} className="size-4 accent-foreground" />
+        {t("showDate")}
+      </label>
     </div>
   );
 }
