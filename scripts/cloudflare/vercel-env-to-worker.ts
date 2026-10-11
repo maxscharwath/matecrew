@@ -3,10 +3,12 @@
  *
  *   bun scripts/cloudflare/vercel-env-to-worker.ts --dry-run   # names only: what moves, what is missing
  *   bun scripts/cloudflare/vercel-env-to-worker.ts             # uploads them as worker secrets
+ *   bun scripts/cloudflare/vercel-env-to-worker.ts --from ~/matecrew-vercel-production.env
  *
  * Pulls Vercel's production variables (`vercel env pull`, project linked in .vercel/), keeps the
  * names the worker reads (.dev.vars.example, minus the platform bridge, which stays closed), and
  * uploads them with `wrangler secret bulk`: secrets survive deploys, unlike dashboard variables.
+ * Variables marked Sensitive on Vercel come back empty: they are listed, never uploaded empty.
  * The Neon and Blob credentials the copy scripts need go to .env.migration.local (git-ignored,
  * readable by its owner only). Values are never printed; temporary files are deleted.
  */
@@ -48,7 +50,15 @@ function run(command: string, args: string[]): void {
   if (result.status !== 0) throw new Error(`${command} ${args[0]} failed (exit ${result.status ?? "signal"})`);
 }
 
+/** `--from <file>`: an env file already on disk (e.g. opened from a sealed build), else a fresh pull. */
+function sourceFile(): string | undefined {
+  const at = process.argv.indexOf("--from");
+  return at === -1 ? undefined : process.argv[at + 1];
+}
+
 function pullVercel(dir: string): Env {
+  const given = sourceFile();
+  if (given) return parseEnv(readFileSync(given, "utf8"));
   const file = join(dir, "vercel.env");
   run("vercel", ["env", "pull", file, "--environment=production", "--yes"]);
   return parseEnv(readFileSync(file, "utf8"));
@@ -78,9 +88,14 @@ function main(): void {
   try {
     const vercel = pullVercel(dir);
     const wanted = workerNames();
-    const moved = wanted.filter((name) => vercel.has(name));
+    const moved = wanted.filter((name) => vercel.get(name));
     report("Worker secrets", moved);
     report("Missing on Vercel (set them on the worker by hand)", wanted.filter((name) => !vercel.has(name)));
+    // Vercel never gives back a "Sensitive" variable: `env pull` writes it empty.
+    report(
+      "Empty on Vercel, likely Sensitive (set them with `wrangler secret put`)",
+      wanted.filter((name) => vercel.get(name) === ""),
+    );
     const migration = migrationEnv(vercel);
     report(`Copy-script credentials for ${MIGRATION_FILE}`, migration.map((line) => line.split("=")[0]));
     if (dryRun) return;
