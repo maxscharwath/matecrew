@@ -10,7 +10,7 @@ Une zone badge NFC est au centre. On badge avec le badge de bureau (MIFARE DESFi
 
 - Doc de montage complète (matériel, câblage, boîtier, comportement) :
   https://claude.ai/code/artifact/9b5e65c1-9bca-4c9a-aeb7-994a2acc41eb
-- Modèle 3D du boîtier (OpenSCAD + STL) : `hardware/`
+- Modèle 3D du boîtier (script Fusion paramétrique, STEP et STL) : `hardware/`
 
 ## Où est quoi
 
@@ -22,7 +22,7 @@ Ce dossier `device/` vit dans le dépôt de l'app web matécrew.
 - `device/sim/` : rend les écrans en PNG sur le Mac (`just sim`), sans carte.
 - `device/web/` : `core` et `ui` compilés en WebAssembly pour le terminal virtuel du site (`just web` écrit `public/device/matecrew.wasm`, versionné). Le runtime réseau est en TypeScript dans `src/lib/device/virtual/`.
 - `device/firmware/` : firmware Rust sur ESP-IDF (`esp-idf-svc`, `epd-waveshare`), toolchain `esp` via espup.
-- `device/hardware/` : modèle OpenSCAD du boîtier (`boitier-matecrew.scad`, source de vérité) et ses STL exportés.
+- `device/hardware/` : boîtier. `boitier_matecrew/boitier_matecrew.py` (script Fusion, source de vérité) construit le modèle paramétrique ; STL, STEP et `.f3d` en sont exportés. Voir `hardware/README.md`.
 - Le reste du dépôt est l'app web (Next.js App Router, Prisma, PostgreSQL, Bun ; voir le `README.md` à la racine).
   Pour l'API de l'appareil, les modèles utiles sont dans `prisma/schema.prisma` : `Office`, `Item`, `Stock`, `StockMovement`, `ConsumptionEntry`, `Membership`, `User`.
   Les endpoints de l'appareil iront sous `src/app/api/device/`.
@@ -130,7 +130,7 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 
 - Commande Bastelgarage reçue. Le kit est ouvert et le XIAO C3 retiré de son support ; le S3 va le remplacer.
 - La carte driver mesure environ 41 × 26 mm. La batterie est une 654060 (environ 60 × 40 × 6,5 mm).
-- Le modèle du boîtier dans `device/hardware/` doit encore être mis à jour avec la vraie batterie et la vraie carte driver.
+- Le boîtier est passé d'OpenSCAD à Fusion le 11 octobre, avec la batterie 654060 et la carte driver 41 × 26. Restent à vérifier sur les pièces : trous du PN532, épaisseur des TTP223, trajet de la nappe jusqu'à la carte driver.
 
 ## Moteur TSX (0.3.0)
 

@@ -2,6 +2,8 @@
 
 Un écran e-ink sur batterie, posé au bureau. Il affiche le stock, on badge pour prendre un maté, et tout le reste se règle sur le site matécrew.
 
+![Le terminal sur son socle, rendu du modèle Fusion](hardware/rendu.png)
+
 Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifact/9b5e65c1-9bca-4c9a-aeb7-994a2acc41eb).
 
 ## Fonctionnalités
@@ -179,7 +181,7 @@ device/
   sim/       rend tous les écrans en PNG sur le Mac, sans carte
   web/       le terminal virtuel : core et ui en WebAssembly pour le site
   firmware/  firmware Rust (ESP-IDF) du XIAO ESP32-S3
-  hardware/  boîtier OpenSCAD et STL
+  hardware/  boîtier : script Fusion paramétrique, STEP et STL
 ```
 
 Les commandes passent par [`just`](https://github.com/casey/just), depuis `device/` :
