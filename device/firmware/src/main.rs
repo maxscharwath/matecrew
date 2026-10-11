@@ -798,6 +798,11 @@ impl Terminal {
                         Some(reason) if self.kept_awake != awake_for => log::info!("sleep: not now, {reason}"),
                         Some(_) => {}
                     }
+                    if awake_for.is_some() && self.dozing {
+                        // Woken by its timer but kept awake: the moon would say it sleeps.
+                        self.wake_up();
+                        self.redraw_current()?;
+                    }
                     self.kept_awake = awake_for;
                     // Still here: something kept it awake.
                     self.doze_at = self.doze_at.max(Instant::now() + DOZE_RECHECK);
@@ -1579,9 +1584,17 @@ impl Terminal {
     /// A key, a tap, a badge or a command: awake, the clock back in the status bar, and deep
     /// sleep DOZE_AFTER from now.
     fn touch(&mut self) {
-        self.dozing = false;
+        self.wake_up();
         self.touched = Instant::now();
         self.doze_at = self.touched + DOZE_AFTER;
+    }
+
+    /// Awake for good: the clock instead of the moon on the next screen, whichever it is (only
+    /// the main screen reads `$device` again).
+    fn wake_up(&mut self) {
+        if std::mem::take(&mut self.dozing) {
+            self.device_info();
+        }
     }
 
     /// Why the terminal stays awake now; `None` when it may go to deep sleep.
@@ -1662,11 +1675,15 @@ impl Terminal {
             // The office opened or closed since the last sync: what now?
             self.sync(false);
         }
-        let Some(hours) = self.state.as_ref().and_then(|s| s.hours.clone()) else { return Ok(()) };
-        let open = hours.open || stale(self);
+        let hours = self.state.as_ref().and_then(|s| s.hours.clone());
+        if hours.is_none() && cap.is_none() {
+            return Ok(());
+        }
+        // Without hours from the site, only the serial console's: as inside them.
+        let open = hours.as_ref().is_none_or(|hours| hours.open) || stale(self);
         let mut wake_in = if open { DAY_WAKE } else { NIGHT_WAKE };
         let ahead = |at: Option<i64>| at.map(|at| at - now()).filter(|&s| s > 0).map(|s| Duration::from_secs(s as u64));
-        if let Some(until) = ahead(time::parse_iso(&hours.until)) {
+        if let Some(until) = ahead(hours.as_ref().and_then(|hours| time::parse_iso(&hours.until))) {
             wake_in = wake_in.min(until);
         }
         if open {
