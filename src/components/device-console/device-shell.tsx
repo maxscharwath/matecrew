@@ -15,8 +15,9 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { fitPanel, PANEL_WIDTH, PAPER_HEX } from "./frame-bits";
+import { KeyChord, type Side } from "./key-chord";
 
-export type Side = "left" | "right";
+export type { Side } from "./key-chord";
 export type KeyLevel = (side: Side, high: boolean, source: string) => void;
 
 /**
@@ -69,35 +70,21 @@ export function useDeviceShortcuts(
 }
 
 /**
- * The touch keys as the terminal reads them (`TouchKeys` in device/core): a key counts when it is
- * released, both keys when the second goes down while the first is held. For a console that
- * sends presses rather than levels: hold one key (mouse, touch or arrow key) and press the other.
- * Returns the level handler for `DeviceShell` and the keyboard shortcuts, and the keys held.
+ * The touch keys for a console that sends presses rather than levels (`KeyChord`): hold one key
+ * (mouse, touch or arrow key) and press the other for both. Returns the level handler for
+ * `DeviceShell` and the keyboard shortcuts, and the keys held.
  */
 export function useKeyChord(press: (key: Side | "both") => void): { keyLevel: KeyLevel; held: readonly Side[] } {
-  const sources = useRef({ left: new Set<string>(), right: new Set<string>() });
-  const chord = useRef(false);
+  const chord = useRef(new KeyChord());
   const latest = useRef(press);
   useEffect(() => {
     latest.current = press;
   });
   const [held, setHeld] = useState<readonly Side[]>([]);
   const keyLevel = useCallback<KeyLevel>((side, high, source) => {
-    const keys = sources.current;
-    const other = side === "left" ? keys.right : keys.left;
-    const wasDown = keys[side].size > 0;
-    if (high) keys[side].add(source);
-    else keys[side].delete(source);
-    const down = keys[side].size > 0;
-    if (down && !wasDown && other.size > 0 && !chord.current) {
-      chord.current = true;
-      latest.current("both");
-    } else if (!down && wasDown) {
-      if (!chord.current) latest.current(side);
-      // The chord ends once both keys are up: releasing them sends nothing more.
-      if (other.size === 0) chord.current = false;
-    }
-    setHeld((["left", "right"] as const).filter((key) => keys[key].size > 0));
+    const pressed = chord.current.level(side, high, source);
+    if (pressed) latest.current(pressed);
+    setHeld(chord.current.held());
   }, []);
   return { keyLevel, held };
 }
