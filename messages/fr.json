@@ -1610,6 +1610,15 @@
     "badgeLastPass": "dernier passage {when}",
     "badgeTakes": "{count, plural, =0 {aucune prise} one {# prise} other {# prises}}",
     "badgeFirstSeen": "vu depuis le {when}",
+    "sounds": {
+      "title": "Sons",
+      "hint": "Les sons que le terminal joue ; un son coupé ne joue pas non plus dans la console.",
+      "boot": "Démarrage et réveil",
+      "key": "Touches",
+      "badge": "Badges et prises",
+      "error": "Erreurs",
+      "notification": "Notifications"
+    },
     "hours": {
       "title": "Heures d'ouverture",
       "hint": "Pendant ces heures, le terminal dort entre deux usages, le stock à l'écran, une lune dans sa barre d'état ; une touche le réveille. En dehors, il affiche son écran de nuit et se réveille à l'ouverture.",

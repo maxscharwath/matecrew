@@ -1610,6 +1610,15 @@
     "badgeLastPass": "last tap {when}",
     "badgeTakes": "{count, plural, =0 {no takes} one {# take} other {# takes}}",
     "badgeFirstSeen": "seen since {when}",
+    "sounds": {
+      "title": "Sounds",
+      "hint": "The sounds the terminal plays; a sound turned off does not play in the console either.",
+      "boot": "Start and wake-up",
+      "key": "Keys",
+      "badge": "Badges and takes",
+      "error": "Errors",
+      "notification": "Notifications"
+    },
     "hours": {
       "title": "Opening hours",
       "hint": "During these hours the terminal sleeps between uses, the stock on its screen and a moon in its status bar; a key wakes it. Outside them it shows its night screen and wakes up when the office opens.",

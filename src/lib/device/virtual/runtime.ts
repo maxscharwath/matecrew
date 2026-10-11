@@ -27,6 +27,7 @@ import type {
   View,
 } from "@/lib/device/virtual/wasm";
 import { RelayLink, isNews } from "@/lib/device/virtual/relay";
+import { soundOf } from "@/lib/device/sounds";
 import type { TerminalStatus } from "../../../../realtime/src/protocol";
 
 export const FIRMWARE_VERSION = "web";
@@ -318,9 +319,11 @@ export class VirtualDevice {
     return this.wasm.buzzerPattern(beep);
   }
   testBuzzer(beep: Beep): void {
-    this.beep(beep);
+    this.beep(beep, true);
   }
-  private beep(beep: Beep): void {
+  /** Plays `beep` unless the terminal's settings turn it off (`always`: the console's test). */
+  private beep(beep: Beep, always = false): void {
+    if (!always && this.state?.sounds && !this.state.sounds[soundOf(beep)]) return;
     const tones = this.wasm.buzzerPattern(beep);
     this.gpio.playPwm(tones, performance.now());
     this.onBeep(beep);

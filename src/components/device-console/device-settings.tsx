@@ -1,5 +1,6 @@
 "use client";
 
+import { SOUNDS, parseSounds } from "@/lib/device/sounds";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -36,6 +37,8 @@ export type DeviceSettingsProps = {
     openFrom: string;
     openUntil: string;
     openDays: string;
+    /** The sounds it plays, comma-separated (`SOUNDS`). */
+    sounds: string;
   };
   /** What a terminal without its own language and theme shows. */
   display: { officeLocale: string; defaultTheme: DeviceTheme };
@@ -91,6 +94,7 @@ export function DeviceSettings({ officeId, device, display, items }: Readonly<De
             </div>
             <DisplayFields device={device} display={display} />
             <HoursFields device={device} locale={display.officeLocale} />
+            <SoundFields sounds={device.sounds} />
             <Button type="submit" disabled={pending}>
               {t("save")}
             </Button>
@@ -185,6 +189,32 @@ function HoursFields({ device, locale }: Readonly<{ device: DeviceSettingsProps[
         </div>
       </fieldset>
     </div>
+  );
+}
+
+/** The sounds the terminal plays, one switch each; saved with the rest of the form. */
+function SoundFields({ sounds }: Readonly<{ sounds: string }>) {
+  const t = useTranslations("devices.sounds");
+  const on = parseSounds(sounds);
+  return (
+    <fieldset className="space-y-2 border-t pt-4">
+      <legend className="sr-only">{t("title")}</legend>
+      <div aria-hidden className="text-sm font-medium">
+        {t("title")}
+      </div>
+      <p className="text-xs text-muted-foreground">{t("hint")}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {SOUNDS.map((sound) => (
+          <label
+            key={sound}
+            className="cursor-pointer rounded-md border px-2.5 py-1 text-sm transition-colors has-[:checked]:border-foreground/40 has-[:checked]:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50"
+          >
+            <input type="checkbox" name="sounds" value={sound} defaultChecked={on[sound]} className="sr-only" />
+            {t(sound)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

@@ -47,6 +47,8 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>,
         let mut rose = [0u64; 2];
         // A key ignored until it reads released.
         let mut ignored = [false; 2];
+        // The press that woke it: the boot melody already says so.
+        let mut silent = matches!(woken, Woken::Press(_));
         match woken {
             Woken::No => {}
             Woken::Press(side) => {
@@ -75,7 +77,9 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>,
             }
             if let Some(event) = keys.sample(level[0] && !ignored[0], level[1] && !ignored[1], now) {
                 log::info!("keys: {event:?}");
-                buzzer.beep(matecrew_core::flow::Beep::Key);
+                if !std::mem::take(&mut silent) {
+                    buzzer.beep(matecrew_core::flow::Beep::Key);
+                }
                 if inputs.send(Input::Pressed(event)).is_err() {
                     return;
                 }

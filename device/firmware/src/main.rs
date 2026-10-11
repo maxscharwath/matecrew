@@ -183,9 +183,13 @@ fn app() -> Result<()> {
     // The start, live: each step on the boot screen as it goes (`ui::boot::BootLog`).
     let mut boot = ui::boot::BootLog::new(6);
     // Words come from the boot screen's catalog, in the office's language (cached state).
-    if let Ok(Some(state)) = store.state() {
-        ui::set_locale(&state.office.locale);
-    }
+    let sounds = match store.state() {
+        Ok(Some(state)) => {
+            ui::set_locale(&state.office.locale);
+            state.sounds
+        }
+        _ => None,
+    };
     boot.start("screen", &[]);
     boot.done("screenReady", &[]);
     boot.start("reader", &[]);
@@ -225,7 +229,9 @@ fn app() -> Result<()> {
             Box::new(|| None)
         }
     });
-    if !warm {
+    buzzer.set_sounds(sounds.unwrap_or(matecrew_core::contract::Sounds::ALL));
+    // Its melody when it starts, or when a key wakes it; a timer's wake stays silent.
+    if !warm || matches!(wake, sleep::Wake::Key(_)) {
         buzzer.beep(matecrew_core::flow::Beep::Boot);
     }
     // The key that woke it: a press over the stock, only a wake over the night screen.
@@ -1471,6 +1477,7 @@ impl Terminal {
         );
         self.store.set_state(&state)?;
         self.live.set_url(state.realtime.as_ref().map(|r| r.url.clone()));
+        self.buzzer.set_sounds(state.sounds.unwrap_or(matecrew_core::contract::Sounds::ALL));
         self.state = Some(state);
 
         // The site refuses what no battery reads: without the divider, the pin floats.

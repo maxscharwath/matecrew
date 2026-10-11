@@ -10,6 +10,7 @@ import { normalizeBadgeUid } from "@/lib/device/codes";
 import { toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
 import { notifyTerminals } from "@/lib/device/push";
 import { HHMM } from "@/lib/device/hours";
+import { SOUNDS, soundsText } from "@/lib/device/sounds";
 import { deviceTheme } from "@/lib/device/contract";
 import type { LiveStatus } from "@/lib/device/live";
 import { defaultDeviceTheme } from "@/lib/device/state";
@@ -41,6 +42,7 @@ export async function updateDevice(
       openFrom: z.string().regex(HHMM, t("hours.invalid")),
       openUntil: z.string().regex(HHMM, t("hours.invalid")),
       openDays: z.array(z.coerce.number().int().min(0).max(6)),
+      sounds: z.array(z.enum(SOUNDS)),
     })
     .refine((hours) => hours.openFrom < hours.openUntil, { message: t("hours.invalid") })
     .safeParse({
@@ -51,16 +53,18 @@ export async function updateDevice(
       openFrom: formData.get("openFrom") ?? "07:30",
       openUntil: formData.get("openUntil") ?? "19:00",
       openDays: formData.getAll("openDays"),
+      sounds: formData.getAll("sounds"),
     });
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
 
   const device = await prisma.device.findFirst({
     where: { id: deviceId, officeId },
-    select: { name: true, leftItemId: true, locale: true, theme: true, openFrom: true, openUntil: true, openDays: true },
+    select: { name: true, leftItemId: true, locale: true, theme: true, openFrom: true, openUntil: true, openDays: true, sounds: true },
   });
   if (!device) return { success: false, error: t("notFound") };
   const { name, firstItemId, openFrom, openUntil } = parsed.data;
   const openDays = [...new Set(parsed.data.openDays)].sort((a, b) => a - b).join(",");
+  const sounds = soundsText(parsed.data.sounds);
   if (firstItemId && !(await prisma.item.count({ where: { id: firstItemId, officeId } }))) {
     return { success: false, error: t("notFound") };
   }
@@ -71,12 +75,12 @@ export async function updateDevice(
   // The picker opens on the left key's item; that is all the keys still have to set.
   await prisma.device.update({
     where: { id: deviceId },
-    data: { name, leftItemId: firstItemId, locale, theme, openFrom, openUntil, openDays },
+    data: { name, leftItemId: firstItemId, locale, theme, openFrom, openUntil, openDays, sounds },
   });
   // What the terminal shows changed: a sync, as the console's button sends, redraws it now (or
   // at its next connection).
-  const before = [device.name, device.leftItemId, device.locale, device.theme, device.openFrom, device.openUntil, device.openDays];
-  const changed = before.some((value, i) => value !== [name, firstItemId, locale, theme, openFrom, openUntil, openDays][i]);
+  const before = [device.name, device.leftItemId, device.locale, device.theme, device.openFrom, device.openUntil, device.openDays, device.sounds];
+  const changed = before.some((value, i) => value !== [name, firstItemId, locale, theme, openFrom, openUntil, openDays, sounds][i]);
   if (changed && platform.relay.terminalUrl()) {
     notifyTerminals([deviceId]);
   } else if (changed) {

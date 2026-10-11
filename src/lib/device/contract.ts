@@ -146,6 +146,14 @@ export const deviceState = z.object({
     .object({ open: z.boolean(), until: z.string(), weekend: z.boolean(), day: z.string(), time: z.string() })
     .nullable()
     .default(null),
+  /**
+   * The sounds it plays (Admin > Appareils > Réglages): the boot melody (also when a key wakes it
+   * from deep sleep), keys, badges and takes, errors, notifications. Null (an older site): all.
+   */
+  sounds: z
+    .object({ boot: z.boolean(), key: z.boolean(), badge: z.boolean(), error: z.boolean(), notification: z.boolean() })
+    .nullable()
+    .default(null),
 });
 
 export const deviceTake = z.object({

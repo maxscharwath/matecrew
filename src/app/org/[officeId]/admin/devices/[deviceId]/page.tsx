@@ -30,6 +30,7 @@ export default async function DevicePage({ params }: Props) {
       openFrom: true,
       openUntil: true,
       openDays: true,
+      sounds: true,
       office: { select: { timezone: true, locale: true } },
     },
   });
@@ -69,6 +70,7 @@ export default async function DevicePage({ params }: Props) {
           openFrom: device.openFrom,
           openUntil: device.openUntil,
           openDays: device.openDays,
+          sounds: device.sounds,
         }}
         display={{ officeLocale: device.office.locale, defaultTheme: defaultDeviceTheme() }}
         items={items}

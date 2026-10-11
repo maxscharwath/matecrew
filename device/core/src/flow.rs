@@ -827,6 +827,7 @@ mod tests {
             realtime: None,
             refresh_at: None,
             hours: None,
+            sounds: None,
         }
     }
 

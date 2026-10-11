@@ -107,6 +107,37 @@ pub struct DeviceState {
     /// screen until they open. Absent (an older site), it never sleeps.
     #[serde(default)]
     pub hours: Option<Hours>,
+    /// The sounds it plays; absent (an older site), all of them.
+    #[serde(default)]
+    pub sounds: Option<Sounds>,
+}
+
+/// The sounds an admin turns on or off for the terminal (`Device.sounds` on the site).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Sounds {
+    /// The boot melody, also when a key wakes it from deep sleep.
+    pub boot: bool,
+    pub key: bool,
+    /// A badge seen, accepted (a take, a serve) or unknown.
+    pub badge: bool,
+    pub error: bool,
+    pub notification: bool,
+}
+
+impl Sounds {
+    pub const ALL: Self = Self { boot: true, key: true, badge: true, error: true, notification: true };
+
+    /// Whether `beep` plays.
+    pub fn allows(&self, beep: crate::flow::Beep) -> bool {
+        use crate::flow::Beep;
+        match beep {
+            Beep::Boot => self.boot,
+            Beep::Key => self.key,
+            Beep::Badge | Beep::Accepted | Beep::Unknown => self.badge,
+            Beep::Error => self.error,
+            Beep::Notification => self.notification,
+        }
+    }
 }
 
 /// Whether the office is open, and until when (`until`, ISO 8601: the closing while open, the
@@ -453,6 +484,17 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"firmwareVersion":"0.1.0","wifiRssi":-61,"unknownBadges":[]}"#);
+    }
+
+    #[test]
+    fn sounds_turn_off_by_group() {
+        use crate::flow::Beep;
+        let quiet: Sounds = serde_json::from_str(r#"{"boot":false,"key":true,"badge":false,"error":true,"notification":true}"#).unwrap();
+        assert!(!quiet.allows(Beep::Boot));
+        assert!(quiet.allows(Beep::Key));
+        assert!(!quiet.allows(Beep::Accepted) && !quiet.allows(Beep::Unknown) && !quiet.allows(Beep::Badge));
+        assert!(quiet.allows(Beep::Error) && quiet.allows(Beep::Notification));
+        assert!(Sounds::ALL.allows(Beep::Boot));
     }
 
     #[test]

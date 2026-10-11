@@ -18,11 +18,11 @@ use esp_idf_svc::sys::{
     esp, esp_rom_gpio_connect_out_signal, gpio_mode_t_GPIO_MODE_DISABLE, gpio_set_direction,
     ledc_mode_t_LEDC_LOW_SPEED_MODE, ledc_set_freq, ledc_timer_t_LEDC_TIMER_0, LEDC_LS_SIG_OUT0_IDX,
 };
-use matecrew_core::flow::Beep;
+use matecrew_core::{contract::Sounds, flow::Beep};
 use std::{
     sync::{
         mpsc::{self, Sender},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     thread,
     time::{Duration, Instant},
@@ -37,6 +37,8 @@ pub struct Buzzer {
     /// When the last beep ended, `None` while one plays: the piezo then charges back to the
     /// divider's voltage.
     quiet_since: Arc<Mutex<Option<Instant>>>,
+    /// The sounds the site lets it play (its settings).
+    sounds: Arc<RwLock<Sounds>>,
 }
 
 impl Buzzer {
@@ -59,11 +61,22 @@ impl Buzzer {
                 *quiet.lock().unwrap() = Some(Instant::now());
             }
         })?;
-        Ok(Self { beeps, quiet_since })
+        Ok(Self { beeps, quiet_since, sounds: Arc::new(RwLock::new(Sounds::ALL)) })
     }
 
     /// Queues `beep`; returns at once. Whoever watches the terminal plays it too (`viewers`).
+    /// The sounds its settings allow, from the state: kept for every clone.
+    pub fn set_sounds(&self, sounds: Sounds) {
+        if let Ok(mut current) = self.sounds.write() {
+            *current = sounds;
+        }
+    }
+
+    /// Plays `beep` unless its settings turn it off, then neither the piezo nor the console plays it.
     pub fn beep(&self, beep: Beep) {
+        if !self.sounds.read().map_or(true, |sounds| sounds.allows(beep)) {
+            return;
+        }
         let _ = self.beeps.send(beep);
         crate::viewers::publish(matecrew_core::link::Event::Beep { tones: beep.tones().to_vec() });
     }

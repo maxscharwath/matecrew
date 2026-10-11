@@ -652,6 +652,10 @@ model Device {
   openFrom    String          @default("07:30")
   openUntil   String          @default("19:00")
   openDays    String          @default("1,2,3,4,5")
+  /// The sounds it plays, comma-separated (`SOUNDS` in src/lib/device/sounds.ts): the boot melody
+  /// (also when a key wakes it), keys, badges and takes, errors, notifications. A sound left out
+  /// is silent on the terminal and in its console.
+  sounds      String          @default("boot,key,badge,error,notification")
 
   firmwareVersion String?
   batteryMv       Int?

@@ -10,6 +10,7 @@ import type { AuthenticatedDevice } from "@/lib/device/auth";
 import { deviceTheme, type DeviceState, type DeviceScreen, type DeviceTheme } from "@/lib/device/contract";
 import { parseSyncTimes } from "@/lib/device/sync-times";
 import { hoursAt, parseDays, wakeWords } from "@/lib/device/hours";
+import { parseSounds } from "@/lib/device/sounds";
 
 /** The theme of terminals that have none of their own: `DEVICE_UI_THEME`, else paper. */
 export function defaultDeviceTheme(): DeviceTheme {
@@ -119,6 +120,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     realtime: relayUrl ? { url: relayUrl } : null,
     refreshAt: await refreshAt(office.id, office.timezone),
     hours: officeHours(device),
+    sounds: parseSounds(device.sounds),
   };
 }
 
