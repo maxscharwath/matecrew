@@ -29,10 +29,8 @@
     {
       "binding": "DB",
       "database_name": "matecrew",
-      // Placeholder: the user creates the database in the EU jurisdiction
-      // (`wrangler d1 create matecrew --jurisdiction eu`) and pastes its id
-      // here. Local dev and preview do not need it.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Created in the EU jurisdiction (`wrangler d1 create matecrew --jurisdiction eu`, region EEUR).
+      "database_id": "fb35f4e1-3bc6-4035-9e37-d1895478780a",
       // SQL migrations, applied in order by `wrangler d1 migrations apply`.
       "migrations_dir": "migrations"
     }
