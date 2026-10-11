@@ -615,6 +615,12 @@ AA = ("AA_X", "AA_Y", "AA_W", "AA_H")
 PAD = ("BOX_W / 2 - PAD_W / 2", "KEY_Y - PAD_H / 2", "PAD_W", "PAD_H")
 
 
+# Variante monobloc : une façade d'un seul tenant et d'une couleur, sans cadre, pastilles ni pavé NFC
+# rapportés. Seule la fenêtre de l'écran la traverse ; les zones des touches et du badge sont gravées
+# en traits fins (anneaux, contour du pavé, icône NFC). Le composant « cadre » reste vide.
+MONOBLOC = False
+
+
 # ---------------------------------------------------------------- façade
 
 def build_facade(comp):
@@ -731,33 +737,56 @@ def build_facade(comp):
     rect(sk, "P_X", "P_Y + P_H - P_LEDGE", "P_W", "P_LEDGE + P_CLR")
     extrude(comp, sk.profiles, "P_LEDGE_RELIEF", CUT, bodies=[body], name="Dégagement rebord dalle")
 
-    # Fenêtre du cadre noir, et logement de sa collerette dans la face intérieure
-    sk = sketch(comp, plate, "Fenêtre")
-    rrect(sk, *around(*AA, "FRAME_W + FRAME_CLR"), "FRAME_R + FRAME_CLR")
-    extrude(comp, sk.profiles, "T_FRONT + 1 mm", CUT, bodies=[body], name="Fenêtre")
-    sk = sketch(comp, plate, "Logement collerette")
-    rrect(sk, *around(*AA, "FRAME_W + FLANGE_W + FRAME_CLR"), "FRAME_R + FLANGE_W + FRAME_CLR")
-    extrude(comp, sk.profiles, "FLANGE_T", CUT, bodies=[body], name="Logement collerette")
-    g = "FRAME_W + FRAME_CLR"
-    chamfer(comp, edges_within(body, (f"AA_X - {g}", f"AA_Y - {g}", "BOX_D"),
-                               (f"AA_X + AA_W + {g}", f"AA_Y + AA_H + {g}", "BOX_D")), "WIN_CH", "Chanfrein fenêtre")
+    if MONOBLOC:
+        # Fenêtre au bord de la zone affichée, la dalle s'appuie directement sur la face intérieure ;
+        # logements des incrustations noires, sauf l'icône NFC qui reste en blanc
+        sk = sketch(comp, plate, "Fenêtre")
+        rrect(sk, *AA, "FRAME_IN_R")
+        extrude(comp, sk.profiles, "T_FRONT + 1 mm", CUT, bodies=[body], name="Fenêtre")
+        chamfer(comp, edges_within(body, ("AA_X", "AA_Y", "BOX_D"), ("AA_X + AA_W", "AA_Y + AA_H", "BOX_D")),
+                "WIN_CH", "Chanfrein fenêtre")
+        # Zones gravées en traits de ENGR_W : face contre le plateau, chaque trait s'imprime en pont court
+        sk = sketch(comp, plane(comp, "BOX_D - ENGR_DEPTH"), "Zones gravées")
+        for kx in KEYS:
+            ring = circle(sk, kx, "KEY_Y", "KEY_DOT_D")
+            circle(sk, kx, "KEY_Y", "KEY_DOT_D - 2 * ENGR_W", center=ring.centerSketchPoint)
+        rrect(sk, *PAD, "PAD_R")
+        rrect(sk, *around(*PAD, "-ENGR_W"), "PAD_R - ENGR_W")
+        extrude(comp, rings(sk), "ENGR_DEPTH + 1 mm", CUT, bodies=[body], name="Zones gravées")
+        sk = sketch(comp, plane(comp, "BOX_D - ENGR_DEPTH"), "Icône NFC")
+        extrude(comp, nfc_icon(sk, "BOX_W / 2", "KEY_Y"), "ENGR_DEPTH + 1 mm", CUT, bodies=[body],
+                name="Icône NFC")
+    else:
+        # Fenêtre du cadre noir, et logement de sa collerette dans la face intérieure
+        sk = sketch(comp, plate, "Fenêtre")
+        rrect(sk, *around(*AA, "FRAME_W + FRAME_CLR"), "FRAME_R + FRAME_CLR")
+        extrude(comp, sk.profiles, "T_FRONT + 1 mm", CUT, bodies=[body], name="Fenêtre")
+        sk = sketch(comp, plate, "Logement collerette")
+        rrect(sk, *around(*AA, "FRAME_W + FLANGE_W + FRAME_CLR"), "FRAME_R + FLANGE_W + FRAME_CLR")
+        extrude(comp, sk.profiles, "FLANGE_T", CUT, bodies=[body], name="Logement collerette")
+        g = "FRAME_W + FRAME_CLR"
+        chamfer(comp, edges_within(body, (f"AA_X - {g}", f"AA_Y - {g}", "BOX_D"),
+                                   (f"AA_X + AA_W + {g}", f"AA_Y + AA_H + {g}", "BOX_D")), "WIN_CH",
+                "Chanfrein fenêtre")
 
     # Logements des pièces noires de la face, comme le site : pastilles des touches (trou épaulé,
-    # posées par l'arrière, retenues par le module tactile) et pavé NFC (collerette)
-    sk = sketch(comp, plane(comp, "BOX_D - INLAY_LIP"), "Pastilles")
-    for kx in KEYS:
-        circle(sk, kx, "KEY_Y", "KEY_DOT_D + 2 * INLAY_CLR")
-    extrude(comp, sk.profiles, "INLAY_LIP + 1 mm", CUT, bodies=[body], name="Pastilles")
-    sk = sketch(comp, plate, "Épaulements pastilles")
-    for kx in KEYS:
-        circle(sk, kx, "KEY_Y", "KEY_DOT_BACK_D + 2 * INLAY_CLR")
-    extrude(comp, sk.profiles, "T_FRONT - INLAY_LIP", CUT, bodies=[body], name="Épaulements pastilles")
-    sk = sketch(comp, plate, "Pavé NFC")
-    rrect(sk, *around(*PAD, "INLAY_CLR"), "PAD_R + INLAY_CLR")
-    extrude(comp, sk.profiles, "T_FRONT + 1 mm", CUT, bodies=[body], name="Pavé NFC")
-    sk = sketch(comp, plate, "Logement collerette pavé")
-    rrect(sk, *around(*PAD, "PAD_FLANGE + INLAY_CLR"), "PAD_R + PAD_FLANGE + INLAY_CLR")
-    extrude(comp, sk.profiles, "FLANGE_T", CUT, bodies=[body], name="Logement collerette pavé")
+    # posées par l'arrière, retenues par le module tactile) et pavé NFC (collerette). En monobloc, la
+    # face reste pleine : les touches et le lecteur travaillent à travers 1,6 mm de PLA.
+    if not MONOBLOC:
+        sk = sketch(comp, plane(comp, "BOX_D - INLAY_LIP"), "Pastilles")
+        for kx in KEYS:
+            circle(sk, kx, "KEY_Y", "KEY_DOT_D + 2 * INLAY_CLR")
+        extrude(comp, sk.profiles, "INLAY_LIP + 1 mm", CUT, bodies=[body], name="Pastilles")
+        sk = sketch(comp, plate, "Épaulements pastilles")
+        for kx in KEYS:
+            circle(sk, kx, "KEY_Y", "KEY_DOT_BACK_D + 2 * INLAY_CLR")
+        extrude(comp, sk.profiles, "T_FRONT - INLAY_LIP", CUT, bodies=[body], name="Épaulements pastilles")
+        sk = sketch(comp, plate, "Pavé NFC")
+        rrect(sk, *around(*PAD, "INLAY_CLR"), "PAD_R + INLAY_CLR")
+        extrude(comp, sk.profiles, "T_FRONT + 1 mm", CUT, bodies=[body], name="Pavé NFC")
+        sk = sketch(comp, plate, "Logement collerette pavé")
+        rrect(sk, *around(*PAD, "PAD_FLANGE + INLAY_CLR"), "PAD_R + PAD_FLANGE + INLAY_CLR")
+        extrude(comp, sk.profiles, "FLANGE_T", CUT, bodies=[body], name="Logement collerette pavé")
 
     # Passage USB-C sur la tranche droite, à la taille du surmoulage : la fiche s'enfonce jusqu'à
     # la prise. Sur ce plan, x d'esquisse = -z.
@@ -829,6 +858,8 @@ def build_cadre(comp):
     pavé NFC. Toutes affleurent la face avant et se posent par l'arrière, sans colle : la dalle serre
     le cadre, les modules tactiles plaquent les pastilles, le pavé tient par sa collerette.
     """
+    if MONOBLOC:
+        return
     plate = plane(comp, "Z_PLATE")
     front = plane(comp, "BOX_D")
     sk = sketch(comp, plate, "Cadre")
@@ -863,7 +894,6 @@ def build_cadre(comp):
     extrude(comp, nfc_icon(sk, "BOX_W / 2", "KEY_Y"), "ENGR_DEPTH", CUT, negative=True, bodies=[pad],
             name="Icône NFC")
     paint(pad, "Plastic - Matte (Black)", pla())
-    return body
 
 
 # ---------------------------------------------------------------- châssis

@@ -34,11 +34,19 @@ de 0,20, 4 périmètres pour les pièces structurelles, remplissage 10 %, sans s
 | `socle.stl` | Support de bureau incliné à 15°, semelle de 90 mm | Semelle | Blanc | 2 h 46 | 50 g |
 | `chassis.stl` | Plaque la dalle, tient la carte driver et la batterie | Face avant | Au choix (caché) | 1 h 16 | 19 g |
 | `cadre.stl`, `pastille-gauche.stl`, `pastille-droite.stl`, `pavé-nfc.stl` | Pièces noires de la face | Collerette dessous, face visible en haut | Noir | 0 h 19 | 3 g |
+| `facade-monobloc.stl` | Variante : façade d'une pièce et d'une couleur, zones gravées ; remplace `facade.stl` et les pièces noires | Face avant | Une couleur | 2 h 46 | 33 g |
 
 Total : environ 9 h 05 et 138 g. Les pièces noires gagnent à être imprimées avec le lissage
 (ironing) des surfaces supérieures, puisque leur face visible est la dernière couche.
 
 4 périmètres : la paroi autour des inserts (1,7 mm) est alors pleine, pas en remplissage.
+
+Variante monobloc : la façade n'est percée que pour l'écran (fenêtre au bord de la zone affichée,
+la dalle s'appuie directement sur la face intérieure) et la micro-grille du buzzer. Les zones sont
+gravées en traits de 0,8 mm sur 0,4 de profondeur : un anneau de 8 mm par touche, le contour du
+pavé et l'icône NFC. Face contre le plateau, chaque trait s'imprime en pont court. Les touches
+capacitives et le lecteur NFC travaillent à travers les 1,6 mm de la façade. Elle se construit
+avec `MONOBLOC = True` en tête du script.
 
 Plus vite : le temps part surtout dans les parois de la façade (70 %, paroi extérieure à
 30 mm/s) et dans les plaques pleines du capot et du socle. Avec paroi extérieure à 45 mm/s,
