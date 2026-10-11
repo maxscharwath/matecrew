@@ -2,8 +2,7 @@
 
 import { createAuthClient } from "better-auth/react";
 
-export const authClient = createAuthClient({
-  baseURL: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-});
+// No baseURL: Better Auth calls the page's own origin, whichever host serves it.
+export const authClient = createAuthClient();
 
 export const { signIn, signUp, signOut, useSession, requestPasswordReset, resetPassword, sendVerificationEmail } = authClient;

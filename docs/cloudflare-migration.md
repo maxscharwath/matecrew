@@ -15,8 +15,8 @@ Cloudflare.
 - Better Auth tourne sur le worker avec `BETTER_AUTH_URL=https://matecrew.vercel.app` : Microsoft renvoie vers
   `matecrew.vercel.app/api/auth/callback/microsoft`, Vercel relaie, le worker valide. Les cookies restent sur
   `matecrew.vercel.app`, le seul domaine que le navigateur voit.
-- Next.js accepte les server actions venant de l'origine publique (`serverActions.allowedOrigins`, calculé depuis
-  `NEXT_PUBLIC_APP_URL` au build).
+- Next.js accepte les server actions venant de l'origine publique (`serverActions.allowedOrigins` dans
+  `next.config.ts`). Le client Better Auth appelle l'origine de la page : le build ne lit aucune URL.
 - Le terminal parle directement au worker (`….workers.dev`) : plus rapide, et les WebSockets du futur canal temps
   réel ne passent pas par les rewrites Vercel.
 - L'adaptateur `vercel` et le pont signé (`src/platform/cloudflare/bridge`) restent dans le code comme option
@@ -52,9 +52,9 @@ URL du worker : `https://matecrew.owt.workers.dev` (déjà dans `vercel.json`).
 `SCHEDULES_ENABLED` est fixé à `"false"` dans `wrangler.jsonc` : tant que Vercel et Neon servent la production,
 leurs planifications QStash envoient les messages Slack et les mails ; ce worker les enverrait une seconde fois.
 
-1. Premier déploiement (`NEXT_PUBLIC_APP_URL` est lu au build, pour les liens et les server actions relayées) :
+1. Premier déploiement :
    ```sh
-   NEXT_PUBLIC_APP_URL=https://matecrew.vercel.app bun run deploy
+   bun run deploy
    ```
 2. Variables : reprendre celles de la production Vercel, sans les afficher.
    ```sh
@@ -97,8 +97,7 @@ vers le worker (build instantané, rien à installer).
    bun --env-file=.env.migration.local scripts/cloudflare/copy-blobs.ts   # relancer jusqu'à 0 échec
    ```
    Supprimer `.env.migration.local` une fois la copie vérifiée.
-4. `SCHEDULES_ENABLED` : `"true"` dans `wrangler.jsonc`, puis
-   `NEXT_PUBLIC_APP_URL=https://matecrew.vercel.app bun run deploy`.
+4. `SCHEDULES_ENABLED` : `"true"` dans `wrangler.jsonc`, puis `bun run deploy`.
 5. Fusionner `cloudflare-migration` dans `main` : la production Vercel devient le proxy.
 6. Vérifier sur `matecrew.vercel.app` : connexion Microsoft, pages avec données, upload d'une photo d'article,
    bouton Slack (l'URL d'interactivité reste `matecrew.vercel.app/api/slack/interactions`, relayée), connecteur
@@ -122,7 +121,7 @@ seulement `Device.tokenHash` dans la même D1. Aucun secret à poser.
    ```
 2. Déployer le site (`REALTIME_URL` est une variable de `wrangler.jsonc`) :
    ```sh
-   NEXT_PUBLIC_APP_URL=https://matecrew.vercel.app bun run deploy
+   bun run deploy
    ```
 3. Vérifier : la console d'un terminal dit « Canal direct ouvert » dans son journal, et le terminal (firmware
    0.4.0 et plus, ou le terminal virtuel) affiche `relay: connected` sur la console série.
@@ -137,7 +136,7 @@ En local, `jurisdiction("eu")` n'existe pas dans workerd : `realtime/src/locate.
 1. Domaine propre si voulu (Cloudflare for SaaS, voir la discussion `matecrew.owt.team`), sinon `workers.dev`.
 2. Microsoft Entra : ajouter l'URI de redirection `https://<URL Cloudflare>/api/auth/callback/microsoft`.
 3. Worker : secrets `BETTER_AUTH_URL` et `NEXT_PUBLIC_APP_URL` sur l'URL Cloudflare
-   (`bunx wrangler secret put …`), puis `NEXT_PUBLIC_APP_URL=<URL Cloudflare> bun run deploy`.
+   (`bunx wrangler secret put …`), retirer `matecrew.vercel.app` de `allowedOrigins` (`next.config.ts`), déployer.
 4. Slack : URL d'interactivité `https://<URL Cloudflare>/api/slack/interactions`. Connecteur MCP Claude :
    `https://<URL Cloudflare>/api/mcp`. Annoncer la nouvelle URL.
 5. Retirer le projet Vercel, Neon, Vercel Blob et QStash ; supprimer `scripts/cloudflare/copy-blobs.ts` et ses
@@ -160,9 +159,6 @@ En local, `jurisdiction("eu")` n'existe pas dans workerd : `realtime/src/locate.
 - Proxy Vercel : un saut réseau de plus par requête du navigateur (Vercel → Cloudflare), mais aucun par requête
   SQL. Taille maximale des requêtes relayées à vérifier à l'étape 3 (uploads de factures). Les WebSockets ne
   passent pas par les rewrites.
-- `NEXT_PUBLIC_APP_URL` doit être défini au build du worker : sinon Next refuse les server actions arrivant par
-  `matecrew.vercel.app`. Le secret du worker ne suffit pas (lu à l'exécution) : `build:cloudflare`, que lance
-  Workers Builds, le fixe à `https://matecrew.vercel.app` par défaut.
 - La file des mails de décompte n'a pas été testée de bout en bout en local (pas d'envoi local de message) : à
   vérifier à la première clôture mensuelle.
 - `proxy.ts` (Next 16) fonctionne, mais OpenNext marque encore le middleware Node comme expérimental.
