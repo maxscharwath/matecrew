@@ -118,6 +118,10 @@ export const auth = betterAuth({
         // exclusively — `plain` would contradict it).
         requirePKCE: true,
         allowPlainCodeChallengeMethod: false,
+        // A connector stays signed in while it is used at least once every 90 days: each refresh
+        // issues a new refresh token valid 90 days. Access tokens stay short (1 h, the default)
+        // and are renewed by the client.
+        refreshTokenExpiresIn: 90 * 24 * 60 * 60,
         // NB: `oidcConfig.metadata` would be the natural place to correct the
         // published discovery document, but the plugin calls its metadata
         // builder with the outer `mcp()` options rather than `oidcConfig`, so
