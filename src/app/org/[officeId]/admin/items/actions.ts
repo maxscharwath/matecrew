@@ -344,14 +344,29 @@ export async function terminalImageFromFile(
   }
 }
 
-/** The item's photo at 96 x 96 in black and white, as a start for drawing. */
+/**
+ * The item's photo at 96 x 96 in black and white, as a start for drawing. Worked out and kept
+ * now when the photo has none yet (a photo stored before pictures were computed at upload).
+ */
 export async function terminalImageFromPhoto(officeId: string, itemId: string): Promise<PictureResult> {
   await requireOrgRoles(officeId, "ADMIN");
   const t = await getTranslations();
-  const item = await prisma.item.findFirst({ where: { id: itemId, officeId }, select: { terminalPhoto: true } });
+  const item = await prisma.item.findFirst({
+    where: { id: itemId, officeId },
+    select: { imageKey: true, terminalPhoto: true },
+  });
   if (!item) return { success: false, error: t("errors.itemNotFound") };
-  if (!item.terminalPhoto) return { success: false, error: t("items.terminalImage.noPhoto") };
-  return { success: true, bits: Buffer.from(item.terminalPhoto).toString("base64") };
+  if (item.terminalPhoto) return { success: true, bits: Buffer.from(item.terminalPhoto).toString("base64") };
+  if (!item.imageKey) return { success: false, error: t("items.terminalImage.noPhoto") };
+  try {
+    const terminalPhoto = await photoToTerminal(await loadPhoto(item.imageKey));
+    await prisma.item.update({ where: { id: itemId }, data: { terminalPhoto } });
+    revalidateItemPages(officeId);
+    return { success: true, bits: Buffer.from(terminalPhoto).toString("base64") };
+  } catch (error) {
+    console.error(`[items] terminal picture of ${itemId} failed`, error);
+    return { success: false, error: t("items.terminalImage.photoFailed") };
+  }
 }
 
 /**

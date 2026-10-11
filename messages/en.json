@@ -1040,6 +1040,7 @@
       "save": "Save",
       "saved": "Terminal picture saved",
       "noPhoto": "This item has no photo.",
+      "photoFailed": "Couldn't read this item's photo.",
       "brush": "Brush",
       "brushSize": "{size} px brush",
       "backfillHint": "{count, plural, one {# photo has} other {# photos have}} no terminal picture yet, so the terminal shows the default picture instead.",

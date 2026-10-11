@@ -1040,6 +1040,7 @@
       "save": "Enregistrer",
       "saved": "Image du terminal enregistrée",
       "noPhoto": "Cet article n'a pas de photo.",
+      "photoFailed": "Impossible de lire la photo de cet article.",
       "brush": "Pinceau",
       "brushSize": "Pinceau de {size} px",
       "backfillHint": "{count, plural, one {# photo n'a} other {# photos n'ont}} pas encore d'image pour le terminal : il affiche l'image par défaut à la place.",
