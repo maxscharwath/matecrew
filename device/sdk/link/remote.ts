@@ -26,6 +26,8 @@ export type WatchOptions = {
 /** Shorthands over `send`, for any transport. */
 export const commands = {
   press: (remote: DeviceRemote, side: "left" | "right") => remote.send({ cmd: "key", side }),
+  /** A key held: the device's long press. */
+  hold: (remote: DeviceRemote, side: "left" | "right") => remote.send({ cmd: "longKey", side }),
   both: (remote: DeviceRemote) => remote.send({ cmd: "both" }),
   badge: (remote: DeviceRemote, uid: string) => remote.send({ cmd: "badge", uid }),
   sync: (remote: DeviceRemote) => remote.send({ cmd: "sync" }),

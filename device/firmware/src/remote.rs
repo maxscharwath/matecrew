@@ -16,7 +16,7 @@ use matecrew_core::{
     action::Action,
     flow::Event as FlowEvent,
     link::Event,
-    live::{self, changed_rows, command_id, patch, FromTerminal, Status, ToTerminal},
+    live::{self, changed_rect, command_id, patch, rect_bytes, FromTerminal, Status, ToTerminal, DEFLATE, RAW},
 };
 use std::{
     sync::{
@@ -30,6 +30,7 @@ use std::{
 
 use crate::{
     api::{Api, Unauthorized},
+    deflate::Deflater,
     socket::{Message, Refused, Socket},
     Input,
 };
@@ -107,12 +108,29 @@ impl Live {
         }
     }
 
-    /// The rows of `frame` the relay does not have yet; false when it cannot take them now.
-    fn send_screen(&self, frame: &[u8]) -> bool {
+    /// The rectangle of `frame` the relay does not have yet, deflated when that makes it smaller
+    /// (with `deflater`); false when the relay cannot take it now.
+    fn send_screen(&self, frame: &[u8], deflater: Option<&mut Deflater>) -> bool {
         let Some(socket) = self.socket() else { return false };
         let Ok(mut relayed) = self.0.relayed.lock() else { return false };
-        let Some((y, rows)) = changed_rows(relayed.as_deref(), frame) else { return true };
-        match socket.send_binary(patch(frame, y, rows), SEND_TIMEOUT) {
+        let Some(rect) = changed_rect(relayed.as_deref(), frame) else { return true };
+        let bytes = rect_bytes(frame, rect);
+        let started = Instant::now();
+        let message = match deflater.and_then(|deflater| deflater.deflate(&bytes)) {
+            Some(deflated) => {
+                log::info!(
+                    "relay screen: {}x{} px, {} B deflated to {} in {} ms",
+                    rect.w * 8,
+                    rect.h,
+                    bytes.len(),
+                    deflated.len(),
+                    started.elapsed().as_millis()
+                );
+                patch(rect, DEFLATE, &deflated)
+            }
+            None => patch(rect, RAW, &bytes),
+        };
+        match socket.send_binary(message, SEND_TIMEOUT) {
             Ok(()) => {
                 *relayed = Some(frame.to_vec());
                 true
@@ -209,6 +227,7 @@ pub fn start(api: Api, live: Live, inputs: Sender<Input>) -> Result<()> {
 pub fn input(action: Action) -> Input {
     match action {
         Action::Key(side) => Input::Flow(FlowEvent::Key { side }),
+        Action::LongKey(side) => Input::Flow(FlowEvent::LongKey { side }),
         Action::Both => Input::Flow(FlowEvent::BothKeys),
         Action::Badge(uid) => Input::Flow(FlowEvent::Badge { uid }),
         Action::Sync => Input::Sync,
@@ -399,6 +418,8 @@ fn uplink(api: Api, relay: Live) -> Result<()> {
     let (up, received) = mpsc::channel::<Up>();
     let _ = UPLINK.set((relay.clone(), Mutex::new(up)));
     thread::Builder::new().stack_size(10 * 1024).spawn(move || {
+        // Its state in PSRAM, made when a console first watches over the relay.
+        let mut deflater: Option<Deflater> = None;
         let mut sent = true;
         let mut uploaded: Option<Vec<u8>> = None;
         let mut status_uploaded: Option<Instant> = None;
@@ -427,7 +448,10 @@ fn uplink(api: Api, relay: Live) -> Result<()> {
             if status_only && status_uploaded.is_some_and(|at| at.elapsed() < STATUS_EVERY) {
                 continue;
             }
-            let done = relay.send_screen(&frame)
+            if relay.connected() && deflater.is_none() {
+                deflater = Deflater::new();
+            }
+            let done = relay.send_screen(&frame, deflater.as_mut())
                 || (!relay.connected() && api.put_frame(&frame).inspect_err(|e| log::warn!("screen mirror: {e:#}")).is_ok());
             if done {
                 sent = true;

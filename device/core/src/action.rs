@@ -8,6 +8,8 @@ use crate::link::Control;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     Key(Side),
+    /// A key held: the long press the terminal's own key makes.
+    LongKey(Side),
     /// Both keys together: the about page.
     Both,
     /// A normalized UID.
@@ -37,6 +39,7 @@ impl Action {
     pub fn from_command(command: Command) -> Option<Self> {
         Some(match command {
             Command::Key { side, .. } => Self::Key(side),
+            Command::LongKey { side, .. } => Self::LongKey(side),
             Command::Both { .. } => Self::Both,
             Command::Badge { uid, .. } => Self::Badge(normalize_uid(&uid)?),
             Command::Sync { app: Some(app), .. } => Self::App(app),
@@ -52,6 +55,7 @@ impl Action {
     pub fn from_control(control: Control) -> Option<Self> {
         Some(match control {
             Control::Key { side } => Self::Key(side),
+            Control::LongKey { side } => Self::LongKey(side),
             Control::Both => Self::Both,
             Control::Badge { uid } => Self::Badge(normalize_uid(&uid)?),
             Control::Sync => Self::Sync,
@@ -81,5 +85,9 @@ mod tests {
         let app: Command = serde_json::from_str(r#"{"id":"c2","kind":"sync","app":"showcase"}"#).unwrap();
         assert_eq!(Action::from_command(app), Some(Action::App(BuiltinApp::Showcase)));
         assert_eq!(Action::from_command(Command::Unknown), None);
+        let held: Command = serde_json::from_str(r#"{"id":"c3","kind":"longKey","side":"right"}"#).unwrap();
+        assert_eq!(Action::from_command(held), Some(Action::LongKey(Side::Right)));
+        let nearby = Control::parse(br#"{"cmd":"longKey","side":"left"}"#).unwrap();
+        assert_eq!(Action::from_control(nearby), Some(Action::LongKey(Side::Left)));
     }
 }

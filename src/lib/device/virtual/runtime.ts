@@ -344,12 +344,17 @@ export class VirtualDevice {
       // A held left key is the short one for an app, the flow's otherwise (it leaves the
       // purchases); the held right key is the terminal's purchases list, like both keys,
       // whatever app runs (firmware/src/main.rs).
-      if (edges & 8) {
-        if (this.appLoaded && this.wasmIdle()) this.press("left");
-        else this.dispatch({ type: "longKey", side: "left" });
-      }
-      if (edges & 16) this.dispatch({ type: "longKey", side: "right" });
+      if (edges & 8) this.hold("left");
+      if (edges & 16) this.hold("right");
     }, 20);
+  }
+
+  /** A held key: the left one is the short one for an app, the flow's otherwise (it leaves the
+   * purchases); the right one is the terminal's purchases list, like both keys, whatever app
+   * runs (firmware/src/main.rs). */
+  private hold(side: Side): void {
+    if (side === "left" && this.appLoaded && this.wasmIdle()) this.press("left");
+    else this.dispatch({ type: "longKey", side });
   }
 
   syncNow(): void {
@@ -750,6 +755,9 @@ export class VirtualDevice {
     switch (command.kind) {
       case "key":
         this.press(command.side);
+        break;
+      case "longKey":
+        this.hold(command.side);
         break;
       case "both":
         this.dispatch({ type: "bothKeys" });

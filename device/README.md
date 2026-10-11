@@ -73,8 +73,11 @@ garde un WebSocket ouvert vers son relais : un Durable Object par terminal (`rea
 dans `Authorization`. Plus rien n'est interrogé en boucle :
 
 - les commandes de la console arrivent en quelques dizaines de millisecondes, et le terminal les acquitte (`ack`) ;
-- l'écran part vers la console seulement quand quelqu'un regarde, et seulement les lignes qui ont changé (quelques Ko
-  au lieu de 48) ; le relais garde le dernier écran pour les vignettes ;
+  une touche maintenue 0,7 s dans la console est un appui long, comme sur le terminal ;
+- l'écran part vers la console seulement quand quelqu'un regarde : le rectangle qui a changé, compressé en deflate
+  par la ROM de l'ESP32 (`firmware/src/deflate.rs`, état en PSRAM). Mesuré sur les 79 écrans des aperçus : un écran
+  entier fait environ 3,5 Ko au lieu de 48, une nouvelle page environ 3 Ko, un compteur quelques centaines d'octets.
+  Le relais garde le dernier écran (pour les vignettes et les consoles qui arrivent) ;
 - le site prévient quand ce que le terminal affiche a changé (stock, articles, badges, sessions, demandes,
   réglages : toute écriture sur ces tables, `src/lib/device/push.ts`), et le terminal se synchronise aussitôt, sauf
   s'il l'a déjà fait depuis ; une synchro est aussi prévue à `refreshAt` (heure limite d'une session, fin d'une

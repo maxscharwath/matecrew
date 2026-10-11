@@ -5,8 +5,10 @@ import {
   CONSOLE_HEADER,
   FRAME_BYTES,
   PANEL_HEIGHT,
+  ROW_BYTES,
   SUBPROTOCOL,
-  applyPatch,
+  applyRect,
+  decodeRect,
   parse,
   readPatch,
   type Command,
@@ -114,16 +116,23 @@ export function useRelay(
       }
     };
 
-    const onBinary = (data: ArrayBuffer) => {
+    // Inflating awaits: patches apply one after the other, each to the screen the one before made.
+    let decoding: Promise<void> = Promise.resolve();
+    const onBinary = (data: ArrayBuffer, from: WebSocket) => {
       const patch = readPatch(data, CONSOLE_HEADER);
       if (!patch) return;
-      // A patch needs the screen it applies to: the relay sends the whole one first.
-      if (!frame && !(patch.y === 0 && patch.rows === PANEL_HEIGHT)) return;
-      const next = frame ? frame.slice() : new Uint8Array(FRAME_BYTES);
-      applyPatch(next, patch);
-      frame = next;
-      const drawnAt = patch.drawnAt ?? Date.now();
-      handlers.current.frame({ hash: `r${drawnAt}-${++counter}`, drawnAt: new Date(drawnAt).toISOString(), bits: next });
+      decoding = decoding.then(async () => {
+        const bytes = await decodeRect(patch);
+        const whole = patch.rect.w === ROW_BYTES && patch.rect.h === PANEL_HEIGHT;
+        // A patch needs the screen it applies to: the relay sends the whole one first.
+        // Not from a socket closed since (its screen was dropped with it).
+        if (!bytes || stopped || from !== socket.current || (!frame && !whole)) return;
+        const next = frame ? frame.slice() : new Uint8Array(FRAME_BYTES);
+        applyRect(next, patch.rect, bytes);
+        frame = next;
+        const drawnAt = patch.drawnAt ?? Date.now();
+        handlers.current.frame({ hash: `r${drawnAt}-${++counter}`, drawnAt: new Date(drawnAt).toISOString(), bits: next });
+      });
     };
 
     const open = async () => {
@@ -141,7 +150,7 @@ export function useRelay(
       };
       ws.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
         if (typeof event.data === "string") onText(event.data);
-        else onBinary(event.data);
+        else onBinary(event.data, ws);
       };
       ws.onclose = () => {
         if (socket.current === ws) socket.current = null;

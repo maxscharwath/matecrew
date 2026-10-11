@@ -1344,6 +1344,8 @@
       "kind": {
         "keyLeft": "Touche gauche",
         "keyRight": "Touche droite",
+        "longKeyLeft": "Touche gauche maintenue",
+        "longKeyRight": "Touche droite maintenue",
         "badge": "Badge {uid}",
         "sync": "Synchro",
         "restart": "Redémarrage",

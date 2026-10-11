@@ -8,6 +8,7 @@ import { toRow, withId, type ConsoleCommand } from "@/lib/device/console-command
 /** The command shape of `@matecrew/device-link`, the same as over Bluetooth. */
 const remoteCommand = z.discriminatedUnion("cmd", [
   z.object({ cmd: z.literal("key"), side: z.enum(["left", "right"]) }),
+  z.object({ cmd: z.literal("longKey"), side: z.enum(["left", "right"]) }),
   z.object({ cmd: z.literal("both") }),
   z.object({ cmd: z.literal("badge"), uid: z.string() }),
   z.object({ cmd: z.literal("sync") }),
@@ -35,6 +36,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ dev
   switch (body.cmd) {
     case "key":
       command = { kind: "key", side: body.side };
+      break;
+    case "longKey":
+      command = { kind: "longKey", side: body.side };
       break;
     case "both":
       command = { kind: "both" };

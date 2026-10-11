@@ -55,6 +55,8 @@ export type Side = "left" | "right";
 /** What a device can be asked to do, over Bluetooth or another transport. */
 export type RemoteCommand =
   | { cmd: "key"; side: Side }
+  /** A key held, as the device's own long press. */
+  | { cmd: "longKey"; side: Side }
   | { cmd: "both" }
   | { cmd: "badge"; uid: string }
   | { cmd: "sync" }

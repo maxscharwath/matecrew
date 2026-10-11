@@ -3,8 +3,8 @@
 //! arrive at once, the screen goes to the console as the rows that changed, and the site says
 //! when what the terminal shows changed, so it syncs then rather than on a timer.
 //!
-//! Text frames are JSON with a `t` tag; the screen goes as binary frames
-//! (`[y u16 LE][rows u16 LE][rows × ROW_BYTES]`). The heartbeat is the text `PING`, answered
+//! Text frames are JSON with a `t` tag; the screen goes as binary frames: the rectangle that
+//! changed, deflated (`patch`). The heartbeat is the text `PING`, answered
 //! `PONG` by the relay without waking it. The log and the beeps go as over Bluetooth
 //! (`link::Event`, `{"t":"log",…}`, `{"t":"beep",…}`): one shape for every transport.
 
@@ -25,7 +25,14 @@ pub const PANEL_WIDTH: usize = 800;
 pub const PANEL_HEIGHT: usize = 480;
 pub const ROW_BYTES: usize = PANEL_WIDTH / 8;
 pub const FRAME_BYTES: usize = ROW_BYTES * PANEL_HEIGHT;
-const HEADER: usize = 4;
+/// `[format u8][x u8][w u8][y u16 LE][h u16 LE]`, then the rectangle's bytes.
+pub const PATCH_HEADER: usize = 7;
+/// The rectangle's bytes as they are.
+pub const RAW: u8 = 0;
+/// The rectangle's bytes deflated (raw deflate, no zlib header): a screen's 48 000 bytes in about
+/// 3.5 KB, a new page in about 3 KB, a counter in a few hundred (measured on the screens'
+/// previews). Browsers and Workers inflate it natively.
+pub const DEFLATE: u8 = 1;
 
 /// What the relay sends the terminal.
 #[derive(Deserialize, Debug, PartialEq)]
@@ -116,6 +123,7 @@ pub fn split_url(url: &str) -> Option<(bool, String, u16, String)> {
 pub fn command_id(command: &Command) -> Option<&str> {
     match command {
         Command::Key { id, .. }
+        | Command::LongKey { id, .. }
         | Command::Both { id }
         | Command::Badge { id, .. }
         | Command::Sync { id, .. }
@@ -126,25 +134,53 @@ pub fn command_id(command: &Command) -> Option<&str> {
     }
 }
 
-/// The rows of `after` that differ from `before`, as `(first row, rows)`; all of them without a
-/// `before`, none when the frames are the same.
-pub fn changed_rows(before: Option<&[u8]>, after: &[u8]) -> Option<(usize, usize)> {
-    let Some(before) = before.filter(|b| b.len() == after.len()) else {
-        return Some((0, after.len() / ROW_BYTES));
-    };
-    let differs = |row: &usize| before[row * ROW_BYTES..(row + 1) * ROW_BYTES] != after[row * ROW_BYTES..(row + 1) * ROW_BYTES];
-    let rows = after.len() / ROW_BYTES;
-    let first = (0..rows).find(differs)?;
-    let last = (first..rows).rev().find(differs)?;
-    Some((first, last - first + 1))
+/// A rectangle of the panel, in bytes horizontally (8 pixels each) and rows vertically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    /// First byte column (0..ROW_BYTES).
+    pub x: usize,
+    pub y: usize,
+    /// Bytes per row.
+    pub w: usize,
+    pub h: usize,
 }
 
-/// The binary frame for rows `y..y + rows` of `frame`.
-pub fn patch(frame: &[u8], y: usize, rows: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(HEADER + rows * ROW_BYTES);
-    out.extend_from_slice(&(y as u16).to_le_bytes());
-    out.extend_from_slice(&(rows as u16).to_le_bytes());
-    out.extend_from_slice(&frame[y * ROW_BYTES..(y + rows) * ROW_BYTES]);
+impl Rect {
+    pub const WHOLE: Rect = Rect { x: 0, y: 0, w: ROW_BYTES, h: PANEL_HEIGHT };
+}
+
+/// The smallest rectangle holding every byte of `after` that differs from `before`; the whole
+/// panel without a `before`, none when the frames are the same.
+pub fn changed_rect(before: Option<&[u8]>, after: &[u8]) -> Option<Rect> {
+    let Some(before) = before.filter(|b| b.len() == after.len() && after.len() == FRAME_BYTES) else {
+        return Some(Rect::WHOLE);
+    };
+    let (mut x0, mut x1, mut y0, mut y1) = (ROW_BYTES, 0, PANEL_HEIGHT, 0);
+    for y in 0..PANEL_HEIGHT {
+        let row = y * ROW_BYTES;
+        let (old, new) = (&before[row..row + ROW_BYTES], &after[row..row + ROW_BYTES]);
+        let Some(first) = old.iter().zip(new).position(|(a, b)| a != b) else { continue };
+        let last = old.iter().zip(new).rposition(|(a, b)| a != b).unwrap_or(first);
+        (x0, x1, y0, y1) = (x0.min(first), x1.max(last), y0.min(y), y);
+    }
+    (y0 < PANEL_HEIGHT).then(|| Rect { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 })
+}
+
+/// The bytes of `frame` inside `rect`, row after row.
+pub fn rect_bytes(frame: &[u8], rect: Rect) -> Vec<u8> {
+    (rect.y..rect.y + rect.h)
+        .flat_map(|y| &frame[y * ROW_BYTES + rect.x..y * ROW_BYTES + rect.x + rect.w])
+        .copied()
+        .collect()
+}
+
+/// The binary frame for `rect`, its bytes in `format` (`RAW` or `DEFLATE`).
+pub fn patch(rect: Rect, format: u8, bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(PATCH_HEADER + bytes.len());
+    out.extend_from_slice(&[format, rect.x as u8, rect.w as u8]);
+    out.extend_from_slice(&(rect.y as u16).to_le_bytes());
+    out.extend_from_slice(&(rect.h as u16).to_le_bytes());
+    out.extend_from_slice(bytes);
     out
 }
 
@@ -200,17 +236,20 @@ mod tests {
     }
 
     #[test]
-    fn only_the_rows_that_changed_go() {
+    fn only_the_rectangle_that_changed_goes() {
         let before = vec![0u8; FRAME_BYTES];
         let mut after = before.clone();
-        assert_eq!(changed_rows(Some(&before), &after), None);
-        assert_eq!(changed_rows(None, &after), Some((0, PANEL_HEIGHT)));
+        assert_eq!(changed_rect(Some(&before), &after), None);
+        assert_eq!(changed_rect(None, &after), Some(Rect::WHOLE));
         after[10 * ROW_BYTES + 3] = 0xff;
-        after[12 * ROW_BYTES] = 0x01;
-        assert_eq!(changed_rows(Some(&before), &after), Some((10, 3)));
-        let frame = patch(&after, 10, 3);
-        assert_eq!(&frame[..4], &[10, 0, 3, 0]);
-        assert_eq!(frame.len(), 4 + 3 * ROW_BYTES);
-        assert_eq!(frame[4 + 3], 0xff);
+        after[12 * ROW_BYTES + 7] = 0x01;
+        let rect = changed_rect(Some(&before), &after).unwrap();
+        assert_eq!(rect, Rect { x: 3, y: 10, w: 5, h: 3 });
+        let bytes = rect_bytes(&after, rect);
+        assert_eq!(bytes.len(), 15);
+        assert_eq!((bytes[0], bytes[14]), (0xff, 0x01));
+        let frame = patch(rect, RAW, &bytes);
+        assert_eq!(&frame[..PATCH_HEADER], &[RAW, 3, 5, 10, 0, 3, 0]);
+        assert_eq!(frame.len(), PATCH_HEADER + 15);
     }
 }

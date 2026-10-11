@@ -5,18 +5,19 @@
  * a second subprotocol.
  */
 import {
-  PANEL_HEIGHT,
   PING,
   PING_EVERY_MS,
   PONG,
   SUBPROTOCOL,
-  changedRows,
+  WHOLE,
+  changedRect,
+  encodeRect,
   parse,
   writePatch,
   type Command,
   type FromTerminal,
   type LogLevel,
-  type Patch,
+  type Rect,
   type ToTerminal,
 } from "../../../../realtime/src/protocol";
 
@@ -31,9 +32,9 @@ export function isNews(at: number, serverTime: string | null | undefined): boole
   return Number.isNaN(built) || at > Math.floor(built / 1000) * 1000;
 }
 
-/** What goes for a new panel: all of it when `whole`, else the rows that changed since `sent`; null when none did. */
-export function screenPatch(sent: Uint8Array | null, frame: Uint8Array, whole: boolean): Patch | null {
-  return whole || !sent ? { y: 0, rows: PANEL_HEIGHT, bits: frame } : changedRows(sent, frame);
+/** What goes for a new panel: all of it when `whole`, else the rectangle that changed since `sent`; null when none did. */
+export function screenRect(sent: Uint8Array | null, frame: Uint8Array, whole: boolean): Rect | null {
+  return whole || !sent ? WHOLE : changedRect(sent, frame);
 }
 
 /** Before reconnection attempt `attempt` (from 0). */
@@ -62,6 +63,8 @@ export class RelayLink {
   private pongTimer: ReturnType<typeof setTimeout> | undefined;
   /** The screen the relay has, for the next patch; null sends it whole. */
   private sent: Uint8Array | null = null;
+  /** Deflating awaits: screens go one after the other. */
+  private sending: Promise<void> = Promise.resolve();
   private closedOnce: Promise<void> = Promise.resolve();
   private settle: () => void = () => {};
   /** A console wants the screen and the log. */
@@ -106,13 +109,19 @@ export class RelayLink {
     if (this.watching) this.send({ t: "log", level, target, msg });
   }
 
-  /** The panel as it is now, while a console watches: the rows that changed since the last one. */
+  /** The panel as it is now, while a console watches: the rectangle that changed since the
+   * last one, deflated, sent in order. */
   screen(frame: Uint8Array | null): void {
     if (!frame || !this.open || !this.watching) return;
-    const patch = screenPatch(this.sent, frame, false);
-    if (!patch) return;
-    this.socket?.send(writePatch(patch));
-    this.sent = frame.slice();
+    const rect = screenRect(this.sent, frame, false);
+    if (!rect) return;
+    const shown = frame.slice();
+    const socket = this.socket;
+    this.sent = shown;
+    this.sending = this.sending.then(async () => {
+      const patch = await encodeRect(shown, rect);
+      if (this.socket === socket && this.open) socket?.send(writePatch(patch));
+    });
   }
 
   private connect(): void {

@@ -14,41 +14,14 @@ const WATCHED_SECONDS = 30;
 
 export const FRAME_BYTES = (800 * 480) / 8;
 
+import { fromRow, withId } from "@/lib/device/console-commands";
+
 export { toRow, type ConsoleCommand } from "@/lib/device/console-commands";
 
-export function toWire(
-  row: Pick<CommandRow, "id" | "kind" | "arg">,
-): DeviceCommand | null {
-  switch (row.kind) {
-    case "KEY": {
-      const tap = /^tap:(\d{1,3}):(\d{1,3})$/.exec(row.arg ?? "");
-      if (tap && Number(tap[1]) < 200 && Number(tap[2]) < 120)
-        return {
-          id: row.id,
-          kind: "tap",
-          x: Number(tap[1]),
-          y: Number(tap[2]),
-        };
-      if (row.arg === "both") return { id: row.id, kind: "both" };
-      return row.arg === "left" || row.arg === "right"
-        ? { id: row.id, kind: "key", side: row.arg }
-        : null;
-    }
-    case "BADGE":
-      return row.arg ? { id: row.id, kind: "badge", uid: row.arg } : null;
-    case "SYNC":
-      return {
-        id: row.id,
-        kind: "sync",
-        ...(row.arg === "app:mate" || row.arg === "app:showcase"
-          ? { app: row.arg.slice(4) as "mate" | "showcase" }
-          : {}),
-      };
-    case "RESTART":
-      return { id: row.id, kind: "restart" };
-    case "FORGET_WIFI":
-      return { id: row.id, kind: "forgetWifi" };
-  }
+/** A stored row as the terminal runs it; null for one that makes no command. */
+export function toWire(row: Pick<CommandRow, "id" | "kind" | "arg">): DeviceCommand | null {
+  const command = fromRow(row);
+  return command && withId(command, row.id);
 }
 
 /**

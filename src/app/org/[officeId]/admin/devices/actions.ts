@@ -104,6 +104,7 @@ export async function assignBadge(
 
 const consoleCommand = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  z.object({ kind: z.literal("longKey"), side: z.enum(["left", "right"]) }),
   z.object({ kind: z.literal("both") }),
   z.object({ kind: z.literal("badge"), uid: z.string() }),
   z.object({ kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),

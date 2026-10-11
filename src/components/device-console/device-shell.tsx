@@ -15,7 +15,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { fitPanel, PANEL_WIDTH, PAPER_HEX } from "./frame-bits";
-import { KeyChord, type Side } from "./key-chord";
+import { KeyChord, type KeyPress, type Side } from "./key-chord";
 
 export type { Side } from "./key-chord";
 export type KeyLevel = (side: Side, high: boolean, source: string) => void;
@@ -70,20 +70,23 @@ export function useDeviceShortcuts(
 }
 
 /**
- * The touch keys for a console that sends presses rather than levels (`KeyChord`): hold one key
- * (mouse, touch or arrow key) and press the other for both. Returns the level handler for
- * `DeviceShell` and the keyboard shortcuts, and the keys held.
+ * The touch keys for a console that sends presses rather than levels (`KeyChord`): a click is a
+ * press, held 0.7 s a long press, and both keys when the second goes down while the first is
+ * held (mouse, touch or arrow key). Returns the level handler for `DeviceShell` and the keyboard
+ * shortcuts, and the keys held.
  */
-export function useKeyChord(press: (key: Side | "both") => void): { keyLevel: KeyLevel; held: readonly Side[] } {
-  const chord = useRef(new KeyChord());
+export function useKeyChord(press: (key: KeyPress) => void): { keyLevel: KeyLevel; held: readonly Side[] } {
   const latest = useRef(press);
   useEffect(() => {
     latest.current = press;
   });
+  // Made at the first key: a long press comes from its timer, through the latest `press`.
+  const chord = useRef<KeyChord | null>(null);
+  useEffect(() => () => chord.current?.dispose(), []);
   const [held, setHeld] = useState<readonly Side[]>([]);
   const keyLevel = useCallback<KeyLevel>((side, high, source) => {
-    const pressed = chord.current.level(side, high, source);
-    if (pressed) latest.current(pressed);
+    chord.current ??= new KeyChord((key) => latest.current(key));
+    chord.current.level(side, high, source);
     setHeld(chord.current.held());
   }, []);
   return { keyLevel, held };

@@ -8,6 +8,7 @@ mod memory;
 mod buzzer;
 mod cache;
 mod cores;
+mod deflate;
 mod fetch;
 mod console;
 mod display;
@@ -694,7 +695,7 @@ impl Terminal {
                 Next::Input(Input::Flow(event)) => {
                     touched = Instant::now();
                     // Keys from the console or the site beep here, the touch keys did already.
-                    self.pressed = matches!(event, Event::Key { .. } | Event::BothKeys);
+                    self.pressed = matches!(event, Event::Key { .. } | Event::LongKey { .. } | Event::BothKeys);
                     if self.pressed {
                         self.buzzer.beep(matecrew_core::flow::Beep::Key);
                     }

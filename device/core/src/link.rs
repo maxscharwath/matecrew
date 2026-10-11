@@ -125,6 +125,8 @@ impl Setup {
 #[serde(tag = "cmd", rename_all = "camelCase")]
 pub enum Control {
     Key { side: Side },
+    /// A key held, as the terminal's own long press.
+    LongKey { side: Side },
     Both,
     Badge { uid: String },
     Sync,

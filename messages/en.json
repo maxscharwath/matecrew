@@ -1344,6 +1344,8 @@
       "kind": {
         "keyLeft": "Left key",
         "keyRight": "Right key",
+        "longKeyLeft": "Left key held",
+        "longKeyRight": "Right key held",
         "badge": "Badge {uid}",
         "sync": "Sync",
         "restart": "Restart",

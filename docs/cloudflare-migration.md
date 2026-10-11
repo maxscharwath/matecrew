@@ -161,7 +161,8 @@ En local, `jurisdiction("eu")` n'existe pas dans workerd : `realtime/src/locate.
   SQL. Taille maximale des requêtes relayées à vérifier à l'étape 3 (uploads de factures). Les WebSockets ne
   passent pas par les rewrites.
 - `NEXT_PUBLIC_APP_URL` doit être défini au build du worker : sinon Next refuse les server actions arrivant par
-  `matecrew.vercel.app`.
+  `matecrew.vercel.app`. Le secret du worker ne suffit pas (lu à l'exécution) : `build:cloudflare`, que lance
+  Workers Builds, le fixe à `https://matecrew.vercel.app` par défaut.
 - La file des mails de décompte n'a pas été testée de bout en bout en local (pas d'envoi local de message) : à
   vérifier à la première clôture mensuelle.
 - `proxy.ts` (Next 16) fonctionne, mais OpenNext marque encore le middleware Node comme expérimental.

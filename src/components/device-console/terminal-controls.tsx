@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Keyboard } from "lucide-react";
-import type { CommandRow, ConsoleCommand } from "@/lib/device/console-commands";
+import { fromRow, type CommandRow, type ConsoleCommand } from "@/lib/device/console-commands";
 import { BadgeZone, DeviceShell, useDeviceShortcuts, useKeyChord, type BadgeOption, type Side } from "./device-shell";
 import type { ConsoleKind, LogEntry } from "./device-log";
 import { PANEL_WIDTH } from "./frame-bits";
@@ -22,14 +22,9 @@ const MAX_EVENTS = 400;
 /** Remote taps are 200 × 120; the log shows them in panel pixels. */
 const TAP_SCALE = PANEL_WIDTH / 200;
 
-/** A key, or both together, as a command. */
-function keyCommand(key: Side | "both"): ConsoleCommand {
-  return key === "both" ? { kind: "both" } : { kind: "key", side: key };
-}
-
 /** Keys, badges and taps are input; the rest acts on the terminal itself. */
 export function commandKind(command: ConsoleCommand): ConsoleKind {
-  return ["key", "both", "badge", "tap"].includes(command.kind) ? "input" : "system";
+  return ["key", "longKey", "both", "badge", "tap"].includes(command.kind) ? "input" : "system";
 }
 
 /** What a command is called in the log, as sent and as the site stores it. */
@@ -40,6 +35,8 @@ export function useCommandLabels() {
       switch (command.kind) {
         case "key":
           return command.side === "right" ? t("kind.keyRight") : t("kind.keyLeft");
+        case "longKey":
+          return command.side === "right" ? t("kind.longKeyRight") : t("kind.longKeyLeft");
         case "both":
           return t("kind.both");
         case "badge":
@@ -59,23 +56,8 @@ export function useCommandLabels() {
   );
   const describeRow = useCallback(
     (row: CommandRow): string => {
-      switch (row.kind) {
-        case "KEY": {
-          const tap = /^tap:(\d+):(\d+)$/.exec(row.arg ?? "");
-          if (tap) return describe({ kind: "tap", x: Number(tap[1]), y: Number(tap[2]) });
-          if (row.arg === "both") return describe({ kind: "both" });
-          return describe({ kind: "key", side: row.arg === "right" ? "right" : "left" });
-        }
-        case "BADGE":
-          return describe({ kind: "badge", uid: row.arg ?? "" });
-        case "SYNC":
-          if (row.arg === "app:mate" || row.arg === "app:showcase") return describe({ kind: "sync", app: row.arg.slice(4) as "mate" | "showcase" });
-          return describe({ kind: "sync" });
-        case "RESTART":
-          return describe({ kind: "restart" });
-        case "FORGET_WIFI":
-          return describe({ kind: "forgetWifi" });
-      }
+      const command = fromRow(row);
+      return command ? describe(command) : row.kind;
     },
     [describe],
   );
@@ -113,8 +95,8 @@ export function useTerminalControls(send: (command: ConsoleCommand) => void, pau
   const flash = useRef<ReturnType<typeof setTimeout>>(undefined);
   const press = useCallback(
     (command: ConsoleCommand) => {
-      if (command.kind === "key" || command.kind === "badge") {
-        setPressed(command.kind === "key" ? command.side : "badge");
+      if (command.kind === "key" || command.kind === "longKey" || command.kind === "badge") {
+        setPressed(command.kind === "badge" ? "badge" : command.side);
         clearTimeout(flash.current);
         flash.current = setTimeout(() => setPressed(null), FLASH_MS);
       }
@@ -122,7 +104,7 @@ export function useTerminalControls(send: (command: ConsoleCommand) => void, pau
     },
     [send],
   );
-  const chord = useKeyChord((key) => press(keyCommand(key)));
+  const chord = useKeyChord(press);
   const shortcuts = useMemo(
     () => ({
       key: (side: Side) => press({ kind: "key", side }),

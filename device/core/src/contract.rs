@@ -288,6 +288,8 @@ pub struct StatusReport<'a> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Command {
     Key { id: String, side: Side },
+    /// A key held (`hardware::LONG_MS`): what the terminal does when its own key is held.
+    LongKey { id: String, side: Side },
     /// Both keys together: the about page.
     Both { id: String },
     /// Already normalized by the site.

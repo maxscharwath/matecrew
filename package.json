@@ -16,7 +16,7 @@
     "postinstall": "prisma generate",
     "preview": "PLATFORM=cloudflare opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "PLATFORM=cloudflare opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "build:cloudflare": "bunx bun@1.4.2 install --frozen-lockfile && PLATFORM=cloudflare opennextjs-cloudflare build",
+    "build:cloudflare": "bunx bun@1.4.2 install --frozen-lockfile && PLATFORM=cloudflare NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://matecrew.vercel.app} opennextjs-cloudflare build",
     "cf-typegen": "wrangler types cloudflare-env.d.ts --env-interface CloudflareEnv --env-file=.dev.vars.example",
     "dui": "bun device/sdk/cli/index.ts",
     "device:preview": "bun dui build && cargo run --manifest-path device/sim/Cargo.toml"

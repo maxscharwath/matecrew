@@ -2,10 +2,10 @@
  * A terminal's live channel, through its relay (one Durable Object per terminal, `./terminal.ts`).
  * The terminal keeps one WebSocket open; the site's consoles open theirs; nothing polls.
  *
- *   terminal → relay   hello, status, ack, log, beep  + binary screen patch (`TerminalPatch`)
+ *   terminal → relay   hello, status, ack, log, beep  + binary screen patch (`writePatch`)
  *   relay → terminal   command, live, sync
  *   console → relay    command, watch
- *   relay → console    online, status, log, beep, commands, command  + binary screen patch (`ConsolePatch`)
+ *   relay → console    online, status, log, beep, commands, command  + binary screen patch, with `drawnAt`
  *   site → relay       RPC on the Durable Object (`Terminal` in ./terminal.ts)
  *
  * Text frames are JSON with a `t` tag. Every socket asks for the `SUBPROTOCOL`; browsers cannot set
@@ -158,62 +158,130 @@ export function isInput(command: Command): boolean {
 }
 
 /**
- * Rows `y` to `y + rows` of the panel. The terminal sends only the rows that changed since the
- * screen it sent before (a clock, a counter: a few KB instead of 48), and the whole panel after
- * connecting or when a console starts watching.
+ * The screen goes as the rectangle that changed since the last one the other end has, deflated:
+ * measured on the panel's 79 previews, a whole screen is about 3.5 KB (48 000 raw), a new page
+ * about 3 KB, a counter a few hundred bytes (`device/core/src/live.rs` writes the same on the
+ * ESP32, with its ROM's deflate). Raw deflate (no zlib header): browsers and Workers inflate it
+ * natively (`DecompressionStream("deflate-raw")`).
  */
-export type Patch = { y: number; rows: number; bits: Uint8Array };
+export type Rect = { x: number; y: number; w: number; h: number };
 
-/** Terminal → relay: `[y u16 LE][rows u16 LE][rows × ROW_BYTES]`. */
-export const TERMINAL_HEADER = 4;
-/** Relay → console: `[y u16 LE][rows u16 LE][drawnAt f64 LE, ms since 1970][rows × ROW_BYTES]`. */
-export const CONSOLE_HEADER = 12;
+/** The rectangle's bytes as they are. */
+export const RAW = 0;
+/** The rectangle's bytes deflated. */
+export const DEFLATE = 1;
+export type Format = typeof RAW | typeof DEFLATE;
+
+/** A rectangle of the panel: `x` and `w` in bytes (8 pixels each), `y` and `h` in rows. */
+export type Patch = { rect: Rect; format: Format; data: Uint8Array };
+
+/** Terminal → relay: `[format u8][x u8][w u8][y u16 LE][h u16 LE]`, then the data. */
+export const TERMINAL_HEADER = 7;
+/** Relay → console: the same, then `drawnAt` (f64 LE, ms since 1970), then the data. */
+export const CONSOLE_HEADER = 15;
+
+export const WHOLE: Rect = { x: 0, y: 0, w: ROW_BYTES, h: PANEL_HEIGHT };
 
 /** The patch in a binary frame with a `header`-byte header, or null when it does not fit the panel. */
 export function readPatch(data: ArrayBuffer | Uint8Array, header: number): (Patch & { drawnAt: number | null }) | null {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (bytes.byteLength < header) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const y = view.getUint16(0, true);
-  const rows = view.getUint16(2, true);
-  if (rows === 0 || y + rows > PANEL_HEIGHT || bytes.byteLength !== header + rows * ROW_BYTES) return null;
-  const drawnAt = header >= CONSOLE_HEADER ? view.getFloat64(4, true) : null;
-  return { y, rows, bits: bytes.subarray(header), drawnAt };
+  const format = bytes[0];
+  const rect = { x: bytes[1], w: bytes[2], y: view.getUint16(3, true), h: view.getUint16(5, true) };
+  const fits = rect.w > 0 && rect.h > 0 && rect.x + rect.w <= ROW_BYTES && rect.y + rect.h <= PANEL_HEIGHT;
+  const data_ = bytes.subarray(header);
+  const sized = format === DEFLATE || data_.byteLength === rect.w * rect.h;
+  if ((format !== RAW && format !== DEFLATE) || !fits || !sized) return null;
+  const drawnAt = header >= CONSOLE_HEADER ? view.getFloat64(7, true) : null;
+  return { rect, format, data: data_, drawnAt };
 }
 
 /** The binary frame of `patch`: for the relay with no `drawnAt`, for a console with one. */
 export function writePatch(patch: Patch, drawnAt?: number): Uint8Array<ArrayBuffer> {
   const header = drawnAt === undefined ? TERMINAL_HEADER : CONSOLE_HEADER;
-  const out = new Uint8Array(header + patch.rows * ROW_BYTES);
+  const out = new Uint8Array(header + patch.data.byteLength);
   const view = new DataView(out.buffer);
-  view.setUint16(0, patch.y, true);
-  view.setUint16(2, patch.rows, true);
-  if (drawnAt !== undefined) view.setFloat64(4, drawnAt, true);
-  out.set(patch.bits.subarray(0, patch.rows * ROW_BYTES), header);
+  out.set([patch.format, patch.rect.x, patch.rect.w]);
+  view.setUint16(3, patch.rect.y, true);
+  view.setUint16(5, patch.rect.h, true);
+  if (drawnAt !== undefined) view.setFloat64(7, drawnAt, true);
+  out.set(patch.data, header);
   return out;
 }
 
-/** Writes `patch` into a whole frame. */
-export function applyPatch(frame: Uint8Array, patch: Patch): void {
-  frame.set(patch.bits.subarray(0, patch.rows * ROW_BYTES), patch.y * ROW_BYTES);
+/** The smallest rectangle holding every byte that differs; the whole panel without `before`, null when none does. */
+export function changedRect(before: Uint8Array | null, after: Uint8Array): Rect | null {
+  if (before?.length !== FRAME_BYTES || after.length !== FRAME_BYTES) return WHOLE;
+  let x0 = ROW_BYTES, x1 = -1, y0 = PANEL_HEIGHT, y1 = -1;
+  for (let y = 0; y < PANEL_HEIGHT; y++) {
+    const row = y * ROW_BYTES;
+    let first = -1, last = -1;
+    for (let x = 0; x < ROW_BYTES; x++) {
+      if (before[row + x] === after[row + x]) continue;
+      if (first < 0) first = x;
+      last = x;
+    }
+    if (first < 0) continue;
+    x0 = Math.min(x0, first);
+    x1 = Math.max(x1, last);
+    y0 = Math.min(y0, y);
+    y1 = y;
+  }
+  return y1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
-/** The rows that differ between two frames, as one patch of `after`; null when they are the same. */
-export function changedRows(before: Uint8Array | null, after: Uint8Array): Patch | null {
-  if (!before || before.length !== after.length) return { y: 0, rows: PANEL_HEIGHT, bits: after };
-  let first = -1;
-  let last = -1;
-  for (let row = 0; row < PANEL_HEIGHT; row++) {
-    const start = row * ROW_BYTES;
-    for (let i = start; i < start + ROW_BYTES; i++) {
-      if (before[i] !== after[i]) {
-        if (first < 0) first = row;
-        last = row;
-        break;
-      }
-    }
+/** The bytes of `frame` inside `rect`, row after row. */
+export function rectBytes(frame: Uint8Array, rect: Rect): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(rect.w * rect.h);
+  for (let r = 0; r < rect.h; r++) {
+    const from = (rect.y + r) * ROW_BYTES + rect.x;
+    out.set(frame.subarray(from, from + rect.w), r * rect.w);
   }
-  if (first < 0) return null;
-  const rows = last - first + 1;
-  return { y: first, rows, bits: after.subarray(first * ROW_BYTES, (last + 1) * ROW_BYTES) };
+  return out;
+}
+
+/** Writes a rectangle's bytes into a whole frame. */
+export function applyRect(frame: Uint8Array, rect: Rect, bytes: Uint8Array): void {
+  for (let r = 0; r < rect.h; r++) frame.set(bytes.subarray(r * rect.w, (r + 1) * rect.w), (rect.y + r) * ROW_BYTES + rect.x);
+}
+
+async function pipe(bytes: Uint8Array, stream: CompressionStream | DecompressionStream, limit: number): Promise<Uint8Array | null> {
+  const reader = new Blob([bytes as Uint8Array<ArrayBuffer>]).stream().pipeThrough(stream).getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    // A deflated rectangle never inflates past the panel: anything more is not one.
+    if (length > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
+/** `rect` of `frame` as a patch: deflated, unless that is not smaller. */
+export async function encodeRect(frame: Uint8Array, rect: Rect): Promise<Patch> {
+  const raw = rectBytes(frame, rect);
+  const deflated = await pipe(raw, new CompressionStream("deflate-raw"), Number.POSITIVE_INFINITY);
+  return deflated && deflated.byteLength < raw.byteLength
+    ? { rect, format: DEFLATE, data: deflated }
+    : { rect, format: RAW, data: raw };
+}
+
+/** The rectangle's bytes, inflated when they were deflated; null when they do not make the rectangle. */
+export async function decodeRect(patch: Patch): Promise<Uint8Array | null> {
+  const size = patch.rect.w * patch.rect.h;
+  const bytes = patch.format === DEFLATE ? await pipe(patch.data, new DecompressionStream("deflate-raw"), size).catch(() => null) : patch.data;
+  return bytes?.byteLength === size ? bytes : null;
 }

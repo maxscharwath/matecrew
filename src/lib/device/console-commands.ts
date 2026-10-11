@@ -7,6 +7,8 @@ import type { DeviceCommand } from "@/lib/device/contract";
  */
 export type ConsoleCommand =
   | { kind: "key"; side: "left" | "right" }
+  /** A key held (0.7 s on the terminal): its long press. Stored as a KEY row, arg "long:left". */
+  | { kind: "longKey"; side: "left" | "right" }
   /** Both keys together: the terminal's about page. Stored as a KEY row, arg "both". */
   | { kind: "both" }
   | { kind: "badge"; uid: string }
@@ -23,6 +25,7 @@ export type CommandRow = {
 
 const KIND_TO_ROW = {
   key: "KEY",
+  longKey: "KEY",
   both: "KEY",
   badge: "BADGE",
   sync: "SYNC",
@@ -36,6 +39,8 @@ function argOf(command: ConsoleCommand): string | null {
   switch (command.kind) {
     case "key":
       return command.side;
+    case "longKey":
+      return `long:${command.side}`;
     case "both":
       return "both";
     case "badge":
@@ -51,6 +56,37 @@ function argOf(command: ConsoleCommand): string | null {
 
 export function toRow(command: ConsoleCommand): CommandRow {
   return { kind: KIND_TO_ROW[command.kind], arg: argOf(command) };
+}
+
+const TAP = /^tap:(\d{1,3}):(\d{1,3})$/;
+
+/** A KEY row's command: a key, a held key, both keys or a tap. */
+function keyOf(arg: string | null): ConsoleCommand | null {
+  const tap = TAP.exec(arg ?? "");
+  if (tap) {
+    const [x, y] = [Number(tap[1]), Number(tap[2])];
+    return x < 200 && y < 120 ? { kind: "tap", x, y } : null;
+  }
+  if (arg === "both") return { kind: "both" };
+  if (arg === "left" || arg === "right") return { kind: "key", side: arg };
+  if (arg === "long:left" || arg === "long:right") return { kind: "longKey", side: arg === "long:left" ? "left" : "right" };
+  return null;
+}
+
+/** A stored row as the command it was (`toRow` the other way); null for one that makes none. */
+export function fromRow(row: CommandRow): ConsoleCommand | null {
+  switch (row.kind) {
+    case "KEY":
+      return keyOf(row.arg);
+    case "BADGE":
+      return row.arg ? { kind: "badge", uid: row.arg } : null;
+    case "SYNC":
+      return row.arg === "app:mate" || row.arg === "app:showcase" ? { kind: "sync", app: row.arg === "app:mate" ? "mate" : "showcase" } : { kind: "sync" };
+    case "RESTART":
+      return { kind: "restart" };
+    case "FORGET_WIFI":
+      return { kind: "forgetWifi" };
+  }
 }
 
 /** The command as the terminal runs it, with its id. */
@@ -71,6 +107,8 @@ export function toRemote(command: ConsoleCommand): RemoteCommand | null {
   switch (command.kind) {
     case "key":
       return { cmd: "key", side: command.side };
+    case "longKey":
+      return { cmd: "longKey", side: command.side };
     case "both":
       return { cmd: "both" };
     case "badge":

@@ -238,6 +238,8 @@ export const statusRequest = z.object({
  */
 export const deviceCommand = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  /** A key held: the terminal's long press. */
+  z.object({ id: z.string(), kind: z.literal("longKey"), side: z.enum(["left", "right"]) }),
   /** Both keys together: the about page. */
   z.object({ id: z.string(), kind: z.literal("both") }),
   z.object({ id: z.string(), kind: z.literal("badge"), uid: z.string() }),

@@ -1,7 +1,7 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { RelayLink, isNews, retryDelay, screenPatch } from "../../src/lib/device/virtual/relay";
-import { FRAME_BYTES, PANEL_HEIGHT, ROW_BYTES, TERMINAL_HEADER, readPatch } from "../../realtime/src/protocol";
+import { RelayLink, isNews, retryDelay, screenRect } from "../../src/lib/device/virtual/relay";
+import { DEFLATE, FRAME_BYTES, ROW_BYTES, TERMINAL_HEADER, WHOLE, decodeRect, readPatch } from "../../realtime/src/protocol";
 
 /** A WebSocket that records what is sent and lets the test play the relay. */
 class FakeSocket {
@@ -67,14 +67,14 @@ test("a change is news only after the state the terminal has, to the second", ()
   assert.equal(isNews(Date.parse("2026-10-11T09:59:59Z"), "2026-10-11T10:00:00Z"), false);
 });
 
-test("the whole screen first, then only the rows that changed", () => {
+test("the whole screen first, then only the rectangle that changed", () => {
   const frame = new Uint8Array(FRAME_BYTES);
-  assert.equal(screenPatch(null, frame, false)?.rows, PANEL_HEIGHT);
-  assert.equal(screenPatch(frame, frame, true)?.rows, PANEL_HEIGHT);
-  assert.equal(screenPatch(frame, frame.slice(), false), null);
+  assert.deepEqual(screenRect(null, frame, false), WHOLE);
+  assert.deepEqual(screenRect(frame, frame, true), WHOLE);
+  assert.equal(screenRect(frame, frame.slice(), false), null);
   const next = frame.slice();
-  next[7 * ROW_BYTES] = 1;
-  assert.deepEqual(screenPatch(frame, next, false)?.y, 7);
+  next[7 * ROW_BYTES + 9] = 1;
+  assert.deepEqual(screenRect(frame, next, false), { x: 9, y: 7, w: 1, h: 1 });
 });
 
 test("reconnections back off from half a second to ten", () => {
@@ -94,7 +94,7 @@ test("the token goes as a subprotocol, commands and changes come through", () =>
   relay.stop();
 });
 
-test("the screen goes only while a console watches: whole, then patches", () => {
+test("the screen goes only while a console watches: whole, then patches, deflated", async () => {
   const { relay, socket } = link();
   socket.accept();
   const frame = new Uint8Array(FRAME_BYTES);
@@ -102,14 +102,19 @@ test("the screen goes only while a console watches: whole, then patches", () => 
   assert.equal(socket.sent.length, 0, "nobody watching");
   socket.say({ t: "live", watching: true });
   relay.screen(frame);
-  const whole = readPatch(socket.sent[0] as Uint8Array, TERMINAL_HEADER);
-  assert.equal(whole?.rows, PANEL_HEIGHT);
   const next = frame.slice();
   next[300 * ROW_BYTES + 1] = 0xff;
   relay.screen(next);
-  const patch = readPatch(socket.sent[1] as Uint8Array, TERMINAL_HEADER);
-  assert.deepEqual([patch?.y, patch?.rows], [300, 1]);
   relay.screen(next);
+  // Deflating awaits; the screens still go in order.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const whole = readPatch(socket.sent[0] as Uint8Array, TERMINAL_HEADER);
+  assert.deepEqual(whole?.rect, WHOLE);
+  assert.equal(whole?.format, DEFLATE);
+  assert.ok((socket.sent[0] as Uint8Array).byteLength < 200, "a blank screen deflates to almost nothing");
+  const patch = readPatch(socket.sent[1] as Uint8Array, TERMINAL_HEADER);
+  assert.deepEqual(patch?.rect, { x: 1, y: 300, w: 1, h: 1 });
+  assert.deepEqual(patch && [...((await decodeRect(patch)) ?? [])], [0xff]);
   assert.equal(socket.sent.length, 2, "nothing changed, nothing sent");
   relay.log("I", "matecrew_web::flow", "test");
   assert.equal(socket.sent[2], '{"t":"log","level":"I","target":"matecrew_web::flow","msg":"test"}');

@@ -4,15 +4,17 @@ import {
   FRAME_BYTES,
   HISTORY,
   INPUT_TTL_MS,
-  PANEL_HEIGHT,
   PING,
   PING_EVERY_MS,
   PING_GRACE_MS,
   PONG,
   SUBPROTOCOL,
   TERMINAL_HEADER,
-  applyPatch,
+  WHOLE,
+  applyRect,
   command as parseCommand,
+  decodeRect,
+  encodeRect,
   isInput,
   parse,
   readPatch,
@@ -74,6 +76,14 @@ function randomTicket(): string {
 export class Terminal extends DurableObject<RelayEnv> {
   /** The last screen, read from storage on first use (the object may have slept since). */
   private frame: Uint8Array | null | undefined;
+  /** Screen work, one after the other: inflating a patch or deflating the screen awaits, and
+   * the next patch must not apply before the one before it. */
+  private screenWork: Promise<void> = Promise.resolve();
+
+  private serially(task: () => Promise<void>): Promise<void> {
+    this.screenWork = this.screenWork.then(task, task);
+    return this.screenWork;
+  }
 
   constructor(ctx: DurableObjectState, env: RelayEnv) {
     super(ctx, env);
@@ -251,18 +261,22 @@ export class Terminal extends DurableObject<RelayEnv> {
     }
   }
 
-  /** The rows of its screen that changed: to the consoles watching it, then kept. */
-  private async screenPatch(message: ArrayBuffer) {
+  /** The rectangle of its screen that changed: to the consoles watching it as it came (they
+   * inflate it), then into the screen kept here. */
+  private screenPatch(message: ArrayBuffer) {
     const patch = readPatch(message, TERMINAL_HEADER);
     if (!patch) return;
-    const drawnAt = Date.now();
-    // Consoles first: storing waits for nothing they need.
-    const out = writePatch(patch, drawnAt);
-    for (const socket of this.screenConsoles()) this.trySend(socket, out);
-    const frame = (await this.loadFrame()) ?? new Uint8Array(FRAME_BYTES);
-    applyPatch(frame, patch);
-    this.frame = frame;
-    await this.ctx.storage.put({ frame, drawnAt }, { allowUnconfirmed: true });
+    return this.serially(async () => {
+      const drawnAt = Date.now();
+      const out = writePatch(patch, drawnAt);
+      for (const socket of this.screenConsoles()) this.trySend(socket, out);
+      const bytes = await decodeRect(patch);
+      if (!bytes) return;
+      const frame = (await this.loadFrame()) ?? new Uint8Array(FRAME_BYTES);
+      applyRect(frame, patch.rect, bytes);
+      this.frame = frame;
+      await this.ctx.storage.put({ frame, drawnAt }, { allowUnconfirmed: true });
+    });
   }
 
   /** What the terminal says about itself: whole on connecting (`hello`), what changed after. */
@@ -306,9 +320,12 @@ export class Terminal extends DurableObject<RelayEnv> {
     }
   }
 
-  private async sendScreen(socket: WebSocket) {
-    const shown = await this.screen();
-    if (shown) this.trySend(socket, writePatch({ y: 0, rows: PANEL_HEIGHT, bits: shown.bits }, shown.drawnAt));
+  /** The whole screen, deflated (about 3.5 KB), before any patch that follows it. */
+  private sendScreen(socket: WebSocket) {
+    return this.serially(async () => {
+      const shown = await this.screen();
+      if (shown) this.trySend(socket, writePatch(await encodeRect(shown.bits, WHOLE), shown.drawnAt));
+    });
   }
 
   private screenConsoles(except?: WebSocket): WebSocket[] {
