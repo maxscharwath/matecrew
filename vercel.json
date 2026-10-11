@@ -6,8 +6,8 @@
   "outputDirectory": "deploy/vercel-proxy",
   "rewrites": [
     {
-      "source": "/:path*",
-      "destination": "https://matecrew.owt.workers.dev/:path*"
+      "source": "/(.*)",
+      "destination": "https://matecrew.owt.workers.dev/$1"
     }
   ]
 }
