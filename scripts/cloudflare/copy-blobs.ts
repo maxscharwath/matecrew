@@ -3,7 +3,7 @@
  * move to Cloudflare. Run by the user, with production credentials they
  * provide in the environment; it only reads from Vercel Blob.
  *
- *   bun scripts/cloudflare/copy-blobs.ts [--dry-run] [--to-dir <dir>]
+ *   bun scripts/cloudflare/copy-blobs.ts [--dry-run] [--to-dir <dir>] [--via-wrangler]
  *
  * Environment:
  *   BLOB_READ_WRITE_TOKEN   the Vercel Blob store's token (list + get)
@@ -19,17 +19,27 @@
  * --dry-run reports what would be copied and writes nothing.
  * --to-dir writes into a local directory instead of R2 (no R2 variables
  * needed), e.g. .data/storage for the Node platform's local storage.
+ * --via-wrangler uploads with `wrangler r2 object put` and the wrangler login instead of an R2 API
+ * token (no R2 variables needed). Wrangler cannot look an object up, so every blob is uploaded
+ * again on a re-run.
  *
  * Vercel counts one advanced operation per 1,000 listed blobs and one simple
  * operation per blob read; a re-run reads only the blobs not copied yet.
  */
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import { parseArgs, promisify } from "node:util";
 import { HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { get, list, type ListBlobResultBlob } from "@vercel/blob";
 
 const CONCURRENCY = 8;
+/** Each wrangler upload is a process of its own: fewer at once. */
+const WRANGLER_CONCURRENCY = 4;
+/** The OWT account (wrangler.jsonc): wrangler cannot pick among several logins on its own. */
+const OWT_ACCOUNT = "fb4a07dcf42e0226490dbaea4aa55bba";
+const run = promisify(execFile);
 const LIST_PAGE = 1000;
 
 interface Destination {
@@ -69,6 +79,29 @@ function r2Destination(): Destination {
     },
     async put(key, body, contentType) {
       await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+    },
+  };
+}
+
+function wranglerDestination(scratch: string): Destination {
+  const bucket = process.env.R2_BUCKET_NAME ?? "matecrew-files";
+  const env = { ...process.env, CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID ?? OWT_ACCOUNT };
+  let next = 0;
+  return {
+    label: `R2 bucket ${bucket} (wrangler, EU)`,
+    async sizeOf() {
+      return null;
+    },
+    async put(key, body, contentType) {
+      next += 1;
+      const file = join(scratch, String(next));
+      await writeFile(file, body);
+      try {
+        const args = ["wrangler", "r2", "object", "put", `${bucket}/${key}`, "--file", file];
+        await run("bunx", [...args, "--content-type", contentType, "--jurisdiction", "eu", "--remote"], { env });
+      } finally {
+        await rm(file, { force: true });
+      }
     },
   };
 }
@@ -121,11 +154,19 @@ const { values } = parseArgs({
   options: {
     "dry-run": { type: "boolean", default: false },
     "to-dir": { type: "string" },
+    "via-wrangler": { type: "boolean", default: false },
   },
 });
 const dryRun = values["dry-run"];
+const viaWrangler = values["via-wrangler"];
 required("BLOB_READ_WRITE_TOKEN");
-const destination = values["to-dir"] ? directoryDestination(values["to-dir"]) : r2Destination();
+const scratch = viaWrangler ? await mkdtemp(join(tmpdir(), "matecrew-blobs-")) : "";
+
+function chooseDestination(): Destination {
+  if (values["to-dir"]) return directoryDestination(values["to-dir"]);
+  return viaWrangler ? wranglerDestination(scratch) : r2Destination();
+}
+const destination = chooseDestination();
 
 const blobs = await listAll();
 console.log(`${blobs.length} blobs in Vercel Blob, destination ${destination.label}${dryRun ? " (dry run)" : ""}.`);
@@ -149,7 +190,8 @@ async function drain(): Promise<void> {
   return drain();
 }
 
-await Promise.all(Array.from({ length: CONCURRENCY }, () => drain()));
+await Promise.all(Array.from({ length: viaWrangler ? WRANGLER_CONCURRENCY : CONCURRENCY }, () => drain()));
+if (scratch) await rm(scratch, { recursive: true, force: true });
 
 const done = dryRun ? `${counts.planned} to copy` : `${counts.copied} copied`;
 console.log(`${done}, ${counts.skipped} already there, ${failures.length} failed.`);

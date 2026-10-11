@@ -188,11 +188,10 @@ function figure(values: readonly unknown[], keys: boolean): string {
 }
 
 function queryTarget(where: Target, checks: readonly Check[]): unknown[][] {
+  // As one --command: on a remote database --file goes through D1's import, which runs the
+  // statements but gives back no result sets.
   const sql = checks.map((check) => `${check.target};`).join("\n");
-  const file = path.join(DEFAULT_OUT, "verify.sql");
-  mkdirSync(DEFAULT_OUT, { recursive: true });
-  writeFileSync(file, sql);
-  const output = wrangler(["d1", "execute", DATABASE, ...targetArgs(where), "--json", "--file", file]);
+  const output = wrangler(["d1", "execute", DATABASE, ...targetArgs(where), "--json", "--command", sql]);
   // Wrangler may print notices first; the JSON array starts on a line of its own.
   const results = JSON.parse(output.slice(output.search(/^\[/m))) as { results: { v: unknown }[] }[];
   return results.map((result) => result.results.map((row) => row.v));
