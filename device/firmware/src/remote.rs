@@ -238,7 +238,8 @@ fn watched(watching: bool) {
 pub fn start(api: Api, live: Live, inputs: Sender<Input>) -> Result<()> {
     uplink(api.clone(), live.clone())?;
     let downlink = Downlink { api, live, inputs };
-    thread::Builder::new().stack_size(10 * 1024).spawn(move || downlink.run())?;
+    // Sockets and HTTP only: their stacks fit in PSRAM.
+    crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(10 * 1024).spawn(move || downlink.run()))?;
     Ok(())
 }
 
@@ -443,7 +444,7 @@ const STATUS_EVERY: Duration = Duration::from_secs(30);
 fn uplink(api: Api, relay: Live) -> Result<()> {
     let (up, received) = mpsc::channel::<Up>();
     let _ = UPLINK.set((relay.clone(), Mutex::new(up)));
-    thread::Builder::new().stack_size(10 * 1024).spawn(move || {
+    crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(10 * 1024).spawn(move || {
         // Its state in PSRAM, made when a console first watches over the relay.
         let mut deflater: Option<Deflater> = None;
         let mut sent = true;
@@ -487,6 +488,6 @@ fn uplink(api: Api, relay: Live) -> Result<()> {
                 }
             }
         }
-    })?;
+    }))?;
     Ok(())
 }

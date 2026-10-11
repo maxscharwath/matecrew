@@ -40,7 +40,8 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>,
     // Pulled down so a key that is not wired yet reads as released.
     let left = PinDriver::input(left, Pull::Down)?;
     let right = PinDriver::input(right, Pull::Down)?;
-    thread::Builder::new().stack_size(3072).spawn(move || {
+    // Pins and the piezo, never the flash: its stack fits in PSRAM.
+    crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(3072).spawn(move || {
         let mut keys = TouchKeys::default();
         let started = Instant::now();
         let (mut last, mut level) = ([false; 2], [false; 2]);
@@ -86,6 +87,6 @@ pub fn watch(left: Gpio5<'static>, right: Gpio8<'static>, inputs: Sender<Input>,
             }
             thread::sleep(Duration::from_millis(KEY_POLL_MS));
         }
-    })?;
+    }))?;
     Ok(())
 }

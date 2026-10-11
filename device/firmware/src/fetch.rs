@@ -101,7 +101,8 @@ pub struct Fetcher {
 impl Fetcher {
     pub fn start(api: Api, inputs: Sender<Input>) -> Result<Self> {
         let (jobs, queue) = mpsc::channel::<Job>();
-        thread::Builder::new().stack_size(12 * 1024).spawn(move || {
+        // HTTP only, never the flash: its stack fits in PSRAM.
+        crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(12 * 1024).spawn(move || {
             for job in queue {
                 let fetched = match job {
                     Job::Data { id, path } => {
@@ -124,7 +125,7 @@ impl Fetcher {
                     return;
                 }
             }
-        })?;
+        }))?;
         Ok(Self { jobs, pending: HashMap::new() })
     }
 

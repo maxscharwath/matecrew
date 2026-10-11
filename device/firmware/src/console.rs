@@ -27,7 +27,8 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
     esp!(unsafe { usb_serial_jtag_driver_install(&mut config) })?;
     unsafe { esp_vfs_usb_serial_jtag_use_driver() };
 
-    thread::Builder::new().stack_size(4096).spawn(move || {
+    // It reads the USB port and hands commands on, never the flash: its stack fits in PSRAM.
+    crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(4096).spawn(move || {
         log::info!("console: {}", console::HELP);
         let mut line = Vec::new();
         for byte in io::stdin().lock().bytes() {
@@ -62,6 +63,6 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
                 return;
             }
         }
-    })?;
+    }))?;
     Ok(())
 }

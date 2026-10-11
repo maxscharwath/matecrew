@@ -54,13 +54,14 @@ impl Buzzer {
         let (beeps, queue) = mpsc::channel::<Beep>();
         let quiet_since = Arc::new(Mutex::new(Some(Instant::now())));
         let quiet = quiet_since.clone();
-        thread::Builder::new().stack_size(3072).spawn(move || {
+        // The piezo's timer, never the flash: its stack fits in PSRAM.
+        crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(3072).spawn(move || {
             for beep in queue {
                 *quiet.lock().unwrap() = None;
                 play(&mut channel, beep);
                 *quiet.lock().unwrap() = Some(Instant::now());
             }
-        })?;
+        }))?;
         Ok(Self { beeps, quiet_since, sounds: Arc::new(RwLock::new(Sounds::ALL)) })
     }
 

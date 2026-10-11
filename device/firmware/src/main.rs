@@ -269,7 +269,9 @@ fn app() -> Result<()> {
         sys_loop,
     )?;
     // Bluetooth LE: setup, control and updates from a browser nearby.
+    let before = free_internal_heap();
     let ble = start_ble(&wifi, Store::new(nvs)?, sender.clone());
+    log::info!("memory: Bluetooth takes {} KB of internal RAM", before.saturating_sub(free_internal_heap()) / 1024);
     let bluetooth = ble.as_ref().map(ble::Ble::label).unwrap_or_default();
     let site = store
         .site()?
