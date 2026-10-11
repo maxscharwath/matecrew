@@ -31,45 +31,70 @@ export const BadgeOverReader = createArt(
   [0, 0, 120, 100],
 );
 
-const z = (x: number, y: number, s: number): string => `M${x} ${y}h${s}l${-s} ${s}h${s}`;
+/**
+ * The lit part of a disc (`cx`, `cy`, `r`) that a second disc (`bx`, `by`, `br`) bites into: a
+ * crescent, as a polygon fine enough to rasterize smoothly. The bite must cross the disc's edge.
+ */
+function crescent(cx: number, cy: number, r: number, bx: number, by: number, br: number): string {
+  const d = Math.hypot(bx - cx, by - cy);
+  const toBite = Math.atan2(by - cy, bx - cx);
+  const toMoon = Math.atan2(cy - by, cx - bx);
+  // Half-angles of the two intersection points, seen from each centre.
+  const alpha = Math.acos((d * d + r * r - br * br) / (2 * d * r));
+  const beta = Math.acos((d * d + br * br - r * r) / (2 * d * br));
+  const steps = 96;
+  const points: [number, number][] = [];
+  // The moon's edge the long way round, away from the bite...
+  for (let i = 0; i <= steps; i++) {
+    const a = toBite + alpha + ((2 * Math.PI - 2 * alpha) * i) / steps;
+    points.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  // ... then back along the bite's edge, inside the moon, from where that ended.
+  for (let i = 0; i <= steps; i++) {
+    const a = toMoon + beta - (2 * beta * i) / steps;
+    points.push([bx + br * Math.cos(a), by + br * Math.sin(a)]);
+  }
+  const corners = points.map(([x, y]) => x.toFixed(2) + " " + y.toFixed(2));
+  return `M${corners.join("L")}Z`;
+}
+
+/** A four-pointed sparkle at (x, y), `s` from its centre to each point, its sides curving in. */
+const sparkle = (x: number, y: number, s: number): string => {
+  const k = s * 0.14;
+  return `M${x} ${y - s}Q${x + k} ${y - k} ${x + s} ${y}Q${x + k} ${y + k} ${x} ${y + s}Q${x - k} ${y + k} ${x - s} ${y}Q${x - k} ${y - k} ${x} ${y - s}Z`;
+};
+
+const MOON = { x: 180, y: 150, r: 80 };
 
 /**
- * Someone asleep in bed, a nightcap on, snoring Zs: the terminal outside the office's hours. Few
- * layers and one half tone, for a light screen. 200 × 125.
+ * The night sky outside the office's hours: a crescent moon, its dark side faintly lit, in a
+ * dithered glow that fades out in two steps, a paper gap setting it apart, and a few sparkles.
+ * Fills only, no hairlines: a partial refresh renders it cleanly. 360 × 300.
  */
-export const Sleeper = createArt(
+export const NightSky = createArt(
   [
-    // The floor, the bed's ends and the mattress.
-    { nodes: [["path", { d: "M4 112H196" }]], stroke: 2 },
-    { nodes: [["rect", { x: 12, y: 44, width: 12, height: 68, rx: 5 }], ["rect", { x: 184, y: 62, width: 10, height: 50, rx: 4 }]], stroke: 2.5 },
-    { nodes: [["rect", { x: 22, y: 78, width: 164, height: 16, rx: 4 }]], fill: true, tone: 0 },
-    { nodes: [["rect", { x: 22, y: 78, width: 164, height: 16, rx: 4 }], ["path", { d: "M30 94V110M178 94V110" }]], stroke: 2.5 },
-    // The pillow, then the head on it.
-    { nodes: [["ellipse", { cx: 46, cy: 72, rx: 21, ry: 8 }]], fill: true, tone: 0 },
-    { nodes: [["ellipse", { cx: 46, cy: 72, rx: 21, ry: 8 }]], stroke: 2.5 },
-    { nodes: [["circle", { cx: 50, cy: 60, r: 13 }]], fill: true, tone: 0 },
-    { nodes: [["circle", { cx: 50, cy: 60, r: 13 }]], stroke: 2.5 },
-    // Closed eyes and a snoring mouth.
-    { nodes: [["path", { d: "M42 61q3 2.5 6 0M53 61q3 2.5 6 0" }], ["circle", { cx: 51, cy: 67.5, r: 1.6 }]], stroke: 2 },
-    // The nightcap: dithered, its band, its tail flopping onto the pillow, the pompom.
-    { nodes: [["path", { d: "M37 57Q35 41 51 41Q61 42 63 53Q50 49 37 57Z" }], ["path", { d: "M44 45Q30 42 27 57" }]], fill: true, tone: 50 },
-    { nodes: [["path", { d: "M37 57Q35 41 51 41Q61 42 63 53Q50 49 37 57Z" }], ["path", { d: "M44 45Q30 42 27 57" }]], stroke: 2.5 },
-    // Its light band, where it meets the forehead.
-    { nodes: [["path", { d: "M37 57Q50 49 63 53L62.5 48.5Q50 44.5 37.5 52.5Z" }]], fill: true, tone: 0 },
-    { nodes: [["path", { d: "M37 57Q50 49 63 53L62.5 48.5Q50 44.5 37.5 52.5Z" }]], stroke: 2 },
-    { nodes: [["circle", { cx: 27, cy: 59, r: 3.5 }]], fill: true },
-    // The blanket over the body, half tone.
+    // The glow: 6 % then 12 % of ink, closer to the moon.
+    { nodes: [["circle", { cx: MOON.x, cy: MOON.y, r: 138 }]], fill: true, tone: 6 },
+    { nodes: [["circle", { cx: MOON.x, cy: MOON.y, r: 110 }]], fill: true, tone: 12 },
+    // A ring of paper around the moon, then its dark side, earthshine.
+    { nodes: [["circle", { cx: MOON.x, cy: MOON.y, r: MOON.r + 9 }]], fill: true, tone: 0 },
+    { nodes: [["circle", { cx: MOON.x, cy: MOON.y, r: MOON.r }]], fill: true, tone: 25 },
+    // The lit crescent, the bite from the upper right.
+    { nodes: [["path", { d: crescent(MOON.x, MOON.y, MOON.r, MOON.x + 40, MOON.y - 30, 74) }]], fill: true },
+    // Sparkles and specks, outside the glow.
     {
-      nodes: [["path", { d: "M58 90V71C66 62 80 58 96 58C116 58 128 64 144 63C160 62 172 60 182 62C188 64 188 72 188 90Z" }]],
+      nodes: [
+        ["path", { d: sparkle(42, 52, 17) }],
+        ["path", { d: sparkle(322, 44, 11) }],
+        ["path", { d: sparkle(328, 252, 15) }],
+        ["path", { d: sparkle(36, 240, 8) }],
+        ["circle", { cx: 100, cy: 18, r: 3 }],
+        ["circle", { cx: 272, cy: 286, r: 3 }],
+        ["circle", { cx: 350, cy: 150, r: 2.5 }],
+        ["circle", { cx: 12, cy: 140, r: 2.5 }],
+      ],
       fill: true,
-      tone: 50,
     },
-    {
-      nodes: [["path", { d: "M58 90V71C66 62 80 58 96 58C116 58 128 64 144 63C160 62 172 60 182 62C188 64 188 72 188 90Z" }]],
-      stroke: 2.5,
-    },
-    // Zs rising from the sleeper, the second larger.
-    { nodes: [["path", { d: `${z(70, 34, 8)}${z(86, 16, 12)}` }]], stroke: 2.5 },
   ],
-  [0, 0, 200, 125],
+  [0, 0, 360, 300],
 );
