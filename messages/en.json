@@ -1401,6 +1401,13 @@
         "firmwareSending": "Sending a firmware over Bluetooth…",
         "firmwareSent": "Firmware sent: the terminal restarts on it."
       },
+      "sound": {
+        "label": "Sound",
+        "muted": "Muted",
+        "on": "The terminal's beeps play here",
+        "off": "Muted: click to hear the terminal's beeps",
+        "blocked": "Click the page to turn the sound on"
+      },
       "controls": {
         "live": "The terminal answers live: each command reaches it within a second."
       },

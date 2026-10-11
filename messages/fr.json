@@ -1401,6 +1401,13 @@
         "firmwareSending": "Envoi d'un firmware par Bluetooth…",
         "firmwareSent": "Firmware envoyé : le terminal redémarre dessus."
       },
+      "sound": {
+        "label": "Son",
+        "muted": "Muet",
+        "on": "Les bips du terminal sont joués ici",
+        "off": "Son coupé : cliquer pour entendre les bips du terminal",
+        "blocked": "Cliquez sur la page pour activer le son"
+      },
       "controls": {
         "live": "Le terminal répond en direct : chaque commande lui parvient en une seconde."
       },

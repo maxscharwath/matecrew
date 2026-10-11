@@ -107,8 +107,8 @@ impl Screen {
         let drawn = started.elapsed();
         if self.next.bits != self.sent {
             self.sent.copy_from_slice(&self.next.bits);
-            // Every screen, setup and linking included, for a browser watching over Bluetooth.
-            crate::ble::show_screen(&self.sent);
+            // Every screen, setup and linking included, for whoever watches (`viewers`).
+            crate::viewers::screen(&self.sent);
             self.order(Order::Show { bits: self.next.bits.clone(), drawn });
         }
         Ok(())
@@ -144,11 +144,6 @@ impl Screen {
         if self.orders.send(Order::Flush(done)).is_ok() {
             let _ = wait.recv();
         }
-    }
-
-    /// What the panel shows or is about to, in the format of the site's screen: 1 = ink.
-    pub fn frame(&self) -> &[u8] {
-        &self.sent
     }
 
     fn order(&self, order: Order) {

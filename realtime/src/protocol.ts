@@ -2,10 +2,10 @@
  * A terminal's live channel, through its relay (one Durable Object per terminal, `./terminal.ts`).
  * The terminal keeps one WebSocket open; the site's consoles open theirs; nothing polls.
  *
- *   terminal → relay   hello, status, ack, log      + binary screen patch (`TerminalPatch`)
+ *   terminal → relay   hello, status, ack, log, beep  + binary screen patch (`TerminalPatch`)
  *   relay → terminal   command, live, sync
  *   console → relay    command, watch
- *   relay → console    online, status, log, commands, command  + binary screen patch (`ConsolePatch`)
+ *   relay → console    online, status, log, beep, commands, command  + binary screen patch (`ConsolePatch`)
  *   site → relay       RPC on the Durable Object (`Terminal` in ./terminal.ts)
  *
  * Text frames are JSON with a `t` tag. Every socket asks for the `SUBPROTOCOL`; browsers cannot set
@@ -68,11 +68,23 @@ export type TerminalStatus = {
   [field: string]: unknown;
 };
 
+/** A log line's level, as the firmware's logger names them. */
+export type LogLevel = "E" | "W" | "I" | "D" | "V";
+
+/**
+ * The log and the beeps have the shape they have over Bluetooth (`DeviceEvent` in
+ * device/sdk/link, `link::Event` in device/core): one per transport would only differ.
+ */
 export type FromTerminal =
   | { t: "hello"; status: TerminalStatus }
   | { t: "status"; status: TerminalStatus }
   | { t: "ack"; id: string }
-  | { t: "log"; line: string };
+  | { t: "log"; level: LogLevel; target: string; msg: string }
+  /** The piezo plays these tones, [Hz, ms] (0 Hz is a silence): consoles play them too. */
+  | { t: "beep"; tones: Tone[] };
+
+/** One tone of a beep: [Hz, ms], 0 Hz a silence. */
+export type Tone = [hz: number, ms: number];
 
 export type ToTerminal =
   | { t: "command"; command: Command }
@@ -89,7 +101,8 @@ export type FromConsole =
 export type ToConsole =
   | { t: "online"; online: boolean; since: number | null }
   | { t: "status"; status: TerminalStatus; at: number }
-  | { t: "log"; line: string; at: number }
+  | { t: "log"; level: LogLevel; target: string; msg: string; at: number }
+  | { t: "beep"; tones: Tone[]; at: number }
   | { t: "commands"; entries: CommandEntry[] }
   | { t: "command"; entry: CommandEntry };
 
@@ -120,6 +133,23 @@ export function command(value: unknown): Command | null {
   const { id, kind } = value as { id?: unknown; kind?: unknown };
   if (typeof id !== "string" || !/^[\w-]{1,64}$/.test(id) || typeof kind !== "string") return null;
   return JSON.stringify(value).length <= 1024 ? (value as Command) : null;
+}
+
+/** A beep's tones as the terminal sent them, or null: at most 32 tones, audible, under 2 s each. */
+export function tones(value: unknown): Tone[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32) return null;
+  const valid = value.every(
+    (tone) =>
+      Array.isArray(tone) &&
+      tone.length === 2 &&
+      Number.isInteger(tone[0]) &&
+      tone[0] >= 0 &&
+      tone[0] <= 20_000 &&
+      Number.isInteger(tone[1]) &&
+      tone[1] > 0 &&
+      tone[1] <= 2_000,
+  );
+  return valid ? (value as Tone[]) : null;
 }
 
 /** Keys, badges and taps: worth running only right away. */

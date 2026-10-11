@@ -32,8 +32,7 @@ use esp_idf_svc::{
     sys,
 };
 use matecrew_core::{
-    contract::normalize_uid,
-    flow::Event as FlowEvent,
+    action::Action,
     link::{self, Control, Event, OtaFrame, ScreenRequest, Setup},
 };
 use sha2::{Digest, Sha256};
@@ -122,7 +121,7 @@ pub fn pairing() -> Option<u32> {
     PAIRING.load(Ordering::Relaxed).then(|| PASSKEY.load(Ordering::Relaxed))
 }
 
-/// The terminal's log, to the serial port as before and to a paired browser.
+/// The terminal's log, to the serial port as before and to whoever watches (`viewers`).
 pub fn init_logging() {
     static ESP: EspIdfLogger<EspIdfLogFilter> = EspIdfLogger::new(EspIdfLogFilter::new());
     struct Tee;
@@ -147,10 +146,8 @@ pub fn init_logging() {
                     log::Level::Trace => 'V',
                 };
                 let target = target.rsplit("::").next().unwrap_or(target).to_owned();
-                let msg = record.args().to_string();
-                // And to a console watching over the relay.
-                crate::remote::log_line(level, &target, &msg);
-                send(Event::Log { level, target, msg });
+                // To a paired browser, and to a console watching over the relay.
+                crate::viewers::publish(Event::Log { level, target, msg: record.args().to_string() });
             }
         }
         fn flush(&self) {}
@@ -535,18 +532,14 @@ fn apply_setup(store: &Mutex<Store>, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn apply_control(inputs: &Sender<Input>, bytes: &[u8]) -> Result<(), String> {
-    let input = match Control::parse(bytes).map_err(|e| e.to_string())? {
-        Control::Key { side } => Input::Flow(FlowEvent::Key { side }),
-        Control::Both => Input::Flow(FlowEvent::BothKeys),
-        Control::Badge { uid } => Input::Flow(FlowEvent::Badge { uid: normalize_uid(&uid).ok_or("not a badge UID")? }),
-        Control::Sync => Input::Sync,
-        Control::Notify { text } => Input::Notify(text),
-        Control::Restart => {
-            restart_in(Duration::from_millis(500));
-            return Ok(());
-        }
-    };
-    inputs.send(input).map_err(|_| "the terminal stopped".to_owned())
+    let control = Control::parse(bytes).map_err(|e| e.to_string())?;
+    let action = Action::from_control(control).ok_or("not a badge UID, or a tap off the screen")?;
+    // Restarted from here, after the answer is out (`Done`), rather than by the main loop.
+    if action == Action::Restart {
+        restart_in(Duration::from_millis(500));
+        return Ok(());
+    }
+    inputs.send(crate::remote::input(action)).map_err(|_| "the terminal stopped".to_owned())
 }
 
 /// A firmware update in progress: ESP-IDF's handle on the other slot and what came so far.

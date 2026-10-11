@@ -16,6 +16,7 @@
     "postinstall": "prisma generate",
     "preview": "PLATFORM=cloudflare opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "PLATFORM=cloudflare opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "build:cloudflare": "PLATFORM=cloudflare opennextjs-cloudflare build",
     "cf-typegen": "wrangler types cloudflare-env.d.ts --env-interface CloudflareEnv --env-file=.dev.vars.example",
     "dui": "bun device/sdk/cli/index.ts",
     "device:preview": "bun dui build && cargo run --manifest-path device/sim/Cargo.toml"

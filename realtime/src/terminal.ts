@@ -16,6 +16,7 @@ import {
   isInput,
   parse,
   readPatch,
+  tones as parseTones,
   writePatch,
   type Command,
   type CommandEntry,
@@ -48,6 +49,8 @@ const TICKET_TTL_MS = 60_000;
 /** While consoles are open, how often the relay looks whether the terminal still pings. */
 const CHECK_EVERY_MS = PING_EVERY_MS / 2;
 const LOG_LINE_MAX = 512;
+const LOG_TARGET_MAX = 64;
+const LEVELS = new Set(["E", "W", "I", "D", "V"]);
 
 function attachment(socket: WebSocket): Attachment | null {
   return (socket.deserializeAttachment() as Attachment | null) ?? null;
@@ -221,39 +224,55 @@ export class Terminal extends DurableObject<RelayEnv> {
   }
 
   private async fromTerminal(message: string | ArrayBuffer) {
-    if (typeof message !== "string") {
-      const patch = readPatch(message, TERMINAL_HEADER);
-      if (!patch) return;
-      const drawnAt = Date.now();
-      // Consoles first: storing waits for nothing they need.
-      const out = writePatch(patch, drawnAt);
-      for (const socket of this.screenConsoles()) this.trySend(socket, out);
-      const frame = (await this.loadFrame()) ?? new Uint8Array(FRAME_BYTES);
-      applyPatch(frame, patch);
-      this.frame = frame;
-      await this.ctx.storage.put({ frame, drawnAt }, { allowUnconfirmed: true });
-      return;
-    }
-    const sent = parse<FromTerminal>(message, ["hello", "status", "ack", "log"]);
-    if (!sent) return;
-    switch (sent.t) {
+    if (typeof message !== "string") return this.screenPatch(message);
+    const sent = parse<FromTerminal>(message, ["hello", "status", "ack", "log", "beep"]);
+    switch (sent?.t) {
       case "hello":
-      case "status": {
-        if (typeof sent.status !== "object" || sent.status === null) return;
-        const at = Date.now();
-        const previous = sent.t === "status" ? ((await this.ctx.storage.get<TerminalStatus>("status")) ?? {}) : {};
-        const status = { ...previous, ...sent.status };
-        this.toConsoles({ t: "status", status, at });
-        await this.ctx.storage.put({ status, statusAt: at }, { allowUnconfirmed: true });
-        break;
-      }
+      case "status":
+        return this.report(sent);
       case "ack":
         if (typeof sent.id === "string") await this.setStatus(sent.id, "delivered");
-        break;
+        return;
       case "log":
-        this.toConsoles({ t: "log", line: String(sent.line).slice(0, LOG_LINE_MAX), at: Date.now() });
-        break;
+        // As over Bluetooth: level, target, message.
+        if (!LEVELS.has(sent.level)) return;
+        return this.toConsoles({
+          t: "log",
+          level: sent.level,
+          target: String(sent.target).slice(0, LOG_TARGET_MAX),
+          msg: String(sent.msg).slice(0, LOG_LINE_MAX),
+          at: Date.now(),
+        });
+      case "beep": {
+        const tones = parseTones(sent.tones);
+        if (tones) this.toConsoles({ t: "beep", tones, at: Date.now() });
+        return;
+      }
     }
+  }
+
+  /** The rows of its screen that changed: to the consoles watching it, then kept. */
+  private async screenPatch(message: ArrayBuffer) {
+    const patch = readPatch(message, TERMINAL_HEADER);
+    if (!patch) return;
+    const drawnAt = Date.now();
+    // Consoles first: storing waits for nothing they need.
+    const out = writePatch(patch, drawnAt);
+    for (const socket of this.screenConsoles()) this.trySend(socket, out);
+    const frame = (await this.loadFrame()) ?? new Uint8Array(FRAME_BYTES);
+    applyPatch(frame, patch);
+    this.frame = frame;
+    await this.ctx.storage.put({ frame, drawnAt }, { allowUnconfirmed: true });
+  }
+
+  /** What the terminal says about itself: whole on connecting (`hello`), what changed after. */
+  private async report(sent: Extract<FromTerminal, { t: "hello" | "status" }>) {
+    if (typeof sent.status !== "object" || sent.status === null) return;
+    const at = Date.now();
+    const previous = sent.t === "status" ? ((await this.ctx.storage.get<TerminalStatus>("status")) ?? {}) : {};
+    const status = { ...previous, ...sent.status };
+    this.toConsoles({ t: "status", status, at });
+    await this.ctx.storage.put({ status, statusAt: at }, { allowUnconfirmed: true });
   }
 
   // --- Consoles ----------------------------------------------------------------------------------

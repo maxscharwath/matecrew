@@ -321,8 +321,11 @@ export class VirtualDevice {
     this.beep(beep);
   }
   private beep(beep: Beep): void {
-    this.gpio.playPwm(this.wasm.buzzerPattern(beep), performance.now());
+    const tones = this.wasm.buzzerPattern(beep);
+    this.gpio.playPwm(tones, performance.now());
     this.onBeep(beep);
+    // A console watching over the relay plays it too (firmware/src/buzzer.rs).
+    this.relay?.send({ t: "beep", tones });
   }
   setKeyLevel(side: Side, high: boolean, source: string): void {
     this.gpio.drive(side === "left" ? 5 : 8, high, source);
@@ -1239,8 +1242,8 @@ export class VirtualDevice {
 
   private log(kind: LogEntry["kind"], text: string): void {
     const entry = { id: ++this.logId, at: Date.now(), kind, text };
-    // As the firmware's log over the live channel: "<level> <target> <message>".
-    this.relay?.log(`${kind === "error" ? "E" : "I"} matecrew_web::${kind} ${text}`);
+    // As the firmware's log over the live channel (and Bluetooth): level, target, message.
+    this.relay?.log(kind === "error" ? "E" : "I", `matecrew_web::${kind}`, text);
     this.update({
       logs: [...this.snapshot.logs.slice(-(MAX_LOGS - 1)), entry],
     });

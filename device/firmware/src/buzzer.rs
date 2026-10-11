@@ -62,9 +62,10 @@ impl Buzzer {
         Ok(Self { beeps, quiet_since })
     }
 
-    /// Queues `beep`; returns at once.
+    /// Queues `beep`; returns at once. Whoever watches the terminal plays it too (`viewers`).
     pub fn beep(&self, beep: Beep) {
         let _ = self.beeps.send(beep);
+        crate::viewers::publish(matecrew_core::link::Event::Beep { tones: beep.tones().to_vec() });
     }
 
     /// How long the piezo has been silent: zero while it plays.

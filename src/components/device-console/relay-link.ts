@@ -13,9 +13,10 @@ import {
   type CommandEntry,
   type TerminalStatus,
   type ToConsole,
+  type Tone,
 } from "../../../realtime/src/protocol";
-import type { LogEntry, LogLevel, MemorySample } from "./device-log";
-import { parseHeap, shortTag } from "./device-log";
+import type { LogEntry, MemorySample } from "./device-log";
+import { deviceLogEntry, parseHeap } from "./device-log";
 import type { MirrorFrame } from "./frame-bits";
 
 /** Where the console opens its socket, with a one-time ticket (`consoleSocket`). */
@@ -28,11 +29,12 @@ export type RelayEvents = {
   commands(entries: CommandEntry[]): void;
   frame(frame: MirrorFrame): void;
   log(entry: LogEntry, memory: MemorySample | null): void;
+  /** The terminal beeped these tones. */
+  beep(tones: Tone[]): void;
 };
 
 /** Reconnections back off up to this. */
 const MAX_RETRY_MS = 10_000;
-const LINE = /^([EWIDV]) (\S+) ([\s\S]*)$/;
 
 /**
  * The console's socket to the terminal's relay (realtime/): its presence, status, log, commands
@@ -83,7 +85,7 @@ export function useRelay(
     };
 
     const onText = (text: string) => {
-      const message = parse<ToConsole>(text, ["online", "status", "log", "commands", "command"]);
+      const message = parse<ToConsole>(text, ["online", "status", "log", "beep", "commands", "command"]);
       if (!message) return;
       const on = handlers.current;
       switch (message.t) {
@@ -99,17 +101,14 @@ export function useRelay(
         case "command":
           on.commands([message.entry]);
           break;
+        case "beep":
+          on.beep(message.tones);
+          break;
         case "log": {
-          const line = LINE.exec(message.line);
-          const entry: LogEntry = {
-            id: `relay-${++counter}`,
-            at: message.at,
-            source: "device",
-            level: (line?.[1] as LogLevel | undefined) ?? "I",
-            tag: line ? shortTag(line[2]) : "log",
-            text: line?.[3] ?? message.line,
-          };
-          on.log(entry, parseHeap(entry.text, message.at));
+          // The same line as over Bluetooth.
+          const { level, target, msg, at } = message;
+          const entry = deviceLogEntry({ t: "log", level, target, msg }, `relay-${++counter}`, at);
+          if (entry) on.log(entry, parseHeap(msg, at));
           break;
         }
       }

@@ -1,3 +1,4 @@
+import type { RemoteCommand } from "@matecrew/device-ui/link";
 import type { DeviceCommand } from "@/lib/device/contract";
 
 /**
@@ -63,4 +64,24 @@ export function fromWire(command: { kind: string; [field: string]: unknown }): C
   const rest: Record<string, unknown> = { ...command };
   delete rest.id;
   return rest as ConsoleCommand;
+}
+
+/** The command as `@matecrew/device-link` sends it over Bluetooth; null for those only the site relays. */
+export function toRemote(command: ConsoleCommand): RemoteCommand | null {
+  switch (command.kind) {
+    case "key":
+      return { cmd: "key", side: command.side };
+    case "both":
+      return { cmd: "both" };
+    case "badge":
+      return { cmd: "badge", uid: command.uid };
+    case "tap":
+      return { cmd: "tap", x: command.x, y: command.y };
+    case "sync":
+      return command.app ? null : { cmd: "sync" };
+    case "restart":
+      return { cmd: "restart" };
+    case "forgetWifi":
+      return null;
+  }
 }

@@ -128,6 +128,8 @@ pub enum Control {
     Both,
     Badge { uid: String },
     Sync,
+    /// A point of the remote's 200 × 120 grid (`action::TAP_WIDTH`, `TAP_HEIGHT`).
+    Tap { x: i32, y: i32 },
     Restart,
     Notify { text: String },
 }
@@ -152,6 +154,8 @@ pub enum Event {
     Done { op: String, ok: bool, error: Option<String> },
     /// A firmware update: "ready", "writing", "done" or "failed".
     Ota { state: String, done: u32, total: u32, error: Option<String> },
+    /// The piezo plays these tones (Hz, ms; 0 Hz is a silence): the browser plays them too.
+    Beep { tones: Vec<(u32, u64)> },
 }
 
 impl Event {
@@ -445,6 +449,7 @@ mod tests {
         assert_eq!(Control::parse(br#"{"cmd":"key","side":"left"}"#).unwrap(), Control::Key { side: Side::Left });
         assert_eq!(Control::parse(br#"{"cmd":"both"}"#).unwrap(), Control::Both);
         assert_eq!(Control::parse(br#"{"cmd":"badge","uid":"04A1"}"#).unwrap(), Control::Badge { uid: "04A1".into() });
+        assert_eq!(Control::parse(br#"{"cmd":"tap","x":3,"y":4}"#).unwrap(), Control::Tap { x: 3, y: 4 });
         assert_eq!(Control::parse(br#"{"cmd":"notify","text":""}"#), Err(LinkError::Invalid("text")));
         assert_eq!(Control::parse(br#"{"cmd":"format"}"#), Err(LinkError::Malformed));
     }
@@ -457,6 +462,16 @@ mod tests {
         assert!(serde_json::from_slice::<serde_json::Value>(&bytes).is_ok());
         let done = Event::Done { op: "setup".into(), ok: true, error: None };
         assert_eq!(String::from_utf8(done.encode(180)).unwrap(), r#"{"t":"done","op":"setup","ok":true,"error":null}"#);
+        // Every melody fits one notification at the MTU browsers negotiate (517).
+        use crate::flow::Beep;
+        for beep in [Beep::Key, Beep::Accepted, Beep::Error, Beep::Notification, Beep::Badge, Beep::Boot, Beep::Unknown] {
+            let bytes = Event::Beep { tones: beep.tones().to_vec() }.encode(514);
+            assert!(bytes.len() <= 514, "{beep:?}: {} bytes", bytes.len());
+        }
+        assert_eq!(
+            String::from_utf8(Event::Beep { tones: vec![(4000, 40)] }.encode(180)).unwrap(),
+            r#"{"t":"beep","tones":[[4000,40]]}"#
+        );
 
         let info = Info { protocol: PROTOCOL, networks: (0..100).map(|i| format!("Network {i}")).collect(), ..Default::default() };
         let bytes = info.encode();

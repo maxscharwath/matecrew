@@ -29,7 +29,6 @@ import {
   Cpu,
   Hash,
   History,
-  Keyboard,
   LoaderCircle,
   MonitorSmartphone,
   Radio,
@@ -42,28 +41,30 @@ import {
   WifiOff,
   WifiZero,
 } from "lucide-react";
-import type { RemoteCommand } from "@matecrew/device-ui/link";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { consoleSocket, sendDeviceCommand } from "@/app/org/[officeId]/admin/devices/actions";
-import { fromWire, toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
+import { fromWire, toRemote, toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
 import type { LiveStatus } from "@/lib/device/live";
 import type { CommandEntry, TerminalStatus } from "../../../realtime/src/protocol";
-import { BadgeZone, DeviceShell, useDeviceShortcuts, useKeyChord, type BadgeOption, type Side } from "./device-shell";
-import { compareFrames, fetchFrame, PANEL_WIDTH, type MirrorFrame } from "./frame-bits";
+import type { BadgeOption } from "./device-shell";
+import { compareFrames, fetchFrame, type MirrorFrame } from "./frame-bits";
 import { MirrorScreen, type Mirror } from "./mirror-screen";
 import { LogPanel } from "./log-panel";
 import { MemoryCard } from "./memory-panel";
 import { ActionsCard } from "./terminal-actions";
 import { BoardCard } from "./board-card";
 import { FactList, RailCard, Workbench, type Fact } from "./workbench";
-import type { ConsoleKind, LogEntry } from "./device-log";
+import type { LogEntry } from "./device-log";
 import { battery, signalBand } from "./readings";
 import { DeviceSettings, RecentTakes, type DeviceSettingsProps, type Take } from "./device-settings";
 import { useBleScreen, useBleSession, useBleTerminal, type BleTerminal } from "./ble-link";
 import { useRelay, type RelaySocket } from "./relay-link";
+import { commandKind, TerminalPanel, useCommandLabels, useConsoleLog, useTerminalControls } from "./terminal-controls";
+import { SoundButton, useConsoleBuzzer } from "./console-buzzer";
+import type { Tone } from "../../../realtime/src/protocol";
 import type { MemorySample } from "./device-log";
 
 interface Props {
@@ -89,16 +90,12 @@ type Command = LiveStatus["commands"][number];
 const POLL_MS = 1000;
 /** Commands the status counts as waiting, as /live lists them. */
 const LISTED = 8;
-/** How long a key or the badge zone stays lit after a press. */
-const FLASH_MS = 700;
 /** Feedback per partial refresh of the mirror (BUSY on the case). */
 const PASS_MS = 650;
 /** SPI clocks the frame in at the start of a refresh. */
 const SPI_MS = 250;
 /** Lines the log keeps: the console's, the commands', and the terminal's own over Bluetooth. */
 const MAX_LINES = 400;
-/** Remote taps are 200 × 120; the log shows them in panel pixels. */
-const TAP_SCALE = PANEL_WIDTH / 200;
 
 const SIGNAL_ICON = { excellent: Wifi, good: WifiHigh, fair: WifiLow, weak: WifiZero } as const;
 
@@ -127,28 +124,17 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
   const [commands, setCommands] = useState<Record<string, Command>>(() =>
     Object.fromEntries(initial.commands.map((command) => [command.id, command])),
   );
-  const [events, setEvents] = useState<LogEntry[]>(() => [
-    { id: "opened", at: Date.parse(renderedAt), source: "console", level: "I", tag: "link", text: t("log.opened") },
-  ]);
-  const [clearedAt, setClearedAt] = useState(0);
-  const [pressed, setPressed] = useState<Side | "badge" | null>(null);
-  const [badgeOpen, setBadgeOpen] = useState(false);
+  const { events, addEvent, clearedAt, clear } = useConsoleLog({
+    id: "opened",
+    at: Date.parse(renderedAt),
+    source: "console",
+    level: "I",
+    tag: "link",
+    text: t("log.opened"),
+  });
   const [mirror, setMirror] = useState<Mirror | null>(null);
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState<{ passes: number; spi: boolean } | null>(null);
-
-  const eventId = useRef(0);
-  const addEvent = useCallback((kind: ConsoleKind, text: string) => {
-    const entry: LogEntry = {
-      id: `e${++eventId.current}`,
-      at: Date.now(),
-      source: "console",
-      level: kind === "error" ? "E" : "I",
-      tag: kind,
-      text,
-    };
-    setEvents((current) => [...current, entry].slice(-MAX_LINES));
-  }, []);
 
   // The terminal over Bluetooth, when connected from here: its screen, and a shorter way for commands.
   const ble = useBleTerminal(device.hardwareId, {
@@ -249,7 +235,9 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
     if (bleFrame) present(bleFrame, "bluetooth");
   }, [bleFrame, present]);
 
-  // With the relay, everything is pushed: presence, status, commands, the terminal's log, its screen.
+  // With the relay, everything is pushed: presence, status, commands, the terminal's log, its
+  // screen, its beeps.
+  const buzzer = useConsoleBuzzer(ble.device, bleLive, relay !== null);
   const { link: relayLink, logs: relayLogs, memory: relayMemory, clearLogs: clearRelayLogs } = useLiveRelay({
     relay,
     renew: () => consoleSocket(officeId, device.id),
@@ -258,6 +246,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
     setCommands,
     present,
     onConnection: (open) => addEvent("link", open ? t("log.relayOpen") : t("log.relayClosed")),
+    onBeep: buzzer.play,
   });
 
   // Without a relay, fetch the frame whenever the terminal uploaded a new one; one request at a time.
@@ -293,27 +282,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
     [],
   );
 
-  const describeSent = useCallback(
-    (command: ConsoleCommand): string => {
-      switch (command.kind) {
-        case "key":
-          return command.side === "right" ? t("kind.keyRight") : t("kind.keyLeft");
-        case "both":
-          return t("kind.both");
-        case "badge":
-          return t("kind.badge", { uid: command.uid });
-        case "tap":
-          return t("kind.tap", { x: command.x * TAP_SCALE, y: command.y * TAP_SCALE });
-        case "sync":
-          return t("kind.sync");
-        case "restart":
-          return t("kind.restart");
-        case "forgetWifi":
-          return t("kind.forgetWifi");
-      }
-    },
-    [t],
-  );
+  const { describe, describeRow } = useCommandLabels();
 
   const sendViaSite = useCallback(
     (command: ConsoleCommand) => {
@@ -342,68 +311,27 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
     [relaySend, sendViaSite],
   );
 
-  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const send = useCallback(
+  const route = useCallback(
     (command: ConsoleCommand) => {
-      if (command.kind === "key" || command.kind === "badge") {
-        setPressed(command.kind === "key" ? command.side : "badge");
-        clearTimeout(flashTimer.current);
-        flashTimer.current = setTimeout(() => setPressed(null), FLASH_MS);
-      }
       // Paired over Bluetooth (its screen comes): straight to the terminal, else through the site.
       const remote = bleLive ? toRemote(command) : null;
       const target = ble.device;
       if (!remote || !target) return sendLive(command);
       void target.send(remote).then((sent) => {
         if (sent.ok) {
-          const kind = command.kind === "key" || command.kind === "badge" || command.kind === "tap" ? "input" : "system";
-          addEvent(kind, t("log.viaBluetooth", { what: describeSent(command) }));
+          addEvent(commandKind(command), t("log.viaBluetooth", { what: describe(command) }));
           return;
         }
         addEvent("error", t("ble.sendFailed", { message: sent.error.message }));
         sendLive(command);
       });
     },
-    [bleLive, ble.device, sendLive, describeSent, addEvent, t],
+    [bleLive, ble.device, sendLive, describe, addEvent, t],
   );
-
-  // Both keys at once, as on the terminal: hold one (mouse, touch, arrow key) and press the other.
-  const chord = useKeyChord((key) => send(keyCommand(key)));
-  const shortcuts = useMemo(
-    () => ({
-      key: (side: Side) => send({ kind: "key", side }),
-      keyLevel: chord.keyLevel,
-      badge: () => setBadgeOpen(true),
-      sync: () => send({ kind: "sync" }),
-    }),
-    [send, chord.keyLevel],
-  );
-  // Only on the console: arrows in the settings must not press the terminal's keys.
-  useDeviceShortcuts(shortcuts, badgeOpen || tab !== "console");
-
-  const describe = useCallback(
-    (command: Command): string => {
-      switch (command.kind) {
-        case "KEY": {
-          const tap = /^tap:(\d+):(\d+)$/.exec(command.arg ?? "");
-          if (tap) return t("kind.tap", { x: Number(tap[1]) * TAP_SCALE, y: Number(tap[2]) * TAP_SCALE });
-          if (command.arg === "both") return t("kind.both");
-          return command.arg === "right" ? t("kind.keyRight") : t("kind.keyLeft");
-        }
-        case "BADGE":
-          return t("kind.badge", { uid: command.arg ?? "" });
-        case "SYNC":
-          if (command.arg === "app:mate") return t("kind.app", { app: "maté" });
-          if (command.arg === "app:showcase") return t("kind.app", { app: "Showcase" });
-          return t("kind.sync");
-        case "RESTART":
-          return t("kind.restart");
-        case "FORGET_WIFI":
-          return t("kind.forgetWifi");
-      }
-    },
-    [t],
-  );
+  // Keys, both keys, the reader and the shortcuts; only on the console tab: arrows in the
+  // settings must not press the terminal's keys.
+  const controls = useTerminalControls(route, tab !== "console");
+  const send = controls.press;
   // One log, oldest first: what the console noticed, the commands it sent, the terminal's own lines.
   const deviceLogs = useMemo(() => [...session.logs, ...relayLogs], [session.logs, relayLogs]);
   const lines = useMemo(() => {
@@ -413,14 +341,14 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
       source: "console",
       level: command.status === "dropped" ? "W" : "I",
       tag: command.kind === "KEY" || command.kind === "BADGE" ? "input" : "system",
-      text: describe(command),
+      text: describeRow(command),
       status: command.status,
     }));
     return [...sent, ...events, ...deviceLogs]
       .filter((line) => line.at > clearedAt)
       .sort((a, b) => a.at - b.at)
       .slice(-MAX_LINES);
-  }, [commands, events, deviceLogs, clearedAt, describe]);
+  }, [commands, events, deviceLogs, clearedAt, describeRow]);
 
   const updateOverBluetooth = async (image: Uint8Array, progress: (percent: number) => void) => {
     const target = ble.device;
@@ -437,13 +365,12 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
   };
 
   const waiting = live.commands.filter((c) => c.status === "waiting").length;
-  const lit = singleKey(pressed);
   // The terminal's memory over Bluetooth, else from its log over the relay.
   const memorySamples = [session.memory, relayMemory].find((samples) => samples.length > 0) ?? [];
   const active = new Set<number>();
-  if (pressed === "left") active.add(5);
-  if (pressed === "right") active.add(8);
-  if (pressed === "badge") [43, 44].forEach((gpio) => active.add(gpio));
+  if (controls.pressed === "left") active.add(5);
+  if (controls.pressed === "right") active.add(8);
+  if (controls.pressed === "badge") [43, 44].forEach((gpio) => active.add(gpio));
   if (busy) active.add(3);
   if (busy?.spi) [2, 4, 7, 9].forEach((gpio) => active.add(gpio));
 
@@ -462,6 +389,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
             {live.reachable ? t("live") : t("offline")}
           </Badge>
           {ble.supported && <BleButton ble={ble} live={bleLive} />}
+          {buzzer.available && <SoundButton buzzer={buzzer} />}
           {waiting > 0 && <Badge variant="secondary">{t("waiting", { count: waiting })}</Badge>}
           <TabsPrimitive.List className="inline-flex h-9 w-fit items-center rounded-lg bg-muted p-[3px] text-muted-foreground sm:ml-auto">
             <TabTrigger value="console" icon={<SquareTerminal />} label={t("tabs.console")} />
@@ -479,45 +407,30 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
       <TabsPrimitive.Content value="console" className="outline-none">
         <Workbench
           terminal={
-            <div className="space-y-3">
-              <DeviceShell
-                pressed={chord.held.length > 0 ? chord.held : lit}
-                onKey={(side) => send({ kind: "key", side })}
-                onKeyLevel={chord.keyLevel}
-                indicator={
-                  <Indicator
-                    busy={busy?.passes ?? null}
-                    mirror={mirror}
-                    preview={preview}
-                    reachable={live.reachable || bleLive}
-                    relative={(iso) => format.relativeTime(new Date(iso), now)}
-                    onHidePreview={() => setPreview(false)}
-                  />
-                }
-                screen={
-                  <MirrorScreen
-                    mirror={mirror}
-                    reachable={live.reachable || bleLive}
-                    preview={preview}
-                    previewUrl={`${base}/screen`}
-                    onPreview={() => setPreview(true)}
-                    onTap={(x, y) => send({ kind: "tap", x, y })}
-                  />
-                }
-                badge={
-                  <BadgeZone
-                    badges={badges}
-                    open={badgeOpen}
-                    onOpenChange={setBadgeOpen}
-                    flashing={pressed === "badge"}
-                    onBadge={(uid) => send({ kind: "badge", uid })}
-                  />
-                }
-              />
-              <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-                <Keyboard className="hidden size-3.5 shrink-0 sm:block" /> {t("shortcuts")} {t("tapHint")}
-              </p>
-            </div>
+            <TerminalPanel
+              controls={controls}
+              badges={badges}
+              indicator={
+                <Indicator
+                  busy={busy?.passes ?? null}
+                  mirror={mirror}
+                  preview={preview}
+                  reachable={live.reachable || bleLive}
+                  relative={(iso) => format.relativeTime(new Date(iso), now)}
+                  onHidePreview={() => setPreview(false)}
+                />
+              }
+              screen={
+                <MirrorScreen
+                  mirror={mirror}
+                  reachable={live.reachable || bleLive}
+                  preview={preview}
+                  previewUrl={`${base}/screen`}
+                  onPreview={() => setPreview(true)}
+                  onTap={(x, y) => send({ kind: "tap", x, y })}
+                />
+              }
+            />
           }
           rail={
             <>
@@ -549,7 +462,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, rel
               timeZone={timeZone}
               fileName={device.name}
               onClear={() => {
-                setClearedAt(Date.now());
+                clear();
                 session.clearLogs();
                 clearRelayLogs();
               }}
@@ -602,16 +515,6 @@ function usePolling(poll: () => Promise<void>, enabled: boolean) {
   }, [poll, enabled]);
 }
 
-/** The key a press lit, for the case. */
-function singleKey(pressed: Side | "badge" | null): Side | null {
-  return pressed === "left" || pressed === "right" ? pressed : null;
-}
-
-/** A key, or both together, as a command. */
-function keyCommand(key: Side | "both"): ConsoleCommand {
-  return key === "both" ? { kind: "both" } : { kind: "key", side: key };
-}
-
 /** The console's commands as the relay lists them (`sent` is still on its way: waiting). */
 function listedCommands(entries: CommandEntry[]): Command[] {
   return entries.flatMap((entry) => {
@@ -651,6 +554,7 @@ function useLiveRelay({
   setCommands,
   present,
   onConnection,
+  onBeep,
 }: {
   relay: RelaySocket | null;
   renew: () => Promise<RelaySocket | null>;
@@ -659,6 +563,7 @@ function useLiveRelay({
   setCommands: Dispatch<SetStateAction<Record<string, Command>>>;
   present: (frame: MirrorFrame, via: Mirror["via"]) => void;
   onConnection: (open: boolean) => void;
+  onBeep: (tones: Tone[]) => void;
 }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [memory, setMemory] = useState<MemorySample[]>([]);
@@ -686,6 +591,7 @@ function useLiveRelay({
         setLogs((current) => [...current, entry].slice(-MAX_LINES));
         if (sample) setMemory((current) => [...current, sample].slice(-MAX_LINES));
       },
+      beep: onBeep,
     },
     screen,
   );
@@ -837,26 +743,6 @@ function BleConnectHint({ ble, dark = false }: Readonly<{ ble: BleTerminal; dark
       {t("connectNearby")}
     </Button>
   );
-}
-
-/** The console's commands as `@matecrew/device-link` sends them; null for those only the site relays. */
-function toRemote(command: ConsoleCommand): RemoteCommand | null {
-  switch (command.kind) {
-    case "key":
-      return { cmd: "key", side: command.side };
-    case "both":
-      return { cmd: "both" };
-    case "badge":
-      return { cmd: "badge", uid: command.uid };
-    case "tap":
-      return { cmd: "tap", x: command.x, y: command.y };
-    case "sync":
-      return command.app ? null : { cmd: "sync" };
-    case "restart":
-      return { cmd: "restart" };
-    case "forgetWifi":
-      return null;
-  }
 }
 
 /** Connects to this terminal over Bluetooth, then says how it goes; a click lets it go. */

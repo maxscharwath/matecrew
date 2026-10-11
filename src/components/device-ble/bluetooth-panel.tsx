@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode, type SubmitEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition, type ReactNode, type SubmitEvent } from "react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -17,7 +17,6 @@ import {
   EyeOff,
   Globe,
   Hash,
-  Keyboard,
   Link2,
   LoaderCircle,
   MemoryStick,
@@ -27,7 +26,7 @@ import {
   Wifi,
   WifiPen,
 } from "lucide-react";
-import { BleDevice, commands, isSupported, type DeviceInfo, type LinkError } from "@matecrew/device-ui/link";
+import { BleDevice, isSupported, type DeviceInfo, type LinkError } from "@matecrew/device-ui/link";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -37,28 +36,27 @@ import { Label } from "@/components/ui/label";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bluetoothLinkStatus, officeTerminal, prepareBluetoothLink } from "@/app/org/[officeId]/admin/devices/bluetooth/actions";
 import { useBleScreen, useBleSession } from "@/components/device-console/ble-link";
-import {
-  BadgeZone,
-  DeviceShell,
-  useDeviceShortcuts,
-  useKeyChord,
-  type BadgeOption,
-  type Side,
-} from "@/components/device-console/device-shell";
-import type { ConsoleKind, LogEntry } from "@/components/device-console/device-log";
+import type { BadgeOption } from "@/components/device-console/device-shell";
+import { SoundButton, useConsoleBuzzer } from "@/components/device-console/console-buzzer";
 import { FrameCanvas } from "@/components/device-console/frame-canvas";
 import { LogPanel } from "@/components/device-console/log-panel";
 import { MemoryCard } from "@/components/device-console/memory-panel";
 import { ScreenControl } from "@/components/device-console/screen-control";
 import { ActionsCard } from "@/components/device-console/terminal-actions";
+import {
+  commandKind,
+  TerminalPanel,
+  useCommandLabels,
+  useConsoleLog,
+  useTerminalControls,
+} from "@/components/device-console/terminal-controls";
+import { toRemote, type ConsoleCommand } from "@/lib/device/console-commands";
 import { FactList, RailCard, Workbench, type Fact } from "@/components/device-console/workbench";
 import { signalBand } from "@/components/device-console/readings";
 
 /** How often the page asks the site whether the terminal linked, and for how long. */
 const LINK_POLL_MS = 3000;
 const LINK_WAIT_MS = 10 * 60 * 1000;
-/** How long a key or the reader stays lit after a press. */
-const FLASH_MS = 700;
 const OTHER = "__other__";
 
 type SetupState =
@@ -89,6 +87,8 @@ function Panel({ officeId, badges }: Readonly<{ officeId: string; badges: BadgeO
   const [setup, setSetup] = useState<SetupState>({ step: "form" });
   const session = useBleSession(device);
   const { info } = session;
+  // The terminal's beeps, as it plays them, while it is paired.
+  const buzzer = useConsoleBuzzer(device, device !== null);
 
   useEffect(() => {
     void isSupported().then(setSupported);
@@ -172,6 +172,7 @@ function Panel({ officeId, badges }: Readonly<{ officeId: string; badges: BadgeO
         connecting={connecting}
         onConnect={connect}
         onRefresh={session.refresh}
+        sound={device && <SoundButton buzzer={buzzer} />}
       />
       {session.infoError && !info && (
         <Alert variant="destructive">
@@ -243,12 +244,15 @@ function TerminalBar({
   connecting,
   onConnect,
   onRefresh,
+  sound,
 }: Readonly<{
   device: BleDevice | null;
   info: DeviceInfo | null;
   connecting: boolean;
   onConnect: () => void;
   onRefresh: () => void;
+  /** Turns the terminal's beeps on or off here. */
+  sound?: ReactNode;
 }>) {
   const t = useTranslations("deviceBluetooth");
   let subtitle: ReactNode = t("bar.disconnected");
@@ -275,6 +279,7 @@ function TerminalBar({
         <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
       </div>
       <div className="flex items-center gap-2">
+        {sound}
         {device ? (
           <>
             <Button variant="ghost" size="icon-sm" aria-label={t("bar.refresh")} title={t("bar.refresh")} onClick={onRefresh}>
@@ -554,56 +559,25 @@ function Debugger({
   const tConsole = useTranslations("devices.console");
   const format = useFormatter();
   const { frame, error } = useBleScreen(device);
-  const [pressed, setPressed] = useState<Side | "badge" | null>(null);
-  const [badgeOpen, setBadgeOpen] = useState(false);
-  const [events, setEvents] = useState<LogEntry[]>([]);
-  const [clearedAt, setClearedAt] = useState(0);
-  const eventId = useRef(0);
-  const flash = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { events, addEvent, clearedAt, clear } = useConsoleLog();
+  const { describe } = useCommandLabels();
   const { info } = session;
 
-  const addEvent = useCallback((kind: ConsoleKind, text: string) => {
-    const entry: LogEntry = { id: `c${++eventId.current}`, at: Date.now(), source: "console", level: kind === "error" ? "E" : "I", tag: kind, text };
-    setEvents((current) => [...current, entry].slice(-200));
-  }, []);
-
-  /** Sends a command and logs it, or the reason it did not go. */
-  const run = useCallback(
-    (what: string, kind: ConsoleKind, action: () => Promise<{ ok: true } | { ok: false; error: LinkError }>) => {
-      void action().then((done) => {
-        if (done.ok) return addEvent(kind, what);
+  /** Sends a command over Bluetooth and logs it, or the reason it did not go. */
+  const send = useCallback(
+    (command: ConsoleCommand) => {
+      const remote = toRemote(command);
+      if (!remote) return;
+      const what = describe(command);
+      void device.send(remote).then((done) => {
+        if (done.ok) return addEvent(commandKind(command), what);
         onError(done.error);
         addEvent("error", `${what}: ${done.error.message}`);
       });
     },
-    [addEvent, onError],
+    [device, describe, addEvent, onError],
   );
-
-  const press = useCallback(
-    (side: Side) => {
-      setPressed(side);
-      clearTimeout(flash.current);
-      flash.current = setTimeout(() => setPressed(null), FLASH_MS);
-      run(side === "left" ? tConsole("kind.keyLeft") : tConsole("kind.keyRight"), "input", () => commands.press(device, side));
-    },
-    [device, run, tConsole],
-  );
-  const badge = (uid: string) => {
-    setPressed("badge");
-    clearTimeout(flash.current);
-    flash.current = setTimeout(() => setPressed(null), FLASH_MS);
-    run(tConsole("kind.badge", { uid }), "input", () => commands.badge(device, uid));
-  };
-  const sync = useCallback(() => run(tConsole("kind.sync"), "system", () => commands.sync(device)), [device, run, tConsole]);
-
-  // Both keys at once, as on the terminal: hold one (mouse, touch, arrow key) and press the other.
-  const both = useCallback(() => run(tConsole("kind.both"), "input", () => commands.both(device)), [device, run, tConsole]);
-  const chord = useKeyChord((key) => (key === "both" ? both() : press(key)));
-  const shortcuts = useMemo(
-    () => ({ key: press, keyLevel: chord.keyLevel, badge: () => setBadgeOpen(true), sync }),
-    [press, chord.keyLevel, sync],
-  );
-  useDeviceShortcuts(shortcuts, badgeOpen);
+  const controls = useTerminalControls(send, false);
 
   const lines = useMemo(
     () => [...events, ...session.logs].filter((line) => line.at > clearedAt).sort((a, b) => a.at - b.at),
@@ -626,45 +600,32 @@ function Debugger({
     }
   };
 
-  const lit = pressed === "left" || pressed === "right" ? pressed : null;
   return (
     <Workbench
       terminal={
-        <div className="space-y-3">
-          <DeviceShell
-            pressed={chord.held.length > 0 ? chord.held : lit}
-            onKey={press}
-            onKeyLevel={chord.keyLevel}
-            indicator={
-              frame && (
-                <span className="text-[10px] font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
-                  {t("screen.live")}
-                </span>
-              )
-            }
-            screen={
-              frame ? (
-                <ScreenControl
-                  label={t("screen.tap")}
-                  onTap={(x, y) => run(tConsole("kind.tap", { x: x * 4, y: y * 4 }), "input", () => commands.tap(device, x, y))}
-                >
-                  <FrameCanvas bits={frame.bits} />
-                </ScreenControl>
-              ) : (
-                <p className="flex size-full items-center justify-center gap-2 p-4 text-center text-sm text-zinc-600">
-                  {message ? <MonitorOff className="size-4 shrink-0" /> : <LoaderCircle className="size-4 shrink-0 animate-spin" />}
-                  {message ?? t("screen.waiting")}
-                </p>
-              )
-            }
-            badge={
-              <BadgeZone badges={badges} open={badgeOpen} onOpenChange={setBadgeOpen} flashing={pressed === "badge"} onBadge={badge} />
-            }
-          />
-          <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-            <Keyboard className="hidden size-3.5 shrink-0 sm:block" /> {tConsole("shortcuts")} {tConsole("tapHint")}
-          </p>
-        </div>
+        <TerminalPanel
+          controls={controls}
+          badges={badges}
+          indicator={
+            frame && (
+              <span className="text-[10px] font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
+                {t("screen.live")}
+              </span>
+            )
+          }
+          screen={
+            frame ? (
+              <ScreenControl label={t("screen.tap")} onTap={(x, y) => controls.press({ kind: "tap", x, y })}>
+                <FrameCanvas bits={frame.bits} />
+              </ScreenControl>
+            ) : (
+              <p className="flex size-full items-center justify-center gap-2 p-4 text-center text-sm text-zinc-600">
+                {message ? <MonitorOff className="size-4 shrink-0" /> : <LoaderCircle className="size-4 shrink-0 animate-spin" />}
+                {message ?? t("screen.waiting")}
+              </p>
+            )
+          }
+        />
       }
       rail={
         <>
@@ -681,9 +642,9 @@ function Debugger({
           <ActionsCard
             deviceName={info?.name ?? device.name}
             description={t("actionsHint")}
-            onSync={sync}
-            onBoth={both}
-            onRestart={() => run(tConsole("kind.restart"), "system", () => commands.restart(device))}
+            onSync={() => controls.press({ kind: "sync" })}
+            onBoth={() => controls.press({ kind: "both" })}
+            onRestart={() => controls.press({ kind: "restart" })}
             onFirmware={update}
           />
         </>
@@ -693,7 +654,7 @@ function Debugger({
           entries={lines}
           fileName={info?.name ?? device.name}
           onClear={() => {
-            setClearedAt(Date.now());
+            clear();
             session.clearLogs();
           }}
         />

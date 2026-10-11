@@ -5,7 +5,8 @@
 //!
 //! Text frames are JSON with a `t` tag; the screen goes as binary frames
 //! (`[y u16 LE][rows u16 LE][rows × ROW_BYTES]`). The heartbeat is the text `PING`, answered
-//! `PONG` by the relay without waking it.
+//! `PONG` by the relay without waking it. The log and the beeps go as over Bluetooth
+//! (`link::Event`, `{"t":"log",…}`, `{"t":"beep",…}`): one shape for every transport.
 
 use serde::{Deserialize, Serialize};
 
@@ -70,7 +71,6 @@ pub enum FromTerminal<'a> {
     Status { status: &'a Status },
     /// The command `id` arrived; the console marks it delivered.
     Ack { id: &'a str },
-    Log { line: &'a str },
 }
 
 impl FromTerminal<'_> {
@@ -173,6 +173,11 @@ mod tests {
             r#"{"t":"hello","status":{"firmware":"0.4.0","batteryMv":3900,"rssi":-61}}"#
         );
         assert_eq!(FromTerminal::Ack { id: "c1" }.json(), r#"{"t":"ack","id":"c1"}"#);
+        // The log and the beeps, as over Bluetooth.
+        let log = crate::link::Event::Log { level: 'I', target: "api".into(), msg: "ok".into() };
+        assert_eq!(serde_json::to_string(&log).unwrap(), r#"{"t":"log","level":"I","target":"api","msg":"ok"}"#);
+        let beep = crate::link::Event::Beep { tones: vec![(4000, 40), (0, 30)] };
+        assert_eq!(serde_json::to_string(&beep).unwrap(), r#"{"t":"beep","tones":[[4000,40],[0,30]]}"#);
     }
 
     #[test]

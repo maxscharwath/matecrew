@@ -21,6 +21,7 @@ mod power;
 mod remote;
 mod socket;
 mod store;
+mod viewers;
 mod wifi;
 
 use anyhow::{bail, Result};
@@ -301,7 +302,7 @@ fn app() -> Result<()> {
     let state = store.state()?;
     // The relay from the last state: the socket opens before the first sync.
     live.set_url(state.as_ref().and_then(|s| s.realtime.as_ref()).map(|r| r.url.clone()));
-    let mirror = cores::on(Core::Core0, || remote::start(api.clone(), live.clone(), sender.clone()))?;
+    cores::on(Core::Core0, || remote::start(api.clone(), live.clone(), sender.clone()))?;
     let mode = store.app_mode()?;
     let mut app = state
         .as_ref()
@@ -336,7 +337,6 @@ fn app() -> Result<()> {
     Terminal {
         site: site.clone(),
         claim_key,
-        mirror,
         fetcher: cores::on(Core::Core0, || fetch::Fetcher::start(api.clone(), sender.clone()))?,
         _sntp: sntp,
         _ble: ble,
@@ -558,7 +558,6 @@ struct Terminal {
     /// For the links that claim an unknown badge: the site and the token's hash.
     site: String,
     claim_key: [u8; 32],
-    mirror: remote::Mirror,
     wifi: Wifi,
     /// The office network, for the about page.
     ssid: String,
@@ -1211,7 +1210,6 @@ impl Terminal {
                 None => ui::flow_screen(d, &Screen::NotReady),
             })?;
         }
-        self.mirror.send(self.screen.frame());
         Ok(())
     }
     fn redraw_current(&mut self) -> Result<()> {
@@ -1227,7 +1225,6 @@ impl Terminal {
 
     fn show(&mut self, draw: impl FnOnce(&mut Canvas) -> Result<(), Infallible>) -> Result<()> {
         self.screen.show(draw)?;
-        self.mirror.send(self.screen.frame());
         Ok(())
     }
 
@@ -1428,14 +1425,9 @@ impl Terminal {
             "ota: installing {} over {FIRMWARE_VERSION}",
             release.version
         );
-        let (screen, mirror) = (&mut self.screen, &self.mirror);
+        let screen = &mut self.screen;
         let mut draw = |percent: u8| {
-            if screen
-                .show(|d| ui::update_screen(d, &release.version, percent))
-                .is_ok()
-            {
-                mirror.send(screen.frame());
-            }
+            let _ = screen.show(|d| ui::update_screen(d, &release.version, percent));
         };
         draw(0);
         match ota::install(&self.api, &release, &mut draw) {

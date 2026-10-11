@@ -66,7 +66,9 @@ export type RemoteCommand =
 export type DeviceEvent =
   | { t: "log"; level: "E" | "W" | "I" | "D" | "V"; target: string; msg: string }
   | { t: "done"; op: "setup" | "control"; ok: boolean; error: string | null }
-  | { t: "ota"; state: "ready" | "writing" | "done" | "failed"; done: number; total: number; error: string | null };
+  | { t: "ota"; state: "ready" | "writing" | "done" | "failed"; done: number; total: number; error: string | null }
+  /** The piezo plays these tones, [Hz, ms] (0 Hz is a silence): play them too. */
+  | { t: "beep"; tones: [hz: number, ms: number][] };
 
 export type LinkErrorCode =
   /** No Web Bluetooth here (Safari, Firefox, no secure context). */
@@ -147,7 +149,7 @@ export function decodeInfo(bytes: Uint8Array): Result<DeviceInfo> {
 export function decodeEvent(bytes: Uint8Array): DeviceEvent | null {
   try {
     const event = JSON.parse(decoder.decode(bytes)) as { t?: unknown };
-    return event.t === "log" || event.t === "done" || event.t === "ota" ? (event as DeviceEvent) : null;
+    return ["log", "done", "ota", "beep"].includes(event.t as string) ? (event as DeviceEvent) : null;
   } catch {
     return null;
   }

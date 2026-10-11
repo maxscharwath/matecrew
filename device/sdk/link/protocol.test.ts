@@ -74,6 +74,13 @@ test("info and events decode, and a newer protocol is reported", () => {
     ok: true,
     error: null,
   });
+  assert.deepEqual(decodeEvent(new TextEncoder().encode('{"t":"beep","tones":[[4000,40],[0,30]]}')), {
+    t: "beep",
+    tones: [
+      [4000, 40],
+      [0, 30],
+    ],
+  });
   assert.equal(decodeEvent(new TextEncoder().encode('{"t":"future"}')), null);
   assert.equal(decodeEvent(new TextEncoder().encode("garbage")), null);
 });

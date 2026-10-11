@@ -15,6 +15,7 @@ import {
   writePatch,
   type Command,
   type FromTerminal,
+  type LogLevel,
   type Patch,
   type ToTerminal,
 } from "../../../../realtime/src/protocol";
@@ -100,9 +101,9 @@ export class RelayLink {
     return true;
   }
 
-  /** A log line, only while a console watches. */
-  log(line: string): void {
-    if (this.watching) this.send({ t: "log", line });
+  /** A log line, only while a console watches; as over Bluetooth: level, target, message. */
+  log(level: LogLevel, target: string, msg: string): void {
+    if (this.watching) this.send({ t: "log", level, target, msg });
   }
 
   /** The panel as it is now, while a console watches: the rows that changed since the last one. */

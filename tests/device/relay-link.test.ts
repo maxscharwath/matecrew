@@ -111,10 +111,10 @@ test("the screen goes only while a console watches: whole, then patches", () => 
   assert.deepEqual([patch?.y, patch?.rows], [300, 1]);
   relay.screen(next);
   assert.equal(socket.sent.length, 2, "nothing changed, nothing sent");
-  relay.log("I matecrew_web::flow test");
-  assert.equal(socket.sent[2], '{"t":"log","line":"I matecrew_web::flow test"}');
+  relay.log("I", "matecrew_web::flow", "test");
+  assert.equal(socket.sent[2], '{"t":"log","level":"I","target":"matecrew_web::flow","msg":"test"}');
   socket.say({ t: "live", watching: false });
-  relay.log("I matecrew_web::flow unseen");
+  relay.log("I", "matecrew_web::flow", "unseen");
   assert.equal(socket.sent.length, 3);
   relay.stop();
 });

@@ -8,12 +8,14 @@
 //!
 //! Without one, or while it cannot be reached, as before: a long poll for commands and the screen
 //! uploaded over HTTP. Two threads either way, as before: `downlink` (the socket, or the long
-//! poll) and `uplink` (the screen, and the log while a console watches).
+//! poll) and `uplink` (the screen, the log while a console watches, the beeps). What the terminal
+//! shows and says reaches this module through `viewers`, like Bluetooth.
 
 use anyhow::Result;
 use matecrew_core::{
-    contract::{normalize_uid, Command},
-    flow::Event,
+    action::Action,
+    flow::Event as FlowEvent,
+    link::Event,
     live::{self, changed_rows, command_id, patch, FromTerminal, Status, ToTerminal},
 };
 use std::{
@@ -43,8 +45,8 @@ const LOOK_EVERY: Duration = Duration::from_millis(500);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// The longest long poll the site holds.
 const LONG_POLL_MAX: Duration = Duration::from_secs(25);
-/// Log lines waiting for the uplink; more are dropped rather than held.
-const LOG_QUEUE_MAX: usize = 64;
+/// Log lines and beeps waiting for the uplink; more are dropped rather than held.
+const TEXT_QUEUE_MAX: usize = 64;
 
 /// The terminal's side of the live channel, shared by the threads that use it. Cheap to clone.
 #[derive(Clone)]
@@ -56,8 +58,6 @@ struct Shared {
     url: Mutex<Option<String>>,
     /// The open socket, for whoever sends.
     socket: Mutex<Option<Arc<Socket>>>,
-    /// A console wants the screen and the log.
-    watching: AtomicBool,
     /// The last report, sent again with each connection's hello.
     status: Mutex<Status>,
     /// The screen the relay has from this connection: patches start from it.
@@ -70,7 +70,6 @@ impl Live {
             token,
             url: Mutex::new(None),
             socket: Mutex::new(None),
-            watching: AtomicBool::new(false),
             status: Mutex::new(status),
             relayed: Mutex::new(None),
         }))
@@ -127,62 +126,104 @@ impl Live {
     }
 }
 
-/// What the uplink sends: a new frame (`None` to send the latest again), or a log line.
+/// What the uplink sends: the panel's latest screen (`LATEST`), or a text message (a log line,
+/// a beep).
 enum Up {
-    Frame(Option<Vec<u8>>),
-    Log(String),
+    Screen,
+    Text(String),
 }
 
-static LOGS: OnceLock<(Live, Mutex<Sender<Up>>)> = OnceLock::new();
-static LOGS_QUEUED: AtomicUsize = AtomicUsize::new(0);
+static UPLINK: OnceLock<(Live, Mutex<Sender<Up>>)> = OnceLock::new();
+static TEXTS_QUEUED: AtomicUsize = AtomicUsize::new(0);
+/// The panel's latest screen, copied in at each new one (no allocation), read when it goes.
+static LATEST: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+/// A console watches: the screen goes, and the log over the relay.
+static WATCHED: AtomicBool = AtomicBool::new(false);
 
-/// A line of the terminal's log, for a console watching over the relay. Never blocks, never
-/// logs: called from the logger, on any thread.
-pub fn log_line(level: char, target: &str, message: &str) {
-    // This module's own lines would loop through a failing send.
-    if target == "remote" || target == "socket" {
+/// Hands `up` to the uplink thread; with `wait` false, gives up rather than wait for the lock.
+fn queue(up: Up, wait: bool) -> bool {
+    let Some((_, uplink)) = UPLINK.get() else { return false };
+    let sender = if wait { uplink.lock().ok() } else { uplink.try_lock().ok() };
+    sender.is_some_and(|sender| sender.send(up).is_ok())
+}
+
+/// A text message for the relay when connected (and while a console watches, with
+/// `watching_only`). Never blocks.
+fn queue_text(watching_only: bool, message: impl FnOnce() -> String) {
+    let Some((live, _)) = UPLINK.get() else { return };
+    if (watching_only && !WATCHED.load(Ordering::Relaxed))
+        || !live.connected()
+        || TEXTS_QUEUED.load(Ordering::Relaxed) >= TEXT_QUEUE_MAX
+    {
         return;
     }
-    let Some((live, uplink)) = LOGS.get() else { return };
-    if !live.0.watching.load(Ordering::Relaxed) || !live.connected() || LOGS_QUEUED.load(Ordering::Relaxed) >= LOG_QUEUE_MAX {
-        return;
-    }
-    let line = format!("{level} {target} {message}");
-    if let Ok(uplink) = uplink.try_lock() {
-        if uplink.send(Up::Log(FromTerminal::Log { line: &line }.json())).is_ok() {
-            LOGS_QUEUED.fetch_add(1, Ordering::Relaxed);
-        }
+    if queue(Up::Text(message()), false) {
+        TEXTS_QUEUED.fetch_add(1, Ordering::Relaxed);
     }
 }
 
-/// Starts both threads; the mirror takes the screen loop's frames.
-pub fn start(api: Api, live: Live, inputs: Sender<Input>) -> Result<Mirror> {
-    let mirror = Mirror::start(api.clone(), live.clone())?;
-    let downlink = Downlink { api, live, inputs, mirror: mirror.clone() };
+/// An event for the consoles over the relay, in the same JSON as over Bluetooth (`link::Event`):
+/// the log while a console watches, the beeps whenever connected (a console with the screen over
+/// Bluetooth still hears them); Bluetooth's own answers stay there. Never blocks, never logs:
+/// called from the logger and the buzzer, on any thread (`viewers::publish`).
+pub fn publish(event: &Event) {
+    match event {
+        // This module's own lines would loop through a failing send.
+        Event::Log { target, .. } if target == "remote" || target == "socket" => {}
+        Event::Log { .. } => queue_text(true, || serde_json::to_string(event).unwrap_or_default()),
+        Event::Beep { .. } => queue_text(false, || serde_json::to_string(event).unwrap_or_default()),
+        Event::Done { .. } | Event::Ota { .. } => {}
+    }
+}
+
+/// A new screen on the panel (`viewers::screen`): kept, and sent while a console watches.
+pub fn screen(bits: &[u8]) {
+    if let Ok(mut latest) = LATEST.lock() {
+        latest.clear();
+        latest.extend_from_slice(bits);
+    }
+    if WATCHED.load(Ordering::Relaxed) {
+        queue(Up::Screen, true);
+    }
+}
+
+/// Whether a console watches; when one just started, the screen goes now.
+fn watched(watching: bool) {
+    if watching && !WATCHED.swap(true, Ordering::Relaxed) {
+        queue(Up::Screen, true);
+    } else if !watching {
+        WATCHED.store(false, Ordering::Relaxed);
+    }
+}
+
+/// Starts both threads.
+pub fn start(api: Api, live: Live, inputs: Sender<Input>) -> Result<()> {
+    uplink(api.clone(), live.clone())?;
+    let downlink = Downlink { api, live, inputs };
     thread::Builder::new().stack_size(10 * 1024).spawn(move || downlink.run())?;
-    Ok(mirror)
+    Ok(())
 }
 
-/// What a console command does on the terminal; `None` for one it cannot run.
-fn input_of(command: Command) -> Option<Input> {
-    Some(match command {
-        Command::Key { side, .. } => Input::Flow(Event::Key { side }),
-        Command::Both { .. } => Input::Flow(Event::BothKeys),
-        Command::Badge { uid, .. } => Input::Flow(Event::Badge { uid: normalize_uid(&uid)? }),
-        Command::Sync { app: Some(app), .. } => Input::SelectApp(app),
-        Command::Sync { .. } => Input::Sync,
-        Command::Tap { x, y, .. } => Input::Tap(x, y),
-        Command::Restart { .. } => Input::Restart,
-        Command::ForgetWifi { .. } => Input::ForgetWifi,
-        Command::Unknown => return None,
-    })
+/// What a console's action does on the terminal, whichever way it came (the relay, the long
+/// poll, Bluetooth).
+pub fn input(action: Action) -> Input {
+    match action {
+        Action::Key(side) => Input::Flow(FlowEvent::Key { side }),
+        Action::Both => Input::Flow(FlowEvent::BothKeys),
+        Action::Badge(uid) => Input::Flow(FlowEvent::Badge { uid }),
+        Action::Sync => Input::Sync,
+        Action::App(app) => Input::SelectApp(app),
+        Action::Tap { x, y } => Input::Tap(x, y),
+        Action::Restart => Input::Restart,
+        Action::ForgetWifi => Input::ForgetWifi,
+        Action::Notify(text) => Input::Notify(text),
+    }
 }
 
 struct Downlink {
     api: Api,
     live: Live,
     inputs: Sender<Input>,
-    mirror: Mirror,
 }
 
 impl Downlink {
@@ -290,8 +331,7 @@ impl Downlink {
         if let Ok(mut open) = self.live.0.socket.lock() {
             *open = None;
         }
-        self.live.0.watching.store(false, Ordering::Relaxed);
-        self.mirror.watched(false);
+        watched(false);
         log::info!("relay: disconnected");
         alive && self.inputs.send(Input::Live(false)).is_ok()
     }
@@ -303,8 +343,8 @@ impl Downlink {
                 crate::net::pulse(false);
                 log::info!("console: {command:?}");
                 let id = command_id(&command).map(str::to_owned);
-                if let Some(input) = input_of(command) {
-                    if self.inputs.send(input).is_err() {
+                if let Some(action) = Action::from_command(command) {
+                    if self.inputs.send(input(action)).is_err() {
                         return false;
                     }
                 }
@@ -312,10 +352,7 @@ impl Downlink {
                     let _ = socket.send_text(&FromTerminal::Ack { id: &id }.json(), SEND_TIMEOUT);
                 }
             }
-            ToTerminal::Live { watching } => {
-                self.live.0.watching.store(watching, Ordering::Relaxed);
-                self.mirror.watched(watching);
-            }
+            ToTerminal::Live { watching } => watched(watching),
             ToTerminal::Sync { at } => return self.inputs.send(Input::Changed(at)).is_ok(),
             ToTerminal::Unknown => {}
         }
@@ -337,11 +374,11 @@ impl Downlink {
                 return true;
             }
         };
-        self.mirror.watched(reply.live);
+        watched(reply.live);
         for command in reply.commands {
             log::info!("console: {command:?}");
-            if let Some(input) = input_of(command) {
-                if self.inputs.send(input).is_err() {
+            if let Some(action) = Action::from_command(command) {
+                if self.inputs.send(input(action)).is_err() {
                     return false;
                 }
             }
@@ -355,79 +392,51 @@ const STATUS_BYTES: usize = 56 * 800 / 8;
 /// How often a change in the status bar alone is sent.
 const STATUS_EVERY: Duration = Duration::from_secs(30);
 
-/// Sends each new frame while a console watches, over the relay when connected (the rows that
-/// changed), else uploaded to the site; when several pile up, only the latest goes. A console
-/// starting to watch gets the screen at once. Also carries the log lines a console watches.
-#[derive(Clone)]
-pub struct Mirror {
-    up: Sender<Up>,
-    live: Arc<AtomicBool>,
-}
-
-impl Mirror {
-    fn start(api: Api, relay: Live) -> Result<Self> {
-        let (up, received) = mpsc::channel::<Up>();
-        let _ = LOGS.set((relay.clone(), Mutex::new(up.clone())));
-        let live = Arc::new(AtomicBool::new(false));
-        let watched = live.clone();
-        thread::Builder::new()
-            .stack_size(10 * 1024)
-            .spawn(move || {
-                let mut latest: Option<Vec<u8>> = None;
-                let mut sent = true;
-                let mut uploaded: Option<Vec<u8>> = None;
-                let mut status_uploaded: Option<Instant> = None;
-                while let Ok(message) = received.recv() {
-                    for message in std::iter::once(message).chain(received.try_iter()) {
-                        match message {
-                            Up::Frame(frame) => {
-                                if let Some(frame) = frame {
-                                    latest = Some(frame);
-                                }
-                                sent = false;
-                            }
-                            Up::Log(line) => {
-                                LOGS_QUEUED.fetch_sub(1, Ordering::Relaxed);
-                                if let Some(socket) = relay.socket() {
-                                    let _ = socket.send_text(&line, SEND_TIMEOUT);
-                                }
-                            }
-                        }
-                    }
-                    let Some(frame) = latest.as_ref().filter(|_| !sent && watched.load(Ordering::Relaxed)) else {
-                        continue;
-                    };
-                    // Uploading over HTTP lights the status bar's network arrow, which changes the
-                    // screen, which uploads again: a change in the status bar alone goes at most
-                    // every STATUS_EVERY; the next one elsewhere carries it.
-                    let status_only = uploaded.as_ref().is_some_and(|before| before[STATUS_BYTES..] == frame[STATUS_BYTES..]);
-                    if status_only && status_uploaded.is_some_and(|at| at.elapsed() < STATUS_EVERY) {
-                        continue;
-                    }
-                    let done = relay.send_screen(frame)
-                        || (!relay.connected() && api.put_frame(frame).inspect_err(|e| log::warn!("screen mirror: {e:#}")).is_ok());
-                    if done {
-                        sent = true;
-                        uploaded = Some(frame.clone());
-                        if status_only {
-                            status_uploaded = Some(Instant::now());
+/// Sends the screen while a console watches, over the relay when connected (the rows that
+/// changed), else uploaded to the site; when several pile up, only the latest goes. Also sends the
+/// text messages (`queue_text`).
+fn uplink(api: Api, relay: Live) -> Result<()> {
+    let (up, received) = mpsc::channel::<Up>();
+    let _ = UPLINK.set((relay.clone(), Mutex::new(up)));
+    thread::Builder::new().stack_size(10 * 1024).spawn(move || {
+        let mut sent = true;
+        let mut uploaded: Option<Vec<u8>> = None;
+        let mut status_uploaded: Option<Instant> = None;
+        while let Ok(message) = received.recv() {
+            for message in std::iter::once(message).chain(received.try_iter()) {
+                match message {
+                    Up::Screen => sent = false,
+                    Up::Text(text) => {
+                        TEXTS_QUEUED.fetch_sub(1, Ordering::Relaxed);
+                        if let Some(socket) = relay.socket() {
+                            let _ = socket.send_text(&text, SEND_TIMEOUT);
                         }
                     }
                 }
-            })?;
-        Ok(Self { up, live })
-    }
-
-    pub fn send(&self, frame: &[u8]) {
-        let _ = self.up.send(Up::Frame(Some(frame.to_vec())));
-    }
-
-    /// Whether someone has the console open; when they just opened it, the screen goes now.
-    fn watched(&self, live: bool) {
-        if live && !self.live.swap(true, Ordering::Relaxed) {
-            let _ = self.up.send(Up::Frame(None));
-        } else if !live {
-            self.live.store(false, Ordering::Relaxed);
+            }
+            if sent || !WATCHED.load(Ordering::Relaxed) {
+                continue;
+            }
+            let Some(frame) = LATEST.lock().ok().map(|latest| latest.clone()).filter(|f| !f.is_empty()) else {
+                continue;
+            };
+            // Uploading over HTTP lights the status bar's network arrow, which changes the
+            // screen, which uploads again: a change in the status bar alone goes at most every
+            // STATUS_EVERY; the next one elsewhere carries it.
+            let status_only = uploaded.as_ref().is_some_and(|before| before[STATUS_BYTES..] == frame[STATUS_BYTES..]);
+            if status_only && status_uploaded.is_some_and(|at| at.elapsed() < STATUS_EVERY) {
+                continue;
+            }
+            let done = relay.send_screen(&frame)
+                || (!relay.connected() && api.put_frame(&frame).inspect_err(|e| log::warn!("screen mirror: {e:#}")).is_ok());
+            if done {
+                sent = true;
+                uploaded = Some(frame);
+                if status_only {
+                    status_uploaded = Some(Instant::now());
+                }
+            }
         }
-    }
+    })?;
+    Ok(())
 }
