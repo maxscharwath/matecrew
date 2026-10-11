@@ -95,6 +95,20 @@ pub struct DeviceState {
     pub theme: String,
     /// The latest firmware published on the site; the terminal installs it when it is newer.
     pub firmware: Option<FirmwareRelease>,
+    /// The relay's socket (`live`): commands, the screen mirror and "what you show changed" go
+    /// through it. Absent (an older site, a site without relay), the terminal polls the site.
+    #[serde(default)]
+    pub realtime: Option<Realtime>,
+    /// When this state changes by itself (a session's cutoff, its preparation ending), ISO 8601:
+    /// the terminal syncs then.
+    #[serde(default)]
+    pub refresh_at: Option<String>,
+}
+
+/// Where the terminal's live channel opens: `wss://…/terminals/socket`, with its token.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Realtime {
+    pub url: String,
 }
 
 /// A firmware image on the site, downloaded with the device's token.
@@ -166,7 +180,15 @@ pub struct ServeResponse {
     pub served: u32,
     /// Why nothing was served: "unknown_badge", "invalid_badge".
     pub reason: Option<String>,
+    /// The runner's [`Person::avatar`] at [`AVATAR_SERVED`], for the screen that thanks them.
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
+
+/// Sides of a person's picture, as the screens draw it (`src/lib/device/avatar.ts`).
+pub const AVATAR_ACCOUNT: usize = 40;
+pub const AVATAR_SERVED: usize = 128;
+pub const AVATAR_PREPARATION: usize = 32;
 
 /// Where the terminal asks for a badge holder's account, and cancels a purchase.
 pub const ACCOUNT_PATH: &str = "/api/device/account";
@@ -214,6 +236,10 @@ pub struct Account {
     pub labels: Vec<String>,
     /// The latest purchases the site still counts (not cancelled), newest first.
     pub purchases: Vec<Purchase>,
+    /// The member's [`Person::avatar`] at [`AVATAR_ACCOUNT`]; None without one (an older site
+    /// sends none).
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 /// `POST /api/device/purchases/cancel`: the badge holder cancels one of their purchases, by the
@@ -336,6 +362,25 @@ mod tests {
         assert_eq!(body, r#"{"badgeUid":"04A1","id":"c1"}"#);
         let done: CancelPurchaseResponse = serde_json::from_str(r#"{"cancelled":false,"reason":"not_yours"}"#).unwrap();
         assert_eq!(done.reason.as_deref(), Some("not_yours"));
+        // A site from before avatars sends none.
+        assert_eq!(account.avatar, None);
+    }
+
+    #[test]
+    fn reads_the_avatars_and_does_without_them() {
+        let served: ServeResponse = serde_json::from_str(r#"{"served":9,"reason":null,"avatar":"QUxleA=="}"#).unwrap();
+        assert_eq!((served.served, served.avatar.as_deref()), (9, Some("QUxleA==")));
+        let served: ServeResponse = serde_json::from_str(r#"{"served":9,"reason":null}"#).unwrap();
+        assert_eq!(served.avatar, None);
+        let item: PreparationItem = serde_json::from_str(
+            r#"{"name":"Maté","count":3,"names":"Alex, Sam, Lou","picture":"",
+            "people":[{"initials":"AM","avatar":"QUxleA=="},{"initials":"S","avatar":null},{"initials":"L"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(item.people[0], Person { initials: "AM".into(), avatar: Some("QUxleA==".into()) });
+        assert_eq!(item.people[2].avatar, None);
+        let item: PreparationItem = serde_json::from_str(r#"{"name":"Maté","count":1,"names":"Lou","picture":""}"#).unwrap();
+        assert!(item.people.is_empty());
     }
 
     #[test]
@@ -508,6 +553,19 @@ pub struct PreparationItem {
     pub name: String, pub count: u32, pub names: String,
     /// As [`ScreenItem::picture`].
     pub picture: String,
+    /// The first ones `names` lists, at [`AVATAR_PREPARATION`]; `count` says how many in all.
+    #[serde(default)]
+    pub people: Vec<Person>,
+}
+/// Someone a screen shows.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Person {
+    /// What shows without an avatar: "AM" for Alex Martin.
+    pub initials: String,
+    /// Their avatar dithered in a disc ringed in ink, at the side the screen draws it: packed
+    /// 1-bit then its opacity plane, base64 (`src/lib/device/avatar.ts`). None without one.
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]

@@ -2,161 +2,395 @@ import { DurableObject } from "cloudflare:workers";
 import {
   COMMAND_TTL_MS,
   FRAME_BYTES,
+  HISTORY,
+  INPUT_TTL_MS,
+  PANEL_HEIGHT,
+  PING,
+  PING_EVERY_MS,
+  PING_GRACE_MS,
+  PONG,
+  SUBPROTOCOL,
+  TERMINAL_HEADER,
+  applyPatch,
   command as parseCommand,
+  isInput,
   parse,
+  readPatch,
+  writePatch,
   type Command,
+  type CommandEntry,
   type CommandStatus,
   type FromConsole,
   type FromTerminal,
+  type Presence,
+  type TerminalStatus,
   type ToConsole,
   type ToTerminal,
 } from "./protocol";
-import type { Env } from "./index";
-import type { Role } from "./token";
 
-/** A command waiting for the terminal to connect, with when it stops waiting. */
+export interface RelayEnv {
+  /** The site's D1 database: terminals are authenticated by the hash of their token. */
+  readonly DB: D1Database;
+  readonly TERMINALS: DurableObjectNamespace<Terminal>;
+}
+
+/** Kept on each socket, so it survives hibernation. */
+type Attachment =
+  | { role: "device"; since: number }
+  /** `screen`: the console wants the screen from here (not while it has it over Bluetooth). */
+  | { role: "console"; user: string; screen: boolean };
+
+/** A command waiting for the terminal to connect, until `until`. */
 type Pending = { command: Command; until: number };
 
+/** How long a console ticket (`ticket`) can be used, once. */
+const TICKET_TTL_MS = 60_000;
+/** While consoles are open, how often the relay looks whether the terminal still pings. */
+const CHECK_EVERY_MS = PING_EVERY_MS / 2;
+const LOG_LINE_MAX = 512;
+
+function attachment(socket: WebSocket): Attachment | null {
+  return (socket.deserializeAttachment() as Attachment | null) ?? null;
+}
+
+function randomTicket(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCodePoint(byte);
+  return `mct_${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`;
+}
+
 /**
- * One terminal's relay: its socket, the consoles watching it, the commands waiting for it and
- * its last screen. Sockets hibernate (`acceptWebSocket`), so an idle terminal costs nothing.
+ * One terminal's relay: its socket, the consoles watching it, the commands waiting for it, its
+ * last status and screen. Sockets hibernate (`acceptWebSocket`) and the terminal's heartbeat is
+ * answered without waking the object, so a connected, idle terminal costs nothing.
+ *
+ * The site calls the public methods over RPC (src/platform/cloudflare/realtime.ts): a console
+ * ticket, a command, "what it shows changed", its presence, its last screen.
  */
-export class Terminal extends DurableObject<Env> {
-  private sockets(role: Role): WebSocket[] {
-    return this.ctx.getWebSockets(role);
+export class Terminal extends DurableObject<RelayEnv> {
+  /** The last screen, read from storage on first use (the object may have slept since). */
+  private frame: Uint8Array | null | undefined;
+
+  constructor(ctx: DurableObjectState, env: RelayEnv) {
+    super(ctx, env);
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));
   }
 
-  private send(sockets: WebSocket[], message: ToConsole | ToTerminal | ArrayBuffer) {
-    const data = message instanceof ArrayBuffer ? message : JSON.stringify(message);
-    for (const socket of sockets) {
-      try {
-        socket.send(data);
-      } catch {
-        // A socket closing meanwhile: its close event cleans up.
-      }
+  // --- RPC from the site -------------------------------------------------------------------------
+
+  /** A one-time ticket for `user`'s console to open its socket within a minute. */
+  async ticket(user: string): Promise<string> {
+    const ticket = randomTicket();
+    await this.ctx.storage.put(`ticket:${ticket}`, { user, until: Date.now() + TICKET_TTL_MS });
+    await this.schedule();
+    return ticket;
+  }
+
+  /** Runs `command` on the terminal now, or keeps it until it connects; consoles see it listed. */
+  async command(command: Command, by: string | null): Promise<CommandStatus> {
+    const valid = parseCommand(command);
+    if (!valid) throw new Error("invalid command");
+    return this.deliver(valid, by);
+  }
+
+  /** What the terminal shows changed at `at`: it syncs now. False when it is not connected. */
+  async changed(at: number): Promise<boolean> {
+    const terminal = this.terminal();
+    if (!terminal) return false;
+    this.send([terminal], { t: "sync", at });
+    return true;
+  }
+
+  async presence(): Promise<Presence> {
+    const terminal = this.terminal();
+    const [status, statusAt, drawnAt] = await Promise.all([
+      this.ctx.storage.get<TerminalStatus>("status"),
+      this.ctx.storage.get<number>("statusAt"),
+      this.ctx.storage.get<number>("drawnAt"),
+    ]);
+    const since = terminal ? (attachment(terminal) as { since: number }).since : null;
+    return { online: !!terminal, since, status: status ?? null, statusAt: statusAt ?? null, drawnAt: drawnAt ?? null };
+  }
+
+  /** The last screen the terminal sent, packed 1 bit (`FRAME_BYTES`), and when. */
+  async screen(): Promise<{ bits: Uint8Array; drawnAt: number } | null> {
+    const [bits, drawnAt] = await Promise.all([this.loadFrame(), this.ctx.storage.get<number>("drawnAt")]);
+    return bits && drawnAt ? { bits, drawnAt } : null;
+  }
+
+  // --- Sockets -----------------------------------------------------------------------------------
+
+  /** Called by the relay's Worker once it has authenticated the caller (src/index.ts). */
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response(null, { status: 426 });
+    const role = request.headers.get("x-role");
+    let joining: Attachment;
+    if (role === "device") {
+      joining = { role: "device", since: Date.now() };
+    } else if (role === "console") {
+      const key = `ticket:${request.headers.get("x-ticket") ?? ""}`;
+      const ticket = await this.ctx.storage.get<{ user: string; until: number }>(key);
+      await this.ctx.storage.delete(key);
+      if (!ticket || ticket.until < Date.now()) return new Response(null, { status: 401 });
+      joining = { role: "console", user: ticket.user, screen: true };
+    } else {
+      return new Response(null, { status: 400 });
+    }
+
+    const { 0: client, 1: server } = new WebSocketPair();
+    if (joining.role === "device") {
+      // One terminal: a new connection (after a restart, a Wi-Fi drop) replaces the old one.
+      for (const old of this.ctx.getWebSockets("device")) old.close(4000, "replaced");
+    }
+    this.ctx.acceptWebSocket(server, [joining.role]);
+    server.serializeAttachment(joining);
+    if (joining.role === "device") await this.terminalJoined(server);
+    else await this.consoleJoined(server);
+    const headers = request.headers.get("x-subprotocol") ? { "sec-websocket-protocol": SUBPROTOCOL } : undefined;
+    return new Response(null, { status: 101, webSocket: client, headers });
+  }
+
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
+    const joined = attachment(socket);
+    if (joined?.role === "device") await this.fromTerminal(message);
+    else if (joined?.role === "console" && typeof message === "string") await this.fromConsole(socket, joined, message);
+  }
+
+  async webSocketClose(socket: WebSocket, code: number, reason: string) {
+    this.left(socket);
+    try {
+      // 1005 and 1006 say no code came; they cannot be sent back.
+      socket.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+    } catch {
+      // Already closed.
     }
   }
 
-  private toConsoles(message: ToConsole | ArrayBuffer) {
-    this.send(this.sockets("console"), message);
+  async webSocketError(socket: WebSocket) {
+    this.left(socket);
   }
 
-  /** Tells the terminal whether a console watches it (`closing` is leaving): it mirrors its
-   * screen only then. */
-  private live(closing?: WebSocket) {
-    const watching = this.sockets("console").some((socket) => socket !== closing);
-    this.send(this.sockets("device"), { t: "live", watching });
+  /** Looks whether the terminal still pings while consoles watch; drops expired commands and tickets. */
+  async alarm() {
+    const now = Date.now();
+    const terminal = this.ctx.getWebSockets("device")[0];
+    if (terminal && !this.alive(terminal, now)) {
+      // Gone without closing (power cut, Wi-Fi lost): say so now rather than when TCP notices.
+      terminal.close(4001, "silent");
+      this.toConsoles({ t: "online", online: false, since: null });
+    }
+    const pending = (await this.ctx.storage.get<Pending[]>("pending")) ?? [];
+    const kept = pending.filter((p) => p.until > now);
+    if (kept.length !== pending.length) {
+      await this.ctx.storage.put("pending", kept);
+      for (const { command } of pending.filter((p) => p.until <= now)) await this.setStatus(command.id, "dropped");
+    }
+    const tickets = await this.ctx.storage.list<{ until: number }>({ prefix: "ticket:" });
+    const expired = [...tickets].filter(([, ticket]) => ticket.until <= now).map(([key]) => key);
+    if (expired.length > 0) await this.ctx.storage.delete(expired);
+    await this.schedule();
   }
 
-  /** Sends `command` to the terminal now, or keeps it for `COMMAND_TTL_MS`. */
-  private async deliver(command: Command) {
-    const [terminal] = this.sockets("device");
+  // --- Terminal ----------------------------------------------------------------------------------
+
+  /** The connected terminal, if it still pings. */
+  private terminal(): WebSocket | null {
+    const socket = this.ctx.getWebSockets("device")[0];
+    return socket && this.alive(socket, Date.now()) ? socket : null;
+  }
+
+  private alive(socket: WebSocket, now: number): boolean {
+    const joined = attachment(socket);
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(socket)?.getTime() ?? 0;
+    const since = joined?.role === "device" ? joined.since : 0;
+    return now - Math.max(pinged, since) < PING_EVERY_MS + PING_GRACE_MS;
+  }
+
+  /** The commands kept for it, whether a console watches; consoles hear it is online. */
+  private async terminalJoined(socket: WebSocket) {
+    const now = Date.now();
+    const pending = ((await this.ctx.storage.get<Pending[]>("pending")) ?? []).filter((p) => p.until > now);
+    await this.ctx.storage.delete("pending");
+    for (const { command } of pending) {
+      this.send([socket], { t: "command", command });
+      await this.setStatus(command.id, "sent");
+    }
+    this.send([socket], { t: "live", watching: this.watching() });
+    this.toConsoles({ t: "online", online: true, since: now });
+  }
+
+  private async fromTerminal(message: string | ArrayBuffer) {
+    if (typeof message !== "string") {
+      const patch = readPatch(message, TERMINAL_HEADER);
+      if (!patch) return;
+      const drawnAt = Date.now();
+      // Consoles first: storing waits for nothing they need.
+      const out = writePatch(patch, drawnAt);
+      for (const socket of this.screenConsoles()) this.trySend(socket, out);
+      const frame = (await this.loadFrame()) ?? new Uint8Array(FRAME_BYTES);
+      applyPatch(frame, patch);
+      this.frame = frame;
+      await this.ctx.storage.put({ frame, drawnAt }, { allowUnconfirmed: true });
+      return;
+    }
+    const sent = parse<FromTerminal>(message, ["hello", "status", "ack", "log"]);
+    if (!sent) return;
+    switch (sent.t) {
+      case "hello":
+      case "status": {
+        if (typeof sent.status !== "object" || sent.status === null) return;
+        const at = Date.now();
+        const previous = sent.t === "status" ? ((await this.ctx.storage.get<TerminalStatus>("status")) ?? {}) : {};
+        const status = { ...previous, ...sent.status };
+        this.toConsoles({ t: "status", status, at });
+        await this.ctx.storage.put({ status, statusAt: at }, { allowUnconfirmed: true });
+        break;
+      }
+      case "ack":
+        if (typeof sent.id === "string") await this.setStatus(sent.id, "delivered");
+        break;
+      case "log":
+        this.toConsoles({ t: "log", line: String(sent.line).slice(0, LOG_LINE_MAX), at: Date.now() });
+        break;
+    }
+  }
+
+  // --- Consoles ----------------------------------------------------------------------------------
+
+  /** A console catches up: online since when, status, recent commands, last screen. */
+  private async consoleJoined(socket: WebSocket) {
+    const terminal = this.terminal();
+    const since = terminal ? (attachment(terminal) as { since: number }).since : null;
+    this.send([socket], { t: "online", online: !!terminal, since });
+    const [status, statusAt, history] = await Promise.all([
+      this.ctx.storage.get<TerminalStatus>("status"),
+      this.ctx.storage.get<number>("statusAt"),
+      this.ctx.storage.get<CommandEntry[]>("history"),
+    ]);
+    if (status) this.send([socket], { t: "status", status, at: statusAt ?? 0 });
+    this.send([socket], { t: "commands", entries: history ?? [] });
+    await this.sendScreen(socket);
+    this.live();
+    await this.schedule();
+  }
+
+  private async fromConsole(socket: WebSocket, joined: Extract<Attachment, { role: "console" }>, message: string) {
+    const sent = parse<FromConsole>(message, ["command", "watch"]);
+    if (sent?.t === "command") {
+      const valid = parseCommand(sent.command);
+      if (valid) await this.deliver(valid, joined.user);
+    } else if (sent?.t === "watch" && typeof sent.screen === "boolean" && sent.screen !== joined.screen) {
+      socket.serializeAttachment({ ...joined, screen: sent.screen });
+      if (sent.screen) await this.sendScreen(socket);
+      this.live();
+    }
+  }
+
+  private async sendScreen(socket: WebSocket) {
+    const shown = await this.screen();
+    if (shown) this.trySend(socket, writePatch({ y: 0, rows: PANEL_HEIGHT, bits: shown.bits }, shown.drawnAt));
+  }
+
+  private screenConsoles(except?: WebSocket): WebSocket[] {
+    return this.ctx.getWebSockets("console").filter((socket) => {
+      const joined = attachment(socket);
+      return socket !== except && joined?.role === "console" && joined.screen;
+    });
+  }
+
+  /** Whether a console wants the screen: the terminal sends it only then. */
+  private watching(except?: WebSocket): boolean {
+    return this.screenConsoles(except).length > 0;
+  }
+
+  /** Tells the terminal whether a console watches (`leaving` is going). */
+  private live(leaving?: WebSocket) {
+    const terminal = this.ctx.getWebSockets("device")[0];
+    if (terminal) this.send([terminal], { t: "live", watching: this.watching(leaving) });
+  }
+
+  private left(socket: WebSocket) {
+    const joined = attachment(socket);
+    if (joined?.role === "device") {
+      if (this.ctx.getWebSockets("device").every((s) => s === socket)) {
+        this.toConsoles({ t: "online", online: false, since: null });
+      }
+    } else if (joined?.role === "console") {
+      this.live(socket);
+    }
+  }
+
+  // --- Commands ----------------------------------------------------------------------------------
+
+  private async deliver(command: Command, by: string | null): Promise<CommandStatus> {
+    const history = (await this.ctx.storage.get<CommandEntry[]>("history")) ?? [];
+    const known = history.find((entry) => entry.id === command.id);
+    // The same command twice (a console sending again after a reconnection): once is enough.
+    if (known) return known.status;
+    const now = Date.now();
+    const terminal = this.terminal();
     let status: CommandStatus = "sent";
     if (terminal) {
       this.send([terminal], { t: "command", command });
     } else {
-      const pending = ((await this.ctx.storage.get<Pending[]>("pending")) ?? []).filter((p) => p.until > Date.now());
-      pending.push({ command, until: Date.now() + COMMAND_TTL_MS });
+      const pending = ((await this.ctx.storage.get<Pending[]>("pending")) ?? []).filter((p) => p.until > now);
+      pending.push({ command, until: now + (isInput(command) ? INPUT_TTL_MS : COMMAND_TTL_MS) });
       await this.ctx.storage.put("pending", pending);
       status = "waiting";
     }
-    this.toConsoles({ t: "commandStatus", id: command.id, status });
+    const entry: CommandEntry = { id: command.id, command, at: now, by, status };
+    await this.ctx.storage.put("history", [...history, entry].slice(-HISTORY));
+    this.toConsoles({ t: "command", entry });
+    if (status === "waiting") await this.schedule();
+    return status;
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const role = request.headers.get("x-role") as Role | null;
-    if (request.headers.get("upgrade") === "websocket" && (role === "device" || role === "console")) {
-      return this.open(role);
-    }
-    if (request.method === "POST" && role === "site") {
-      const parsed = parseCommand(await request.json().catch(() => null));
-      if (!parsed) return Response.json({ error: "invalid_command" }, { status: 400 });
-      await this.deliver(parsed);
-      return new Response(null, { status: 204 });
-    }
-    return new Response(null, { status: 400 });
+  private async setStatus(id: string, status: CommandStatus) {
+    const history = (await this.ctx.storage.get<CommandEntry[]>("history")) ?? [];
+    const entry = history.find((e) => e.id === id);
+    if (!entry || entry.status === status) return;
+    entry.status = status;
+    await this.ctx.storage.put("history", history);
+    this.toConsoles({ t: "command", entry });
   }
 
-  /** A hibernating WebSocket for the terminal or a console. */
-  private async open(role: "device" | "console"): Promise<Response> {
-    const { 0: client, 1: server } = new WebSocketPair();
-    if (role === "device") {
-      // One terminal: a new connection replaces the old one.
-      for (const old of this.sockets("device")) old.close(4000, "replaced");
-    }
-    this.ctx.acceptWebSocket(server, [role]);
-    if (role === "device") await this.terminalJoined(server);
-    else await this.consoleJoined(server);
-    return new Response(null, { status: 101, webSocket: client });
+  // --- Plumbing ----------------------------------------------------------------------------------
+
+  /** The next alarm: soon while consoles watch, at the first expiry otherwise, none when idle. */
+  private async schedule() {
+    const now = Date.now();
+    const times: number[] = [];
+    if (this.ctx.getWebSockets("console").length > 0) times.push(now + CHECK_EVERY_MS);
+    const pending = (await this.ctx.storage.get<Pending[]>("pending")) ?? [];
+    times.push(...pending.map((p) => p.until));
+    const tickets = await this.ctx.storage.list<{ until: number }>({ prefix: "ticket:" });
+    times.push(...[...tickets.values()].map((t) => t.until));
+    if (times.length === 0) return this.ctx.storage.deleteAlarm();
+    const next = Math.max(now + 1_000, Math.min(...times));
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > next || current < now) await this.ctx.storage.setAlarm(next);
   }
 
-  /** The terminal is online: the commands kept for it, whether a console watches; consoles hear of it. */
-  private async terminalJoined(server: WebSocket) {
-    await this.ctx.storage.put("onlineSince", Date.now());
-    const pending = ((await this.ctx.storage.get<Pending[]>("pending")) ?? []).filter((p) => p.until > Date.now());
-    await this.ctx.storage.delete("pending");
-    for (const { command } of pending) this.send([server], { t: "command", command });
-    this.send([server], { t: "live", watching: this.sockets("console").length > 0 });
-    this.toConsoles({ t: "online", online: true, since: Date.now() });
+  private async loadFrame(): Promise<Uint8Array | null> {
+    if (this.frame === undefined) this.frame = (await this.ctx.storage.get<Uint8Array>("frame")) ?? null;
+    return this.frame;
   }
 
-  /** A console catches up (online since when, last status, last screen); the terminal starts mirroring. */
-  private async consoleJoined(server: WebSocket) {
-    const since = this.sockets("device").length > 0 ? ((await this.ctx.storage.get<number>("onlineSince")) ?? null) : null;
-    this.send([server], { t: "online", online: since !== null, since });
-    const status = await this.ctx.storage.get<Record<string, unknown>>("status");
-    if (status) this.send([server], { t: "status", status });
-    const frame = await this.ctx.storage.get<ArrayBuffer>("frame");
-    if (frame) this.send([server], frame);
-    this.live();
+  private toConsoles(message: ToConsole) {
+    this.send(this.ctx.getWebSockets("console"), message);
   }
 
-  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
-    const [role] = this.ctx.getTags(socket) as Role[];
-    if (role === "device") {
-      if (typeof message !== "string") {
-        if (message.byteLength !== FRAME_BYTES) return;
-        await this.ctx.storage.put("frame", message);
-        this.toConsoles(message);
-        return;
-      }
-      const sent = parse<FromTerminal>(message, ["hello", "status", "log", "ack"]);
-      if (!sent) return;
-      switch (sent.t) {
-        case "hello":
-        case "status": {
-          const status: Record<string, unknown> = { ...sent };
-          delete status.t;
-          await this.ctx.storage.put("status", status);
-          this.toConsoles({ t: "status", status });
-          break;
-        }
-        case "log":
-          this.toConsoles({ t: "log", line: String(sent.line).slice(0, 512), at: Date.now() });
-          break;
-        case "ack":
-          this.toConsoles({ t: "commandStatus", id: sent.id, status: "delivered" });
-          break;
-      }
-    } else if (role === "console" && typeof message === "string") {
-      const sent = parse<FromConsole>(message, ["command"]);
-      const valid = sent && parseCommand(sent.command);
-      if (valid) await this.deliver(valid);
-    }
+  private send(sockets: WebSocket[], message: ToConsole | ToTerminal) {
+    const text = JSON.stringify(message);
+    for (const socket of sockets) this.trySend(socket, text);
   }
 
-  webSocketClose(socket: WebSocket, code: number, reason: string) {
-    const [role] = this.ctx.getTags(socket) as Role[];
-    if (role === "device" && this.sockets("device").every((s) => s === socket)) {
-      this.toConsoles({ t: "online", online: false, since: null });
-    } else if (role === "console") {
-      this.live(socket);
-    }
+  private trySend(socket: WebSocket, data: string | Uint8Array) {
     try {
-      // Completes the closing handshake.
-      socket.close(code === 1005 ? 1000 : code, reason);
+      socket.send(data);
     } catch {
-      // Already closed.
+      // Closing meanwhile: its close event cleans up.
     }
   }
 }

@@ -110,6 +110,28 @@ Retour arrière : « Instant Rollback » de Vercel vers le déploiement précéd
 écrit dans D1 depuis la bascule n'existe pas dans Neon : à décider au cas par cas, d'où l'intérêt de vérifier
 juste après la bascule.
 
+## 4 bis. Relais temps réel des terminaux
+
+Un second Worker, `matecrew-realtime` (`realtime/`), tient un Durable Object par terminal (dans l'UE) : le terminal
+et les consoles y gardent un WebSocket, le site l'appelle en RPC (binding `TERMINALS` avec `script_name`). Il lit
+seulement `Device.tokenHash` dans la même D1. Aucun secret à poser.
+
+1. Déployer le relais **avant** le site (le binding du site nomme son script) :
+   ```sh
+   cd realtime && bun run deploy        # wrangler deploy, matecrew-realtime.owt.workers.dev
+   ```
+2. Déployer le site (`REALTIME_URL` est une variable de `wrangler.jsonc`) :
+   ```sh
+   NEXT_PUBLIC_APP_URL=https://matecrew.vercel.app bun run deploy
+   ```
+3. Vérifier : la console d'un terminal dit « Canal direct ouvert » dans son journal, et le terminal (firmware
+   0.4.0 et plus, ou le terminal virtuel) affiche `relay: connected` sur la console série.
+4. Publier le firmware (`just release` puis `just publish` depuis `device/`) : l'ancien firmware continue en
+   long-poll jusqu'à sa mise à jour.
+
+Si le relais tombe, le site retombe sur le polling (`noRelay`), et le terminal sur le long-poll, tout seuls.
+En local, `jurisdiction("eu")` n'existe pas dans workerd : `realtime/src/locate.ts` prend l'espace de noms simple.
+
 ## 5. Plus tard : URL Cloudflare et retrait de Vercel
 
 1. Domaine propre si voulu (Cloudflare for SaaS, voir la discussion `matecrew.owt.team`), sinon `workers.dev`.

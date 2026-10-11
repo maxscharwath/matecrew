@@ -15,12 +15,14 @@ import {
   Styled,
   Image,
   Media,
+  Group,
   Show,
   bind,
   and,
   eq,
   lt,
   ne,
+  not,
   useI18n,
   type Children,
   type Dimension,
@@ -69,6 +71,7 @@ export function Frame({
   right = view("right"),
   primary,
   reader = false,
+  hint,
   children,
   ...layout
 }: Readonly<LayoutProps & {
@@ -81,6 +84,8 @@ export function Frame({
   right?: TextChildren;
   primary?: "left" | "right";
   reader?: boolean;
+  /** Between the tabs when no badge is read: a `KeyHint`, such as how to leave. */
+  hint?: Children;
   children?: Children;
 }>) {
   const t = useT();
@@ -89,7 +94,7 @@ export function Frame({
       <StatusBar leading={leading} trailing={trailing}>{title}</StatusBar>
       <Main {...layout}>{children}</Main>
       {keys && (
-        <Keys reader={reader ? t("reader") : false}>
+        <Keys reader={reader ? t("reader") : false} center={hint}>
           {/* A label too long for its tab takes a smaller size rather than losing its end. */}
           <Key side="left" primary={primary === "left"} onPress={emit("left")}><Styled style="leadStrong" fit>{left}</Styled></Key>
           <Key side="right" primary={primary === "right"} onPress={emit("right")}><Styled style="leadStrong" fit>{right}</Styled></Key>
@@ -152,3 +157,23 @@ export function Picture({ value, size, half = false }: Readonly<{ value: unknown
   );
 }
 
+/**
+ * Someone a screen names, `size` px: their avatar as the site dithers it, in a disc ringed in
+ * ink, else their initials in an outlined disc. `person` is where the host puts them in the view
+ * (`hasAvatar`, `avatar`, `initials`).
+ */
+export function Avatar({ person, size }: Readonly<{ person: string; size: number }>) {
+  const has = view(`${person}.hasAvatar`, false);
+  return (
+    <Group width={size} height={size}>
+      <Show when={has}>
+        <Image width={size} height={size} sourceWidth={size} sourceHeight={size} value={view(`${person}.avatar`, [])} />
+      </Show>
+      <Show when={not(has)}>
+        <Surface variant="outline" radius={Math.floor(size / 2)} width={size} height={size} align="center" justify="center">
+          <Small align="center">{view(`${person}.initials`)}</Small>
+        </Surface>
+      </Show>
+    </Group>
+  );
+}

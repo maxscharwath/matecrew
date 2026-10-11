@@ -2,13 +2,15 @@
 /**
  * The person's purchases, from "Mon compte" (`account.tsx`) or the right key held then a badge
  * (the badge screen with `view.purchases`): a page of rows, the left key moves through them and
- * the way back to the account, the right key cancels the selected one after a second press
+ * the way back to the account, the right key cancels the selected one after a second press.
+ * Either key held leaves for the main screen at once, which the middle of the key strip says
  * (`core::flow`, `Screen::Purchases`).
  */
 import {
   HStack,
   VStack,
   Surface,
+  KeyHint,
   H1,
   Lead,
   Large,
@@ -23,8 +25,8 @@ import {
   not,
   type Children,
 } from "@matecrew/device-ui";
-import { ArrowLeftIcon, ChevronRightIcon, ReceiptIcon } from "@matecrew/device-ui/icons/lucide";
-import { Frame, PageDots, Picture, useT, view } from "./shared";
+import { ArrowLeftIcon, ChevronRightIcon, LogOutIcon, ReceiptIcon } from "@matecrew/device-ui/icons/lucide";
+import { Avatar, Frame, PageDots, Picture, useT, view } from "./shared";
 
 /** Rows on a page: `flow::PURCHASES_PAGE`. */
 const ROWS = 4;
@@ -70,10 +72,12 @@ export function purchases() {
   return (
     <Frame
       title={concat(t("purchases.title"), " · ", view("name"))}
+      leading={<Avatar person="person" size={40} />}
       keys
       left={cond(view("confirm", false), t("purchases.keep"), t("purchases.next"))}
       right={cond(back, t("purchases.leave"), cond(view("confirm", false), t("purchases.confirmCancel"), t("purchases.cancel")))}
       primary="right"
+      hint={<KeyHint icon={<LogOutIcon size={24} />}>{t("purchases.hold")}</KeyHint>}
       gap={8}
     >
       <Show when={view("confirm", false)}>

@@ -62,6 +62,10 @@ fn previews() -> Value {
     let mut dashboard: DeviceScreen =
         serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap();
     let picture = decode_base64(&dashboard.items[0].picture).unwrap();
+    // Drawn busts, dithered by the site's code (scripts/device/avatar-fixtures.ts).
+    let avatars: Value = serde_json::from_str(include_str!("../../fixtures/avatars.json")).unwrap();
+    let avatar = |key: &str| avatars[key].as_str().map(String::from);
+    let face = |i: usize| avatars["preparation"][i].clone();
     let mut all = Collector(Map::new());
     all.add("stock", "Three items, the usual office", |d| dashboard_screen(d, &dashboard, false));
     all.add("stock-offline", "Same, without network", |d| dashboard_screen(d, &dashboard, true));
@@ -84,17 +88,24 @@ fn previews() -> Value {
         });
     }
     let drawn = |i: usize| dashboard.items[i % dashboard.items.len()].picture.clone();
+    // Who: an avatar for most, initials for those without one; past five, only counted.
+    let initials = |s: &str| json!({"initials": s, "avatar": null});
+    let with = |s: &str, i: usize| json!({"initials": s, "avatar": face(i)});
     dashboard.preparation = Some(serde_json::from_value(json!({
-        "title":"À préparer · Après-midi","total":"9 à préparer","sessionId":"s1","serveLabel":"Servi",
+        "title":"À préparer · Après-midi","total":"11 à préparer","sessionId":"s1","serveLabel":"Servi",
         "items":[
-            {"name":"Maté Classic","count":5,"names":"Alex, Sam, Chris, Jo, Max","picture":drawn(0)},
-            {"name":"Maté Zero","count":3,"names":"Pat, Robin, Mika","picture":drawn(1)},
-            {"name":"Maté Ginger","count":1,"names":"Lou","picture":drawn(2)}
+            {"name":"Maté Classic","count":7,"names":"Alex, Sam, Chris, Jo, Max, Kim, Noa","picture":drawn(0),
+             "people":[with("AM", 0), initials("SB"), with("CR", 2), initials("JD"), with("MK", 1)]},
+            {"name":"Maté Zero","count":3,"names":"Pat, Robin, Mika","picture":drawn(1),
+             "people":[with("PL", 1), initials("RV"), with("MS", 0)]},
+            {"name":"Maté Ginger","count":1,"names":"Lou","picture":drawn(2),"people":[initials("LG")]}
         ]
     })).unwrap());
     all.add("preparation", "Before a session: who takes what; the right key serves it", |d| dashboard_screen(d, &dashboard, false));
     all.add("badge-serve", "Servi: the runner's badge", |d| badge_screen(d, "Servi"));
-    all.add("served", "The site served the session", |d| served_screen(d, "Alex", 9));
+    let served = avatar("served");
+    all.add("served", "The site served the session: the runner's avatar", |d| served_screen(d, "Alex", 9, served.as_deref()));
+    all.add("served-no-avatar", "Served by someone without an avatar", |d| served_screen(d, "Alex", 9, None));
     all.add("setup", "First start: join the setup Wi-Fi", |d| {
         setup_screen(d, &SetupInfo { ap_ssid: "matecrew-setup-50E4", ap_password: "k7m2xq9pab", portal_url: "http://192.168.71.1", bluetooth: "matecrew-50E4 · 482913" })
     });
@@ -108,7 +119,7 @@ fn previews() -> Value {
     let pick = PickInfo { name: "Alex", item: "Maté Classic", stock: 36, picture: &picture, index: 0, count: 3 };
     all.add("pick", "Choose the item", |d| pick_screen(d, &pick));
     all.add("leave", "Nothing for me", |d| leave_screen(d, "Alex"));
-    all.add("taken", "Confirmation, 10 s to cancel", |d| taken_screen(d, "Alex", "Maté Classic"));
+    all.add("taken", "Confirmation: what was taken, then the stock again", |d| taken_screen(d, "Alex", "Maté Classic", &picture));
     all.add("update", "Installing a firmware update", |d| update_screen(d, "0.2.0", 50));
     all.add("unknown-badge", "Badge not assigned yet", |d| unknown_badge_screen(d, "04A1B2C3D4E5F6", None));
     let claim = "https://matecrew.vercel.app/badge?d=cmv1eex25001zieyucz0rillv&u=04A1B2C3D4E5F6&t=1791570300&s=1XA8_wdH3MGEW6rDCHsTew";
@@ -155,6 +166,7 @@ fn previews() -> Value {
         products: products.to_vec(),
         labels: labels.to_vec(),
         recent: first[..matecrew_core::flow::ACCOUNT_PURCHASES].to_vec(),
+        avatar: avatar("account"),
     };
     let purchases = |rows: &[PurchaseRow], selected, back, page, confirm| Screen::Purchases {
         name: "Alex Martin".into(),
@@ -164,6 +176,7 @@ fn previews() -> Value {
         page,
         pages: 2,
         confirm,
+        avatar: avatar("account"),
     };
     let failed = |task, failure| Screen::Failed { task, failure };
     all.add("account-badge", "Right key: the badge whose account to show", |d| {
@@ -184,6 +197,7 @@ fn previews() -> Value {
             products: Vec::new(),
             labels: labels.to_vec(),
             recent: Vec::new(),
+            avatar: None,
         })
     });
     all.add("account-offline", "No Wi-Fi: the account lives on the site", |d| {
@@ -224,7 +238,7 @@ fn previews() -> Value {
         flow_screen(d, &failed(Task::Cancel, Failure::Site { status: 500 }))
     });
     all.add("purchases-empty", "Nothing bought lately", |d| {
-        flow_screen(d, &Screen::Purchases { name: "Sam".into(), rows: Vec::new(), selected: 0, back: true, page: 0, pages: 1, confirm: false })
+        flow_screen(d, &Screen::Purchases { name: "Sam".into(), rows: Vec::new(), selected: 0, back: true, page: 0, pages: 1, confirm: false, avatar: None })
     });
     // The same screens in English, as an office with `locale: "en"` gets them.
     for (name, from) in [
@@ -286,14 +300,14 @@ fn flow(previews: &mut Map<String, Value>) {
     // While a preparation shows, the right key is "Servi": a runner's badge, then the site's count.
     on(&["preparation"], &[("right", "badge-serve")]);
     on(&["badge-serve"], &[("badge", "served"), ("left", "preparation"), ("right", "preparation")]);
-    on(&["served"], &[("left", "stock"), ("right", "stock")]);
+    on(&["served", "served-no-avatar"], &[("left", "stock"), ("right", "stock")]);
     on(&["badge"], &[("badge", "pick"), ("left", "stock"), ("right", "stock")]);
     on(&["pick"], &[("left", "leave"), ("right", "taken")]);
     on(&["leave"], &[("left", "pick"), ("right", "stock")]);
     on(&["taken", "unknown-badge", "claim-badge", "error"], &[("left", "stock"), ("right", "stock")]);
     on(&home, &[("badge", "unknown-badge")]);
     // Both keys, from any screen once the terminal runs: its about page; a key goes back.
-    let running = ["badge", "pick", "leave", "taken", "unknown-badge", "claim-badge", "error", "badge-serve", "served"];
+    let running = ["badge", "pick", "leave", "taken", "unknown-badge", "claim-badge", "error", "badge-serve", "served", "served-no-avatar"];
     on(&home, &[("both", "about")]);
     on(&running, &[("both", "about")]);
     let account = ["account-badge", "account-loading", "account", "account-new", "purchases-badge", "purchases-from-account", "purchases", "purchases-last", "purchases-confirm", "purchases-cancelling", "purchases-empty"];

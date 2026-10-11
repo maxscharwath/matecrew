@@ -2,8 +2,9 @@
 /**
  * "Mon compte": the right key, a badge, then the site's live answer (`core::flow`,
  * `Screen::Account`). Read from across the room: today in ink, the week, the month and what it
- * cost (at the price the cans were bought), the last seven days as bars and the latest purchases.
- * The left key lists every purchase (`purchases.tsx`); nothing personal stays on the terminal.
+ * cost (at the price the cans were bought), the last seven days as bars and the latest purchases;
+ * the member's avatar before the title. The left key lists every purchase (`purchases.tsx`);
+ * nothing personal stays on the terminal.
  */
 import {
   HStack,
@@ -31,7 +32,7 @@ import {
   type TextChildren,
 } from "@matecrew/device-ui";
 import { LoaderCircleIcon, ReceiptIcon } from "@matecrew/device-ui/icons/lucide";
-import { Frame, Picture, useT, view } from "./shared";
+import { Avatar, Frame, Picture, useT, view } from "./shared";
 
 /** Stacked bar tones, bottom first, as the engine draws them (scene/charts.rs). */
 const STACK = [100, 50, 25, 12];
@@ -95,6 +96,7 @@ export function account() {
   return (
     <Frame
       title={concat(t("account.title"), " · ", view("name"))}
+      leading={<Avatar person="person" size={40} />}
       keys
       left={t("account.purchases")}
       right={t("account.close")}

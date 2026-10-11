@@ -37,7 +37,14 @@ import { Label } from "@/components/ui/label";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bluetoothLinkStatus, officeTerminal, prepareBluetoothLink } from "@/app/org/[officeId]/admin/devices/bluetooth/actions";
 import { useBleScreen, useBleSession } from "@/components/device-console/ble-link";
-import { BadgeZone, DeviceShell, useDeviceShortcuts, type BadgeOption, type Side } from "@/components/device-console/device-shell";
+import {
+  BadgeZone,
+  DeviceShell,
+  useDeviceShortcuts,
+  useKeyChord,
+  type BadgeOption,
+  type Side,
+} from "@/components/device-console/device-shell";
 import type { ConsoleKind, LogEntry } from "@/components/device-console/device-log";
 import { FrameCanvas } from "@/components/device-console/frame-canvas";
 import { LogPanel } from "@/components/device-console/log-panel";
@@ -589,7 +596,13 @@ function Debugger({
   };
   const sync = useCallback(() => run(tConsole("kind.sync"), "system", () => commands.sync(device)), [device, run, tConsole]);
 
-  const shortcuts = useMemo(() => ({ key: press, badge: () => setBadgeOpen(true), sync }), [press, sync]);
+  // Both keys at once, as on the terminal: hold one (mouse, touch, arrow key) and press the other.
+  const both = useCallback(() => run(tConsole("kind.both"), "input", () => commands.both(device)), [device, run, tConsole]);
+  const chord = useKeyChord((key) => (key === "both" ? both() : press(key)));
+  const shortcuts = useMemo(
+    () => ({ key: press, keyLevel: chord.keyLevel, badge: () => setBadgeOpen(true), sync }),
+    [press, chord.keyLevel, sync],
+  );
   useDeviceShortcuts(shortcuts, badgeOpen);
 
   const lines = useMemo(
@@ -613,13 +626,15 @@ function Debugger({
     }
   };
 
+  const lit = pressed === "left" || pressed === "right" ? pressed : null;
   return (
     <Workbench
       terminal={
         <div className="space-y-3">
           <DeviceShell
-            pressed={pressed === "left" || pressed === "right" ? pressed : null}
+            pressed={chord.held.length > 0 ? chord.held : lit}
             onKey={press}
+            onKeyLevel={chord.keyLevel}
             indicator={
               frame && (
                 <span className="text-[10px] font-medium tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
@@ -667,7 +682,7 @@ function Debugger({
             deviceName={info?.name ?? device.name}
             description={t("actionsHint")}
             onSync={sync}
-            onBoth={() => run(tConsole("kind.both"), "input", () => commands.both(device))}
+            onBoth={both}
             onRestart={() => run(tConsole("kind.restart"), "system", () => commands.restart(device))}
             onFirmware={update}
           />

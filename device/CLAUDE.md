@@ -100,6 +100,7 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 ## API de l'appareil (côté site)
 
 - Contrat Zod : `src/lib/device/contract.ts`. Routes : `src/app/api/device/` (`link`, `link/token`, `state`, `takes`, `status`, `ui`, `commands`, `frame`, `firmware/<version>`).
+- Temps réel : avec `state.realtime`, un WebSocket vers le relais (`realtime/`, un Durable Object par terminal) porte les commandes, le miroir (patchs de lignes) et « ce que tu affiches a changé » ; `commands` et `frame` ne servent plus qu'en repli. Protocole : `realtime/src/protocol.ts` et `core/src/live.rs` ; transport : `firmware/src/socket.rs` et `remote.rs`. Voir « Canal temps réel » dans `README.md`.
 - Mise à jour par le réseau : `state.firmware` annonce la dernière `FirmwareRelease` ; `firmware/src/ota.rs` l'installe dans l'autre slot (`partitions.csv`) et la confirme après sa première synchro, sinon le bootloader revient à l'ancienne. Publier : `just release` puis `just publish`.
 - Liaison façon RFC 8628 : `/api/device/link` renvoie `device_code` (secret, gardé par l'appareil) et `user_code` (affiché) ; un admin valide sur `/link` ; l'appareil interroge `/api/device/link/token` toutes les 5 s et reçoit son jeton `mcd_…` une seule fois.
 - Ensuite : `Authorization: Bearer mcd_…`. Le serveur ne garde que le SHA-256 du jeton. Un 401 veut dire « appareil délié » : effacer le jeton et recommencer la liaison.

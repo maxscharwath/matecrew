@@ -201,7 +201,7 @@ than `’`.
 `ItemTitle`, `ItemDescription`, `ItemActions`, `ItemValue`), `StatusBar` (title, clock, Wi-Fi and
 battery from `$device.status`: charging, plugged and low battery have their own icons; or
 `trailing` such as `Steps`), `Main`, `Keys` and `Key` (tabs on the bottom edge above each key),
-`ReaderHint`, `BadgeInput`, `QrCode`, `OverlayHost`, `MateCrewMark`, `Logo`. Ink surfaces turn their
+`ReaderHint`, `KeyHint` (an icon and a few words between the tabs, on their line: `<Keys center={<KeyHint icon={…}>…</KeyHint>}>`), `BadgeInput`, `QrCode`, `OverlayHost`, `MateCrewMark`, `Logo`. Ink surfaces turn their
 content to paper by themselves.
 
 **Charts**: `LineChart`, `BarChart`, `AreaChart` and `ComposedChart` take `Line`, `Bar` and `Area`

@@ -1,10 +1,14 @@
 //! Item pictures at the definition they are drawn in. The site draws them 96 x 96 and sends
 //! them as they are; where a screen has less room it shows them at half, 48 x 48, each pixel
-//! from a 2 x 2 block, never magnified.
+//! from a 2 x 2 block, never magnified. A photo comes dithered: its half is dithered again from
+//! the blocks' grey, so it keeps its tones instead of darkening.
 //!
 //! A picture carries a second plane, its opacity (`engine::sprite::PackedSprite`): ink is
 //! black, opaque paper white, the rest transparent. The site computes it
-//! (`src/lib/device/bitmap.ts`, `withOpacity`); both planes are halved alike.
+//! (`src/lib/device/bitmap.ts`, `withOpacity`).
+//!
+//! People's avatars come at the side their screen draws them (`contract::AVATAR_*`), already
+//! in a disc: [`avatar`] only checks them.
 
 /// Side of a picture as the site draws it.
 pub const FULL: usize = 96;
@@ -22,9 +26,16 @@ pub fn pictures(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     if raw.len() != 2 * plane {
         return (vec![0; plane], vec![0; bytes(HALF)]);
     }
-    let mut half = halve(&raw[..plane], FULL);
+    let mut half = halve_ink(&raw[..plane], FULL);
     half.extend(halve(&raw[plane..], FULL));
     (raw.to_vec(), half)
+}
+
+/// An avatar from the site at `side` x `side` with its opacity plane, as the screens draw it;
+/// empty when there is none or it has another size: the screen then shows the initials or an
+/// icon.
+pub fn avatar(raw: Option<&[u8]>, side: usize) -> Vec<u8> {
+    raw.filter(|raw| raw.len() == 2 * bytes(side)).map(<[u8]>::to_vec).unwrap_or_default()
 }
 
 fn ink(bits: &[u8], side: usize, x: usize, y: usize) -> bool {
@@ -35,7 +46,46 @@ fn set(bits: &mut [u8], side: usize, x: usize, y: usize) {
     bits[y * side / 8 + x / 8] |= 0x80 >> (x % 8);
 }
 
-/// Half the side: a pixel is ink when at least two of its 2 x 2 block are.
+/// Where Atkinson dithering passes a pixel's error: an eighth to each of these neighbours, as
+/// the site dithers (`src/lib/device/bitmap.ts`).
+const ATKINSON: [(isize, usize); 6] = [(1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2)];
+
+/// Half the side of the ink: each 2 x 2 block as a grey (0 to 4 pixels of ink), dithered. A
+/// block all ink or all paper stays so, and two pixels of four are ink as in [`halve`]: drawings
+/// and pixel art keep their look, a dithered photo its tones.
+fn halve_ink(bits: &[u8], side: usize) -> Vec<u8> {
+    let half = side / 2;
+    let mut level = vec![0f32; half * half];
+    for y in 0..half {
+        for x in 0..half {
+            let inked = [(0, 0), (1, 0), (0, 1), (1, 1)]
+                .iter()
+                .filter(|(dx, dy)| ink(bits, side, 2 * x + dx, 2 * y + dy))
+                .count();
+            level[y * half + x] = 255.0 * (4 - inked) as f32 / 4.0;
+        }
+    }
+    let mut out = vec![0; bytes(half)];
+    for y in 0..half {
+        for x in 0..half {
+            let old = level[y * half + x];
+            let inked = old < 128.0;
+            if inked {
+                set(&mut out, half, x, y);
+            }
+            let error = (old - if inked { 0.0 } else { 255.0 }) / 8.0;
+            for (dx, dy) in ATKINSON {
+                let (nx, ny) = (x as isize + dx, y + dy);
+                if nx >= 0 && (nx as usize) < half && ny < half {
+                    level[ny * half + nx as usize] += error;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Half the side of the opacity: a pixel is opaque when at least two of its 2 x 2 block are.
 fn halve(bits: &[u8], side: usize) -> Vec<u8> {
     let half = side / 2;
     let mut out = vec![0; bytes(half)];
@@ -71,6 +121,29 @@ mod tests {
         assert_eq!(half.len(), 2 * bytes(HALF));
         assert!(ink(&half, HALF, 0, 0));
         assert!(!ink(&half, HALF, 1, 0), "one pixel of four is not enough");
+    }
+
+    #[test]
+    fn a_dithered_grey_keeps_its_tone_at_half() {
+        let mut raw = vec![0u8; 2 * bytes(FULL)];
+        // A checkerboard: 50 % ink, as dithering draws a mid grey.
+        for y in 0..FULL {
+            for x in (y % 2..FULL).step_by(2) {
+                set(&mut raw, FULL, x, y);
+            }
+        }
+        let (_, half) = pictures(&raw);
+        let inked = (0..HALF * HALF).filter(|i| ink(&half, HALF, i % HALF, i / HALF)).count();
+        let share = inked as f32 / (HALF * HALF) as f32;
+        assert!((0.4..0.6).contains(&share), "{share}: a mid grey, not black");
+    }
+
+    #[test]
+    fn an_avatar_comes_at_its_side_or_not_at_all() {
+        let raw = vec![0xAA; 2 * bytes(40)];
+        assert_eq!(avatar(Some(&raw), 40), raw);
+        assert!(avatar(Some(&raw), 32).is_empty(), "another side");
+        assert!(avatar(None, 40).is_empty());
     }
 
     #[test]

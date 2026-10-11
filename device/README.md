@@ -9,13 +9,14 @@ Matériel, câblage et boîtier : [doc de montage](https://claude.ai/code/artifa
 ### Au quotidien
 
 - **Écran** : le stock de chaque article, et le libellé des deux actions juste au-dessus de leur touche.
-- **Prise** : on touche une action, on badge, l'écran confirme avec un bip. On a 10 s pour annuler.
+- **Prise** : on touche une action, on badge, l'écran confirme avec un bip et l'image de l'article pris. On a 10 s pour annuler.
 - **Badge inconnu** : l'écran le signale et le badge apparaît sur le site, où un admin l'attribue à un membre. Personne n'a besoin de connaître un UID.
 - **Hors ligne** : les prises restent en mémoire et partent à la synchro suivante.
-- **Mon compte** : la touche droite, puis le badge : le terminal demande le compte au site, en direct (`POST /api/device/account`). Aujourd'hui, la semaine, le mois, le coût du mois (au prix d'achat des canettes), les 7 derniers jours en barres empilées par produit et les 2 derniers achats. Rien de personnel n'est gardé sur le terminal : sans réseau, l'écran le dit. La touche gauche « Achats » ouvre la liste, la droite ferme.
-- **Mes achats** : depuis « Mon compte », ou la touche droite maintenue 0,7 s puis le badge : les 20 derniers achats de la personne, quatre par page (image, article, date, prix). La touche gauche passe au suivant, la droite annule l'achat choisi après un second appui (mêmes règles que sur le site : le maté revient dans le stock) ; la dernière ligne revient à « Mon compte ». Un appui simple compte au relâchement, un appui long dès 0,7 s.
+- **Mon compte** : la touche droite, puis le badge : le terminal demande le compte au site, en direct (`POST /api/device/account`). Aujourd'hui, la semaine, le mois, le coût du mois (au prix d'achat des canettes), les 7 derniers jours en barres empilées par produit et les 2 derniers achats, l'avatar de la personne avant le titre (aussi dans « Mes achats »). Rien de personnel n'est gardé sur le terminal : sans réseau, l'écran le dit. La touche gauche « Achats » ouvre la liste, la droite ferme.
+- **Mes achats** : depuis « Mon compte », ou la touche droite maintenue 0,7 s puis le badge : les 20 derniers achats de la personne, quatre par page (image, article, date, prix). La touche gauche passe au suivant, la droite annule l'achat choisi après un second appui (mêmes règles que sur le site : le maté revient dans le stock) ; la dernière ligne revient à « Mon compte ». L'une ou l'autre touche maintenue 0,7 s quitte la liste pour l'écran principal, même pendant la confirmation (rien n'est annulé) ; le milieu de la barre des touches le rappelle (« Maintenir pour quitter »). Un appui simple compte au relâchement, un appui long dès 0,7 s.
 - **Erreurs** : chaque échec dit ce qui s'est passé : pas de réseau (Wi-Fi, délai, connexion, TLS, DNS), le site a répondu une erreur (avec le code HTTP), réponse illisible (versions différentes) ou badge inconnu du site, avec une ligne technique (« HTTP 503 · /api/device/account »). La touche gauche réessaie.
-- **Préparation** : pendant une préparation, l'écran montre chaque article (image, quantité, qui l'a demandé) ; la touche droite devient « Servi » : le badge du runner clôt la session sur le site (servi, consommé, sorti du stock), comme la page runner.
+- **Préparation** : pendant une préparation, l'écran montre chaque article (image, quantité, qui l'a demandé : les avatars des cinq premiers, ou leurs initiales, puis les prénoms) ; la touche droite devient « Servi » : le badge du runner clôt la session sur le site (servi, consommé, sorti du stock), comme la page runner, et l'écran qui le remercie montre son avatar.
+- **Avatars** : la photo de profil (téléversée, ou celle de Microsoft à la connexion) tramée (Atkinson) dans un disque cerclé d'encre, à la taille de l'écran qui l'affiche : 40 px pour le compte, 32 px pour la préparation, 128 px pour « Servi » (`src/lib/device/avatar.ts`). Elle n'arrive qu'avec les réponses en direct (compte, « Servi ») et, dans l'état, pour les seules personnes d'une préparation : `state.badges` reste une liste de noms, et la prise, hors ligne, n'en montre pas. Le site garde les gris de chaque avatar à côté de lui dans le stockage (`avatars/<id>/terminal-….grey`), calculés une fois. Sans avatar : les initiales, ou l'icône de l'écran.
 - **Batterie** : tension lue sur D5 (pont 1 MΩ / 1 MΩ, `DIVIDER_PERMILLE` dans `core/src/power.rs` pour calibrer), charge selon une courbe LiPo, icône d'alerte sous 10 %. Branché à un ordinateur en USB, la barre d'état montre la charge (un chargeur secteur n'est pas vu : il faudrait un pont VBUS sur D6).
 - **À propos** : les deux touches ensemble, depuis n'importe quel écran : version, date et commit du build, slot OTA, Wi-Fi et signal, IP, MAC, site, id de l'appareil, id de la puce, batterie, durée depuis l'allumage.
 - **Sans interrupteur** : gestes à deux touches pour éteindre, rallumer et redémarrer (détail dans `CLAUDE.md`).
@@ -59,11 +60,32 @@ Le principe est celui du « device authorization grant » (RFC 8628), le même q
 | `POST` | `/api/device/takes` | jeton | Envoyer les prises en attente (idempotent) |
 | `POST` | `/api/device/status` | jeton | Batterie, version, signal Wi-Fi, badges inconnus |
 | `GET` | `/api/device/ui` | jeton | Application précompilée binaire DUI1, activée par `state.appUrl` |
-| `GET` | `/api/device/commands?wait=25` | jeton | Ce qu'un admin fait depuis la console : touche, badge, synchro, redémarrage, oubli du Wi-Fi. Tenue jusqu'à 25 s |
-| `PUT` | `/api/device/frame` | jeton | Ce que l'écran affiche, 48 000 octets, pour le miroir de la console |
+| `GET` | `/api/device/commands?wait=25` | jeton | Sans relais : ce qu'un admin fait depuis la console (touche, badge, synchro, redémarrage, oubli du Wi-Fi). Tenue jusqu'à 25 s |
+| `PUT` | `/api/device/frame` | jeton | Sans relais : ce que l'écran affiche, 48 000 octets, pour le miroir de la console |
 | `GET` | `/api/device/firmware/<version>` | jeton | Image du firmware annoncé dans l'état, pour la mise à jour |
 
 Le contrat est écrit en Zod dans `src/lib/device/contract.ts` ; le firmware reprend les mêmes formes.
+
+### Canal temps réel (relais)
+
+Quand l'état annonce `realtime.url` (`wss://matecrew-realtime.owt.workers.dev/terminals/socket`), le terminal
+garde un WebSocket ouvert vers son relais : un Durable Object par terminal (`realtime/`, dans l'UE), avec son jeton
+dans `Authorization`. Plus rien n'est interrogé en boucle :
+
+- les commandes de la console arrivent en quelques dizaines de millisecondes, et le terminal les acquitte (`ack`) ;
+- l'écran part vers la console seulement quand quelqu'un regarde, et seulement les lignes qui ont changé (quelques Ko
+  au lieu de 48) ; le relais garde le dernier écran pour les vignettes ;
+- le site prévient quand ce que le terminal affiche a changé (stock, articles, badges, sessions, demandes,
+  réglages : toute écriture sur ces tables, `src/lib/device/push.ts`), et le terminal se synchronise aussitôt, sauf
+  s'il l'a déjà fait depuis ; une synchro est aussi prévue à `refreshAt` (heure limite d'une session, fin d'une
+  préparation), et toutes les 15 min par sécurité ;
+- son journal et sa mémoire (lignes `heap:`) vont à la console qui regarde, comme en Bluetooth ;
+- un battement (`p` → `o`) toutes les 30 s, auquel Cloudflare répond sans réveiller l'objet : sans réponse en 10 s,
+  le terminal se reconnecte ; le relais le dit hors ligne après 45 s de silence.
+
+Le protocole est dans `realtime/src/protocol.ts` (site) et `device/core/src/live.rs` (firmware), le transport dans
+`device/firmware/src/socket.rs` (le WebSocket d'ESP-IDF, `esp_transport_ws`) et `remote.rs`. Sans relais, ou tant
+qu'il est injoignable, le terminal revient au long-poll, au `PUT /frame` et à une synchro toutes les 2 min.
 
 ## Mise à jour par le réseau
 
@@ -171,5 +193,9 @@ site, prêt), avec un QR à modules arrondis et le logo au centre.
 Les icônes sont celles du site (Lucide), dessinées à la compilation à la taille
 voulue avec des traits de 2 px exacts ; les illustrations (badge au-dessus du
 lecteur, logo) suivent le même chemin. Les images des articles fournies par
-l'API restent prioritaires. Les crédits sont dans
+l'API restent prioritaires : le dessin de l'article, sinon sa photo tramée à 96 px
+(`Item.terminalPhoto`, avec son plan d'opacité lu sur les gris : le fond blanc
+autour du produit est transparent). Une photo calculée avant le tramage (un
+seuil) est recalculée à l'ouverture de la page des articles. À 48 px, l'image
+est retramée depuis les blocs 2 × 2 pour garder ses tons. Les crédits sont dans
 [sdk/icons/licenses](sdk/icons/licenses/README.md).

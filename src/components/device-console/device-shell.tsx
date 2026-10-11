@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Nfc } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -66,6 +66,40 @@ export function useDeviceShortcuts(
       globalThis.removeEventListener("blur", release);
     };
   }, [handlers, paused]);
+}
+
+/**
+ * The touch keys as the terminal reads them (`TouchKeys` in device/core): a key counts when it is
+ * released, both keys when the second goes down while the first is held. For a console that
+ * sends presses rather than levels: hold one key (mouse, touch or arrow key) and press the other.
+ * Returns the level handler for `DeviceShell` and the keyboard shortcuts, and the keys held.
+ */
+export function useKeyChord(press: (key: Side | "both") => void): { keyLevel: KeyLevel; held: readonly Side[] } {
+  const sources = useRef({ left: new Set<string>(), right: new Set<string>() });
+  const chord = useRef(false);
+  const latest = useRef(press);
+  useEffect(() => {
+    latest.current = press;
+  });
+  const [held, setHeld] = useState<readonly Side[]>([]);
+  const keyLevel = useCallback<KeyLevel>((side, high, source) => {
+    const keys = sources.current;
+    const other = side === "left" ? keys.right : keys.left;
+    const wasDown = keys[side].size > 0;
+    if (high) keys[side].add(source);
+    else keys[side].delete(source);
+    const down = keys[side].size > 0;
+    if (down && !wasDown && other.size > 0 && !chord.current) {
+      chord.current = true;
+      latest.current("both");
+    } else if (!down && wasDown) {
+      if (!chord.current) latest.current(side);
+      // The chord ends once both keys are up: releasing them sends nothing more.
+      if (other.size === 0) chord.current = false;
+    }
+    setHeld((["left", "right"] as const).filter((key) => keys[key].size > 0));
+  }, []);
+  return { keyLevel, held };
 }
 
 /** Key centres along the panel's 800 px, from the enclosure model in device/hardware. */

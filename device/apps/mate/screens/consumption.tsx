@@ -87,13 +87,16 @@ export function leave() {
   );
 }
 
-/** Done: who, what, and the way back. */
+/** Done: who, what (its picture beside the tick), and the way back. */
 export function taken() {
   const t = useT();
   return (
     <Frame title={view("item")}>
       <Empty>
-        <EmptyMedia variant="ink" size={128}><CircleCheckBigIcon size={64} strokeWidth={4} /></EmptyMedia>
+        <HStack gap={24} align="center">
+          <Picture value={view("picture", [])} size={128} />
+          <EmptyMedia variant="ink" size={128}><CircleCheckBigIcon size={64} strokeWidth={4} /></EmptyMedia>
+        </HStack>
         <H1 align="center">{t("taken.heading", { name: view("name") })}</H1>
         <Badge variant="secondary"><ClockIcon size={18} /> {t("taken.back")}</Badge>
       </Empty>

@@ -27,9 +27,16 @@ import {
   EmptyTitle,
   EmptyDescription,
   OwtMark,
+  concat,
+  lt,
+  ne,
+  not,
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, HandPlatterIcon, PackageOpenIcon, TriangleAlertIcon } from "@matecrew/device-ui/icons/lucide";
-import { Frame, Picture, useT, view } from "./shared";
+import { Avatar, Frame, Picture, useT, view } from "./shared";
+
+/** People with their avatar on an order's card: as many as the site sends (PREPARATION_PEOPLE). */
+const PEOPLE = 5;
 
 const item = (index: number, field: string, fallback: unknown = "") => view(`items.${index}.${field}`, fallback);
 
@@ -233,14 +240,25 @@ export function preparation() {
   const row = (i: number, field: string, fallback: unknown = "") => view(`prepRows.${i}.${field}`, fallback);
   const order = (i: number) => (
     <Show when={row(i, "visible", false)}>
-      <Card variant="outline" width="fill" height={128} direction="row" gap={16} padding={[12, 16]} align="center">
+      <Card variant="outline" width="fill" height={128} direction="row" gap={16} padding={[6, 16]} align="center">
         <Picture value={row(i, "picture48", [])} size={64} half />
-        <VStack gap={2} width="fill">
+        <VStack gap={4} width="fill">
           <HStack gap={10}>
             <Num size="sm">{row(i, "count", 0)}</Num>
             <Large lines={1} width="fill">{row(i, "name")}</Large>
           </HStack>
-          <Muted lines={2}>{row(i, "names")}</Muted>
+          {/* Who: their avatars (or initials), the rest counted, then their names. */}
+          <HStack gap={4} align="center">
+            {Array.from({ length: PEOPLE }, (_, j) => (
+              <Show key={j} when={lt(j, row(i, "peopleCount", 0))}>
+                <Avatar person={`prepRows.${i}.people.${j}`} size={32} />
+              </Show>
+            ))}
+            <Show when={ne(row(i, "more", 0), 0)}>
+              <Small>{concat("+", row(i, "more", 0))}</Small>
+            </Show>
+          </HStack>
+          <Muted lines={1} fit width="fill">{row(i, "names")}</Muted>
         </VStack>
       </Card>
     </Show>
@@ -264,7 +282,13 @@ export function served() {
   return (
     <Frame title={t("served.title")}>
       <Empty>
-        <EmptyMedia variant="ink" size={128}><HandPlatterIcon size={64} strokeWidth={4} /></EmptyMedia>
+        {/* The runner's avatar, else the served icon. */}
+        <Show when={view("person.hasAvatar", false)}>
+          <Avatar person="person" size={128} />
+        </Show>
+        <Show when={not(view("person.hasAvatar", false))}>
+          <EmptyMedia variant="ink" size={128}><HandPlatterIcon size={64} strokeWidth={4} /></EmptyMedia>
+        </Show>
         <H1 align="center">{t("served.heading", { count: view("count", 0) })}</H1>
         <Badge variant="secondary"><CircleCheckBigIcon size={18} /> {t("served.thanks", { name: view("name") })}</Badge>
       </Empty>

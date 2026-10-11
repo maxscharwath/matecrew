@@ -8,10 +8,24 @@ import { setLocaleCookie } from "@/lib/locale";
 import { revokeMcpConnection } from "@/lib/mcp/connections";
 import { type Locale, locales } from "@/i18n/request";
 import { buildAvatarKey } from "@/lib/storage";
+import { avatarGreyKey } from "@/lib/device/avatar";
 import { platform } from "@/platform";
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg"]);
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
+
+/** The avatar being replaced or removed: its file in R2, and its grey levels kept for the badge terminal. */
+async function dropAvatar(userId: string): Promise<void> {
+  const current = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { image: true },
+  });
+  if (!current?.image) return;
+  if (current.image.startsWith("avatars/")) {
+    await platform.storage.delete(current.image).catch(() => {});
+  }
+  await platform.storage.delete(await avatarGreyKey(userId, current.image)).catch(() => {});
+}
 
 const UpdateProfileSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
@@ -69,15 +83,7 @@ export async function updateProfile(
   }
 
   // Delete old R2 avatar if replacing or removing
-  if (imageUpdate.image !== undefined) {
-    const current = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { image: true },
-    });
-    if (current?.image?.startsWith("avatars/")) {
-      await platform.storage.delete(current.image).catch(() => {});
-    }
-  }
+  if (imageUpdate.image !== undefined) await dropAvatar(userId);
 
   await prisma.user.update({
     where: { id: userId },

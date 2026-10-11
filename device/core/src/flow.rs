@@ -13,8 +13,10 @@
 //! press (`Effect::CancelPurchase`), the way back returns to the account.
 //! While the site shows a preparation, the right key is "Servi": a runner's
 //! badge closes the session (`Effect::Serve`).
-//! Right key held → "put your badge" → badge → the purchases straight away. A
-//! long press anywhere else is the short one.
+//! Right key held → "put your badge" → badge → the purchases straight away.
+//! Either key held on the purchases leaves them for the main screen, a
+//! cancellation waiting for its second press included. A long press anywhere
+//! else is the short one.
 //! Nothing personal is kept on the terminal: without the site, the account
 //! says why (`Screen::Failed`).
 
@@ -197,9 +199,12 @@ pub enum Screen {
     Leave {
         name: String,
     },
+    /// `picture` as in `contract::Item`: what was taken.
     Taken {
         name: String,
         item: String,
+        #[serde(default)]
+        picture: String,
     },
     /// `claim_url` lets the person link the badge to their account by scanning it.
     UnknownBadge {
@@ -213,10 +218,13 @@ pub enum Screen {
     NoItems,
     /// Version, build, network and battery: the host's `$device`, nothing from the flow.
     About,
-    /// The preparation was served: who, and how many orders.
+    /// The preparation was served: who (`avatar` as in `contract::ServeResponse`), and how many
+    /// orders.
     Served {
         name: String,
         count: u32,
+        #[serde(default)]
+        avatar: Option<String>,
     },
     /// The right key, or held (`purchases`): the badge whose account to show.
     AccountBadge {
@@ -239,6 +247,9 @@ pub enum Screen {
         products: Vec<String>,
         labels: Vec<String>,
         recent: Vec<PurchaseRow>,
+        /// As in `contract::Account`, before the title.
+        #[serde(default)]
+        avatar: Option<String>,
     },
     /// A page of the purchases. `selected` is the row on this page, `rows.len()` for the way
     /// back to the account, which ends the last page (`back`). With `confirm`, the selected
@@ -251,6 +262,9 @@ pub enum Screen {
         page: u32,
         pages: u32,
         confirm: bool,
+        /// As in `contract::Account`, before the title.
+        #[serde(default)]
+        avatar: Option<String>,
     },
     /// The site gave no usable answer to `task`. The left key tries again when
     /// `failure.retry()`.
@@ -410,10 +424,16 @@ impl Flow {
 
     pub fn handle(&mut self, event: Event, cx: Context) -> Vec<Effect> {
         let expired = self.deadline().is_some_and(|until| cx.now_ms >= until);
-        // A long press is the short one, except the right key's from the main screen.
+        // A long press is the short one, except the right key's from the main screen and either
+        // key's on the purchases.
         let event = match (&self.stage, event) {
             (Stage::Idle | Stage::Message { .. }, Event::LongKey { side: Side::Right }) => {
                 return self.ask_for_account_badge(true, cx);
+            }
+            // Out of the list at once, without stepping through it to the way back; nothing is cancelled.
+            (Stage::Purchases { .. }, Event::LongKey { .. }) => {
+                self.stage = Stage::Idle;
+                return vec![beep(Beep::Key), show(Screen::Main)];
             }
             (_, Event::LongKey { side }) => Event::Key { side },
             (_, event) => event,
@@ -602,6 +622,7 @@ impl Flow {
             products: account.products.clone(),
             labels: account.labels.clone(),
             recent: account.purchases.iter().take(ACCOUNT_PURCHASES).map(|purchase| row(purchase, cx)).collect(),
+            avatar: account.avatar.clone(),
         };
         self.stage = Stage::Account { uid, account, until: cx.now_ms + ACCOUNT_MS };
         sound.map(beep).into_iter().chain([show(screen)]).collect()
@@ -634,6 +655,7 @@ impl Flow {
             page: page as u32,
             pages: pages as u32,
             confirm: confirm && index < purchases.len(),
+            avatar: account.avatar.clone(),
         };
         self.stage = Stage::Purchases { uid, account, index, confirm, until: cx.now_ms + ACCOUNT_MS };
         sound.map(beep).into_iter().chain([show(screen)]).collect()
@@ -735,7 +757,7 @@ impl Flow {
         vec![
             Effect::Queue { take },
             beep(Beep::Accepted),
-            show(Screen::Taken { name, item: item.name.clone() }),
+            show(Screen::Taken { name, item: item.name.clone(), picture: item.picture.clone() }),
         ]
     }
 }
@@ -802,6 +824,8 @@ mod tests {
             screen: serde_json::from_str(include_str!("../../fixtures/dashboard.json")).unwrap(),
             app_url: None,
             theme: "paper".into(),
+            realtime: None,
+            refresh_at: None,
         }
     }
 
@@ -940,6 +964,7 @@ mod tests {
                 show(Screen::Taken {
                     name: "Alex".into(),
                     item: "Zero".into(),
+                    picture: String::new(),
                 }),
             ]
         );
@@ -1007,6 +1032,7 @@ mod tests {
             products: vec!["Maté".into()],
             labels: ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from).to_vec(),
             purchases: (1..=count).map(|n| purchase(&format!("c{n}"))).collect(),
+            avatar: Some("QUxleA==".into()),
         }
     }
 
@@ -1045,6 +1071,7 @@ mod tests {
                 products: vec!["Maté".into()],
                 labels: ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from).to_vec(),
                 recent: vec![row(); ACCOUNT_PURCHASES],
+                avatar: Some("QUxleA==".into()),
             })]
         );
         assert_eq!(flow.deadline(), Some(1_500 + ACCOUNT_MS));
@@ -1229,10 +1256,12 @@ mod tests {
         // "Mes achats": five purchases, two pages of four, the way back ending the second.
         let effects = flow.handle(key(Side::Left), cx(&s, 1_000));
         assert!(!flow.wants_badge());
-        let Some(Effect::Show { screen: Screen::Purchases { name, rows, selected, back, page, pages, confirm } }) = effects.last() else {
+        let Some(Effect::Show { screen: Screen::Purchases { name, rows, selected, back, page, pages, confirm, avatar } }) = effects.last() else {
             panic!("{effects:?}");
         };
         assert_eq!((name.as_str(), rows.len(), *selected, *back, *page, *pages, *confirm), ("Alex", 4, 0, false, 0, 2, false));
+        // Whose purchases: the avatar the site sent with the account.
+        assert_eq!(avatar.as_deref(), Some("QUxleA=="));
 
         // Left moves on; the fifth is on the second page with the way back.
         for _ in 0..4 {
@@ -1288,6 +1317,42 @@ mod tests {
         // From the account, the list again, then the stock.
         flow.handle(key(Side::Left), cx(&s, 1_300));
         assert_eq!(flow.handle(Event::Tick, cx(&s, 1_300 + ACCOUNT_MS)), [show(Screen::Main)]);
+    }
+
+    #[test]
+    fn the_confirmation_shows_what_was_taken() {
+        let mut s = state();
+        s.items[1].picture = "WmVybw==".into();
+        let mut flow = Flow::default();
+        flow.handle(key(Side::Left), cx(&s, 0));
+        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 100));
+        flow.handle(key(Side::Left), cx(&s, 200));
+        let effects = flow.handle(key(Side::Right), cx(&s, 300));
+        assert_eq!(
+            effects.last(),
+            Some(&show(Screen::Taken { name: "Alex".into(), item: "Zero".into(), picture: "WmVybw==".into() }))
+        );
+    }
+
+    #[test]
+    fn holding_either_key_leaves_the_purchases_for_the_main_screen() {
+        let s = state();
+        for side in [Side::Left, Side::Right] {
+            let mut flow = Flow::default();
+            flow.handle(Event::LongKey { side: Side::Right }, cx(&s, 0));
+            flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 100));
+            flow.handle(Event::Account { account: account(6) }, cx(&s, 200));
+            // On the second page, the first purchase there waiting for its second press.
+            for at in 0..4 {
+                flow.handle(key(Side::Left), cx(&s, 300 + at));
+            }
+            let effects = flow.handle(key(Side::Right), cx(&s, 400));
+            assert!(matches!(effects.last(), Some(Effect::Show { screen: Screen::Purchases { confirm: true, .. } })), "{effects:?}");
+            // Held: the main screen, the purchase kept, nothing waiting.
+            assert_eq!(flow.handle(Event::LongKey { side }, cx(&s, 500)), [beep(Beep::Key), show(Screen::Main)]);
+            assert!(flow.is_idle());
+            assert_eq!(flow.deadline(), None);
+        }
     }
 
     #[test]

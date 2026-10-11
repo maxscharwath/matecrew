@@ -27,6 +27,7 @@ The build compiles in exactly one adapter set.
 | `database: Database` | `ports/database.ts` | The Prisma client and `commitBatch` for atomic writes (D1 has no transactions). |
 | `images: ImageProcessor` | `ports/images.ts` | Item photos (WebP) and the terminal's grey levels. |
 | `pdf: PdfRenderer` | `ports/pdf.ts` | React-PDF documents to bytes. |
+| `relay: TerminalRelay` | `ports/realtime.ts` | The terminals' live channel (realtime/): console sockets, commands, "what you show changed", presence, last screen. `noRelay` where there is none: terminals and consoles poll the site. |
 
 ### Jobs and schedules
 
@@ -51,6 +52,7 @@ entry never decides what a job does.
 | database | D1 binding `DB`, atomic batches through `D1Database.batch()` | SQLite through libSQL (`DATABASE_URL`, default `.data/matecrew.sqlite`), batches as transactions | That D1 database, through the bridge, with the Cloudflare adapter's code |
 | images | Images binding `IMAGES` plus a small PNG/grey codec | sharp | sharp (`node/images.ts`) |
 | pdf | React-PDF with yoga loaded for workerd | React-PDF | React-PDF (`node/pdf.ts`) |
+| relay | The relay Worker's Durable Objects (binding `TERMINALS` with `script_name`) over RPC, at `REALTIME_URL` | None (`noRelay`): polling | None (`noRelay`): polling |
 
 The Cloudflare adapters read their bindings per call through
 `getCloudflareContext()`. Never call it at module top level. `worker.ts` sets the

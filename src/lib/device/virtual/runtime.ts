@@ -6,7 +6,7 @@ import { downloadImage } from "./images";
  * of takes, mirrors its panel to the site and obeys the console, through the
  * same API as the real one.
  */
-import { cancelPurchaseResponse, deviceAccount, deviceState } from "@/lib/device/contract";
+import { cancelPurchaseResponse, deviceAccount, deviceCommand, deviceState } from "@/lib/device/contract";
 import type {
   CommandsResponse,
   DeviceState,
@@ -26,10 +26,16 @@ import type {
   Side,
   View,
 } from "@/lib/device/virtual/wasm";
+import { RelayLink, isNews } from "@/lib/device/virtual/relay";
+import type { TerminalStatus } from "../../../../realtime/src/protocol";
 
 export const FIRMWARE_VERSION = "web";
 /** Like the firmware's loop: sync this often while nothing else asks for it. */
 const SYNC_EVERY_MS = 120_000;
+/** With the live channel open the site says when to sync: this is only a safety net. */
+const RELAY_SYNC_EVERY_MS = 15 * 60_000;
+/** A sync the site asked for waits this long, again, while the flow is busy. */
+const BUSY_RETRY_MS = 5_000;
 const COMMANDS_WAIT_SECONDS = 25;
 const MAX_LOGS = 200;
 
@@ -140,9 +146,13 @@ function random53(): number {
   return (high & 0x1fffff) * 2 ** 32 + low;
 }
 
-/** Waits `ms`, then runs `step`: one sequential step of a loop that never awaits inside it. */
-function after(ms: number, signal: AbortSignal, step: () => Promise<unknown>): Promise<unknown> {
-  return sleep(ms, signal).then(step);
+/** Resolves when `promise` settles; rejects when `signal` aborts first. */
+function until(promise: Promise<void>, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    promise.then(resolve, resolve);
+  });
 }
 
 function randomHex(bytes: number): string {
@@ -162,6 +172,16 @@ export class VirtualDevice {
   private readonly pendingImages = new Set<string>();
   /** Server time at a local `performance.now()`, set by each sync. */
   private clock: { serverMs: number; at: number } | null = null;
+  /** The live channel, while the state names a relay (`state.realtime`). */
+  private relay: RelayLink | null = null;
+  /** It opened once since the start: opening again syncs, changes may have been missed. */
+  private relayOpened = false;
+  private periodicTimer: ReturnType<typeof setTimeout> | undefined;
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private pushedTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Console commands from the relay, run one after the other. */
+  private commandChain: Promise<unknown> = Promise.resolve();
+  private syncedAt: number | null = null;
   /** What is on the panel, to redraw it when the wasm is rebuilt. */
   private view: View | "main" | null = null;
   private tickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -241,6 +261,10 @@ export class VirtualDevice {
     clearTimeout(this.overlayTimer);
     this.run.abort();
     clearTimeout(this.tickTimer);
+    this.stopRelay();
+    clearTimeout(this.periodicTimer);
+    clearTimeout(this.refreshTimer);
+    clearTimeout(this.pushedTimer);
   }
 
   restart(): void {
@@ -254,6 +278,7 @@ export class VirtualDevice {
     this.restoreApp();
     this.claimKey = null;
     this.clock = null;
+    this.relayOpened = false;
     this.update({ phase: "booting", link: null });
     this.start();
   }
@@ -269,6 +294,7 @@ export class VirtualDevice {
   setNetwork(on: boolean): void {
     this.log("info", on ? "Wi-Fi rétabli" : "Wi-Fi coupé");
     this.update({ network: on, phase: on ? this.snapshot.phase : "offline" });
+    if (!on) this.stopRelay();
     if (!on && this.view === "main") this.showMain();
     if (on && this.stored.token)
       void this.sync().catch((error: unknown) => this.fail(error));
@@ -281,6 +307,7 @@ export class VirtualDevice {
   /** Shown in the status bar at once; reported to the site with the next sync. */
   setSensors(sensors: Sensors): void {
     this.sensors = sensors;
+    this.relay?.send({ t: "status", status: this.relayStatus() });
     if (this.view === "main" && this.wasmIdle()) this.showMain();
   }
 
@@ -311,9 +338,13 @@ export class VirtualDevice {
       if (edges & 2) this.press("right");
       // Both keys belong to the terminal, whatever app runs: its about page.
       if (edges & 4) this.dispatch({ type: "bothKeys" });
-      // A held left key is the short one; the held right key is the terminal's purchases list,
-      // like both keys, whatever app runs (firmware/src/main.rs).
-      if (edges & 8) this.press("left");
+      // A held left key is the short one for an app, the flow's otherwise (it leaves the
+      // purchases); the held right key is the terminal's purchases list, like both keys,
+      // whatever app runs (firmware/src/main.rs).
+      if (edges & 8) {
+        if (this.appLoaded && this.wasmIdle()) this.press("left");
+        else this.dispatch({ type: "longKey", side: "left" });
+      }
       if (edges & 16) this.dispatch({ type: "longKey", side: "right" });
     }, 20);
   }
@@ -478,14 +509,18 @@ export class VirtualDevice {
     return this.linkUntilLinked(signal);
   }
 
-  /** Syncs every SYNC_EVERY_MS while the terminal is idle, until `signal` aborts. */
+  /**
+   * Syncs every SYNC_EVERY_MS while the terminal is idle, RELAY_SYNC_EVERY_MS while the live
+   * channel is open, until `signal` aborts. Called again, it starts counting anew.
+   */
   private syncEvery(signal: AbortSignal): void {
-    after(SYNC_EVERY_MS, signal, async () => {
-      if (this.wasmIdle()) await this.sync().catch((error: unknown) => this.fail(error));
-      this.syncEvery(signal);
-    }).catch((error: unknown) => {
-      if (!signal.aborted) this.fail(error);
-    });
+    clearTimeout(this.periodicTimer);
+    if (signal.aborted) return;
+    const every = this.relay?.open ? RELAY_SYNC_EVERY_MS : SYNC_EVERY_MS;
+    this.periodicTimer = setTimeout(() => {
+      const synced = this.wasmIdle() ? this.sync() : Promise.resolve();
+      void synced.catch((error: unknown) => this.fail(error)).finally(() => this.syncEvery(signal));
+    }, every);
   }
 
   private async link(signal: AbortSignal): Promise<void> {
@@ -591,6 +626,9 @@ export class VirtualDevice {
     });
     this.stored.unknownBadges = [];
     this.save();
+    this.syncedAt = Date.now();
+    this.scheduleRefresh(state.refreshAt ?? null);
+    this.connectRelay(state);
 
     if (this.stored.appMode === "showcase") {
       this.wasm.updateApp("showcase", state);
@@ -671,7 +709,9 @@ export class VirtualDevice {
   private async pollStep(signal: AbortSignal): Promise<boolean> {
     if (signal.aborted) return false;
     try {
-      if (!this.snapshot.network) await sleep(2000, signal);
+      // The live channel brings the commands: no poll while it is open.
+      if (this.relay?.open) await until(this.relay.closed, signal);
+      else if (!this.snapshot.network) await sleep(2000, signal);
       else if ((await this.pollOnce(signal)) === "restart") {
         this.restart();
         return false;
@@ -708,6 +748,9 @@ export class VirtualDevice {
       case "key":
         this.press(command.side);
         break;
+      case "both":
+        this.dispatch({ type: "bothKeys" });
+        break;
       case "badge":
         this.tap(command.uid);
         break;
@@ -723,6 +766,98 @@ export class VirtualDevice {
         return "restart";
     }
     return "done";
+  }
+
+  // The live channel (./relay.ts), as firmware/src/remote.rs.
+
+  /** Opens the live channel the state names, or closes it when it names none. */
+  private connectRelay(state: DeviceState): void {
+    const url = state.realtime?.url ?? null;
+    const token = this.stored.token;
+    if (!url || !token || !this.snapshot.network) return this.stopRelay();
+    if (this.relay?.url === url) {
+      this.relay.send({ t: "status", status: this.relayStatus() });
+      return;
+    }
+    this.stopRelay();
+    this.relay = new RelayLink(url, token, {
+      opened: () => this.relayOpen(),
+      closed: (refused) => this.relayClosed(refused),
+      command: (command) => this.relayCommand(command),
+      live: (watching) => {
+        if (watching) this.relay?.screen(this.snapshot.bits);
+      },
+      sync: (at) => this.pushedSync(at),
+    });
+    this.relay.start();
+  }
+
+  private stopRelay(): void {
+    this.relay?.stop();
+    this.relay = null;
+  }
+
+  private relayOpen(): void {
+    this.log("info", "Canal direct ouvert");
+    this.relay?.send({ t: "hello", status: this.relayStatus() });
+    // Open again: what changed while it was closed was not said.
+    if (this.relayOpened) this.syncNow();
+    this.relayOpened = true;
+    this.syncEvery(this.run.signal);
+  }
+
+  private relayClosed(refused: boolean): void {
+    this.log("info", refused ? "Relais injoignable : retour au polling" : "Canal direct coupé : retour au polling");
+    this.syncEvery(this.run.signal);
+    // Refused may mean unlinked: a sync asks the site, whose 401 says so.
+    if (refused) this.syncNow();
+  }
+
+  /** A console command over the live channel: run in order, then acknowledged. */
+  private relayCommand(command: unknown): void {
+    const parsed = deviceCommand.safeParse(command);
+    const id = (command as { id?: unknown } | null)?.id;
+    this.commandChain = this.commandChain.then(async () => {
+      const outcome = parsed.success
+        ? await this.runCommand(parsed.data).catch((error: unknown): "done" => {
+            this.fail(error);
+            return "done";
+          })
+        : "done";
+      if (typeof id === "string") this.relay?.send({ t: "ack", id });
+      if (outcome === "restart") this.restart();
+    });
+  }
+
+  /** "What you show changed" at `at`: a sync, unless the last one is newer, once the flow is idle. */
+  private pushedSync(at: number): void {
+    clearTimeout(this.pushedTimer);
+    if (!isNews(at, this.state?.serverTime)) return;
+    if (!this.wasmIdle()) {
+      this.pushedTimer = setTimeout(() => this.pushedSync(at), BUSY_RETRY_MS);
+      return;
+    }
+    this.syncNow();
+  }
+
+  /** A sync when the state changes by itself (`refreshAt`: a cutoff, a preparation ending), by the site's clock. */
+  private scheduleRefresh(refreshAt: string | null): void {
+    clearTimeout(this.refreshTimer);
+    const at = refreshAt ? Date.parse(refreshAt) : Number.NaN;
+    const now = this.clock ? this.clock.serverMs + performance.now() - this.clock.at : Date.now();
+    if (Number.isNaN(at) || at <= now) return;
+    this.refreshTimer = setTimeout(() => this.pushedSync(at), at - now);
+  }
+
+  private relayStatus(): TerminalStatus {
+    return {
+      firmware: FIRMWARE_VERSION,
+      batteryMv: this.sensors.batteryMv,
+      rssi: this.sensors.wifiRssi,
+      app: this.stored.appMode ?? (this.appLoaded ? "app" : "mate"),
+      uptime: Math.floor(performance.now() / 1000),
+      syncedAt: this.syncedAt,
+    };
   }
 
   // The take flow, in the wasm.
@@ -890,7 +1025,7 @@ export class VirtualDevice {
         return;
       }
       this.beep("accepted");
-      this.show({ type: "flow", screen: { type: "served", name, count: reply.served } });
+      this.show({ type: "flow", screen: { type: "served", name, count: reply.served, avatar: reply.avatar ?? null } });
       // The next main screen shows the stock without the served preparation.
       await this.sync();
     } catch (error) {
@@ -1010,7 +1145,8 @@ export class VirtualDevice {
       refreshes: this.snapshot.refreshes + 1,
       refresh: full ? "full" : "partial",
     });
-    if (this.stored.token && this.snapshot.network) void this.uploadFrame(bits);
+    if (this.relay?.open) this.relay.screen(bits);
+    else if (this.stored.token && this.snapshot.network) void this.uploadFrame(bits);
   }
 
   /** Reports the panel to the site's console; only the latest frame matters. */
@@ -1103,6 +1239,8 @@ export class VirtualDevice {
 
   private log(kind: LogEntry["kind"], text: string): void {
     const entry = { id: ++this.logId, at: Date.now(), kind, text };
+    // As the firmware's log over the live channel: "<level> <target> <message>".
+    this.relay?.log(`${kind === "error" ? "E" : "I"} matecrew_web::${kind} ${text}`);
     this.update({
       logs: [...this.snapshot.logs.slice(-(MAX_LOGS - 1)), entry],
     });

@@ -1,7 +1,7 @@
 //! Terminal host adapter. All layouts are compiled from apps/mate (see device.config.ts).
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use matecrew_core::{
-    contract::decode_base64,
+    contract::{decode_base64, AVATAR_ACCOUNT, AVATAR_SERVED},
     flow::{Cause, Failure, PurchaseRow, Screen, Task},
 };
 use serde_json::{json, Value};
@@ -264,12 +264,30 @@ pub fn leave_screen<D: DrawTarget<Color = BinaryColor>>(
         json!({"title":name,"left":"Suivant","right":"Quitter"}),
     )
 }
+/// Done: who, and what they took with its picture (96 x 96, as `contract::Item::picture`).
 pub fn taken_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     name: &str,
     item: &str,
+    picture: &[u8],
 ) -> Result<(), D::Error> {
-    render(d, "taken", json!({"name":name,"item":item}))
+    render(d, "taken", json!({"name":name,"item":item,"picture":picture::pictures(picture).0}))
+}
+
+/// What a screen shows for someone: their avatar at `side` (`hasAvatar`), else their initials.
+fn person(name: &str, avatar: Option<&str>, side: usize) -> Value {
+    let raw = avatar.and_then(decode_base64);
+    let avatar = picture::avatar(raw.as_deref(), side);
+    json!({"hasAvatar": !avatar.is_empty(), "avatar": avatar, "initials": initials(name)})
+}
+
+/// The first letters of the first and last names, "AM" for Alex Martin, as the site does
+/// (`src/lib/device/avatar.ts`).
+pub fn initials(name: &str) -> String {
+    let mut words = name.split_whitespace();
+    let first = words.next().and_then(|word| word.chars().next());
+    let last = words.last().and_then(|word| word.chars().next());
+    first.into_iter().chain(last).flat_map(char::to_uppercase).collect()
 }
 /// "Mon compte", as the site counts it now (`flow::Screen::Account`): counts, the last days, the
 /// month's cost and the latest purchases.
@@ -284,6 +302,8 @@ pub struct AccountInfo<'a> {
     pub labels: &'a [String],
     pub cost: Option<&'a str>,
     pub recent: &'a [PurchaseRow],
+    /// As in `contract::Account`, before the title.
+    pub avatar: Option<&'a str>,
 }
 
 pub fn account_screen<D: DrawTarget<Color = BinaryColor>>(
@@ -319,6 +339,7 @@ pub fn account_screen<D: DrawTarget<Color = BinaryColor>>(
             "cost": info.cost,
             "recent": info.recent.iter().map(purchase_row).collect::<Vec<_>>(),
             "recentCount": info.recent.len(),
+            "person": person(info.name, info.avatar, AVATAR_ACCOUNT),
         }),
     )
 }
@@ -423,6 +444,7 @@ fn purchases_screen<D: DrawTarget<Color = BinaryColor>>(
     page: u32,
     pages: u32,
     confirm: bool,
+    avatar: Option<&str>,
 ) -> Result<(), D::Error> {
     let chosen = rows.get(selected as usize);
     render(
@@ -442,6 +464,7 @@ fn purchases_screen<D: DrawTarget<Color = BinaryColor>>(
             "selectedPicture": chosen
                 .map(|row| picture::pictures(&decode_base64(&row.picture).unwrap_or_default()).0)
                 .unwrap_or_default(),
+            "person": person(name, avatar, AVATAR_ACCOUNT),
         }),
     )
 }
@@ -470,6 +493,7 @@ where
             products,
             labels,
             recent,
+            avatar,
         } => account_screen(
             d,
             &AccountInfo {
@@ -482,6 +506,7 @@ where
                 labels,
                 cost: cost.as_deref(),
                 recent,
+                avatar: avatar.as_deref(),
             },
         ),
         Screen::Failed { task, failure } => failure_screen(d, *task, *failure),
@@ -493,7 +518,8 @@ where
             page,
             pages,
             confirm,
-        } => purchases_screen(d, name, rows, *selected, *back, *page, *pages, *confirm),
+            avatar,
+        } => purchases_screen(d, name, rows, *selected, *back, *page, *pages, *confirm, avatar.as_deref()),
         Screen::Badge { key_label } => badge_screen(d, key_label),
         Screen::Pick {
             name,
@@ -515,7 +541,9 @@ where
             pick_screen(d, &info)
         }
         Screen::Leave { name } => leave_screen(d, name),
-        Screen::Taken { name, item } => taken_screen(d, name, item),
+        Screen::Taken { name, item, picture } => {
+            taken_screen(d, name, item, &decode_base64(picture).unwrap_or_default())
+        }
         Screen::UnknownBadge { uid, claim_url } => {
             unknown_badge_screen(d, uid, claim_url.as_deref())
         }
@@ -530,17 +558,19 @@ where
             "Aucun article n'est actif sur le site.",
         ),
         Screen::About => about_screen(d),
-        Screen::Served { name, count } => served_screen(d, name, *count),
+        Screen::Served { name, count, avatar } => served_screen(d, name, *count, avatar.as_deref()),
     }
 }
 
-/// The preparation was served from the terminal: who, and how many orders the site closed.
+/// The preparation was served from the terminal: who (with their avatar, as
+/// `contract::ServeResponse` gives it), and how many orders the site closed.
 pub fn served_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     name: &str,
     count: u32,
+    avatar: Option<&str>,
 ) -> Result<(), D::Error> {
-    render(d, "served", json!({"name":name,"count":count}))
+    render(d, "served", json!({"name":name,"count":count,"person":person(name, avatar, AVATAR_SERVED)}))
 }
 
 /// Both keys: the terminal's own page. Everything it shows is in `$device` (`device_info::set`).

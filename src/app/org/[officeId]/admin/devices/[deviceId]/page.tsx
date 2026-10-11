@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { ITEM_DISPLAY_ORDER } from "@/lib/items";
 import { loadLiveStatus } from "@/lib/device/live";
@@ -15,7 +16,7 @@ const RECENT_TAKES = 30;
 
 export default async function DevicePage({ params }: Props) {
   const { officeId, deviceId } = await params;
-  await requireOrgRoles(officeId, "ADMIN");
+  const { session } = await requireOrgRoles(officeId, "ADMIN");
 
   const device = await prisma.device.findFirst({
     where: { id: deviceId, officeId },
@@ -31,7 +32,7 @@ export default async function DevicePage({ params }: Props) {
   });
   if (!device) notFound();
 
-  const [badges, items, takes, live] = await Promise.all([
+  const [badges, items, takes, live, relay] = await Promise.all([
     prisma.badge.findMany({
       where: { officeId },
       orderBy: [{ user: { name: "asc" } }, { lastSeenAt: "desc" }],
@@ -44,8 +45,10 @@ export default async function DevicePage({ params }: Props) {
       take: RECENT_TAKES,
       select: { id: true, badgeUid: true, itemId: true, rejectedReason: true, takenAt: true },
     }),
-    // Also marks the console open: the terminal starts mirroring its screen.
+    // Without a relay, also marks the console open: the terminal starts mirroring its screen.
     loadLiveStatus(device.id),
+    // With one, the console's socket: everything else is pushed on it.
+    platform.relay.console(device.id, session.user.id),
   ]);
   const holder = new Map(badges.map((b) => [b.uid, b.user?.name ?? null]));
 
@@ -72,6 +75,7 @@ export default async function DevicePage({ params }: Props) {
           takenAt: take.takenAt.toISOString(),
         }))}
         initial={live}
+        relay={relay}
         renderedAt={new Date().toISOString()}
         timeZone={device.office.timezone}
       />

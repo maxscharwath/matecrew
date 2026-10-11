@@ -4,7 +4,17 @@ import sharp from "sharp";
 import { cloudflareImages } from "../../src/platform/cloudflare/images";
 import { decodePng } from "../../src/platform/cloudflare/images/png";
 import { sharpImages } from "../../src/platform/node/images";
-import { ITEM_IMAGE_BYTES, ITEM_IMAGE_SIZE, itemImage, pictureToBitmap, threshold } from "../../src/lib/device/bitmap";
+import {
+  ITEM_IMAGE_BYTES,
+  ITEM_IMAGE_SIZE,
+  TERMINAL_PHOTO_BYTES,
+  itemImage,
+  needsTerminalPhoto,
+  photoToTerminal,
+  pictureToBitmap,
+  threshold,
+  withOpacity,
+} from "../../src/lib/device/bitmap";
 
 const PHOTO = "public/textures/el-tony-mate-label-sm.jpg";
 const SIDE = ITEM_IMAGE_SIZE;
@@ -132,4 +142,29 @@ test("the terminal shows the drawing, else the photo's picture, else the catalog
   const fallback = itemImage(null, null);
   assert.equal(fallback.bits.length, ITEM_IMAGE_BYTES);
   assert.deepEqual(itemImage(new Uint8Array(72), null).bits, fallback.bits, "a picture of another size is ignored");
+});
+
+test("a photo is dithered, with its background read on the grey levels", async () => {
+  // The label, 3:2, fits the square with white above and below: background, not object.
+  const stored = await sharpImages.optimizeForWeb(new Uint8Array(await sharp(PHOTO).toBuffer()));
+  const picture = await photoToTerminal(stored);
+  assert.equal(picture.length, TERMINAL_PHOTO_BYTES);
+  const bit = (plane: Uint8Array, x: number, y: number) => (plane[(y * SIDE + x) >> 3] & (0x80 >> ((y * SIDE + x) & 7))) !== 0;
+  const opacity = picture.subarray(ITEM_IMAGE_BYTES);
+  assert.equal(bit(opacity, 0, 0), false, "the white band above the label is transparent");
+  assert.equal(bit(opacity, SIDE / 2, SIDE / 2), true, "the label is opaque");
+  // Dithered: the label's tones are dots, not the threshold's flat areas.
+  const flat = withOpacity(await pictureToBitmap(stored, "threshold"));
+  assert.ok(differingPixels(picture, flat) > (SIDE * SIDE) / 20, "not a threshold");
+  // As stored, the terminal gets it unchanged: its own opacity, not one worked out from the dots.
+  assert.deepEqual(withOpacity(itemImage(null, picture)), picture);
+});
+
+test("a photo's picture from before dithering is still shown, and worked out again", () => {
+  const legacy = new Uint8Array(ITEM_IMAGE_BYTES).fill(0x0f);
+  assert.deepEqual(itemImage(null, legacy).bits, legacy);
+  assert.equal(needsTerminalPhoto("items/i1/photo.webp", legacy), true);
+  assert.equal(needsTerminalPhoto("items/i1/photo.webp", null), true);
+  assert.equal(needsTerminalPhoto("items/i1/photo.webp", new Uint8Array(TERMINAL_PHOTO_BYTES)), false);
+  assert.equal(needsTerminalPhoto(null, null), false, "no photo, nothing to work out");
 });

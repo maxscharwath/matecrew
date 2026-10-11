@@ -5,6 +5,7 @@ import { d1Database } from "./database";
 import { cloudflareImages } from "./images";
 import { cloudflareJobQueue } from "./jobs";
 import { workerdReactPdf } from "./pdf";
+import { durableObjectRelay } from "./realtime";
 import { r2BlobStore } from "./storage";
 
 /**
@@ -20,4 +21,5 @@ export const platform: Platform = {
   env: createProcessEnv(),
   images: cloudflareImages,
   pdf: workerdReactPdf,
+  relay: durableObjectRelay,
 };

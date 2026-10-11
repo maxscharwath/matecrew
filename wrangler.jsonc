@@ -69,6 +69,17 @@
       }
     ]
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        // The terminals' realtime relay (realtime/, its own Worker, deployed before this one):
+        // one Durable Object per terminal, called over RPC (src/platform/cloudflare/realtime.ts).
+        "name": "TERMINALS",
+        "class_name": "Terminal",
+        "script_name": "matecrew-realtime"
+      }
+    ]
+  },
   "triggers": {
     // Must match src/jobs/schedules.ts (checked by tests/platform/schedules.test.ts).
     "crons": ["*/5 * * * *", "0 2 * * *", "0 2 1 * *"]
@@ -76,7 +87,9 @@
   "vars": {
     // The worker sends the Slack notifications and mails since the cutover (2026-10-11). "false"
     // keeps its crons off while another deployment still sends them (docs/cloudflare-migration.md).
-    "SCHEDULES_ENABLED": "true"
+    "SCHEDULES_ENABLED": "true",
+    // Where terminals and consoles open their sockets (realtime/wrangler.jsonc).
+    "REALTIME_URL": "wss://matecrew-realtime.owt.workers.dev"
   },
   // Rendering and mailing statement PDFs and replaying a month's costing
   // ledger exceed the default 30 s of CPU on large offices. Workers Paid only.

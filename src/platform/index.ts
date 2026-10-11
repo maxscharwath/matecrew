@@ -20,5 +20,6 @@ export { BatchConflictError, expectRows } from "./ports/database";
 export type { AppEnv, EnvName } from "./ports/env";
 export type { Job, JobHandlers, JobName, JobPayloads, JobQueue, ScheduledTask } from "./ports/jobs";
 export type { BlobInfo, BlobObject, BlobStore } from "./ports/storage";
+export type { TerminalRelay } from "./ports/realtime";
 export { readBlobBytes } from "./ports/storage";
 export { platform } from "@/platform/active";

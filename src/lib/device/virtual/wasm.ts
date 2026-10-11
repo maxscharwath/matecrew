@@ -38,12 +38,13 @@ export type FlowScreen =
       count: number;
     }
   | { type: "leave"; name: string }
-  | { type: "taken"; name: string; item: string; image: string }
+  | { type: "taken"; name: string; item: string; picture: string }
   | { type: "unknownBadge"; uid: string; claimUrl: string | null }
   | { type: "notReady" }
   | { type: "noItems" }
   | { type: "about" }
-  | { type: "served"; name: string; count: number }
+  /** `avatar`: the runner's, as `serveResponse` gives it. */
+  | { type: "served"; name: string; count: number; avatar?: string | null }
   | { type: "accountBadge"; purchases: boolean }
   | { type: "accountLoading"; name: string; cancelling: boolean }
   | {
@@ -57,6 +58,7 @@ export type FlowScreen =
       products: string[];
       labels: string[];
       recent: PurchaseRow[];
+      avatar?: string | null;
     }
   | {
       type: "purchases";
@@ -67,6 +69,7 @@ export type FlowScreen =
       page: number;
       pages: number;
       confirm: boolean;
+      avatar?: string | null;
     }
   | { type: "failed"; task: "account" | "purchases" | "cancel"; failure: Failure };
 

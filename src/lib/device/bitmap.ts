@@ -6,7 +6,8 @@
 import { CoffeeIcon } from "@matecrew/device-ui/icons/pixelarticons";
 import { platform, readBlobBytes } from "@/platform";
 
-export type Bitmap = { width: number; height: number; bits: Uint8Array };
+/** `opacity`, when the picture comes with its own (a dithered photo), as `withOpacity` gives it. */
+export type Bitmap = { width: number; height: number; bits: Uint8Array; opacity?: Uint8Array };
 
 /**
  * Side of an item picture in panel pixels, as the terminal draws it; where a screen has less
@@ -14,6 +15,10 @@ export type Bitmap = { width: number; height: number; bits: Uint8Array };
  */
 export const ITEM_IMAGE_SIZE = 96;
 export const ITEM_IMAGE_BYTES = (ITEM_IMAGE_SIZE * ITEM_IMAGE_SIZE) / 8;
+/** A photo's picture as stored (Item.terminalPhoto): dithered, then its opacity plane. */
+export const TERMINAL_PHOTO_BYTES = 2 * ITEM_IMAGE_BYTES;
+/** Grey this light or lighter, reachable from the edges, is a photo's background. */
+const BACKGROUND_GREY = 250;
 
 export function blank(width: number, height: number): Bitmap {
   return {
@@ -108,36 +113,49 @@ export function threshold(gray: Uint8Array, width: number, height: number): Bitm
   return out;
 }
 
-/**
- * Any picture as an item's 96 x 96: dithered for a photo, a plain threshold
- * for a drawing. Pixel art at 24, 48 or 96 px keeps its pixels.
- */
-export async function pictureToBitmap(
-  source: Uint8Array,
-  mode: "dither" | "threshold",
-): Promise<Bitmap> {
+/** Any picture in grey levels at an item's 96 x 96. Pixel art at 24, 48 or 96 px keeps its pixels. */
+async function itemGrey(source: Uint8Array): Promise<Uint8Array> {
   const { width, height } = await platform.images.size(source);
   const pixelArt =
     width > 0 &&
     width === height &&
     width <= ITEM_IMAGE_SIZE &&
     ITEM_IMAGE_SIZE % width === 0;
-  const gray = await platform.images.greyscaleSquare(
+  return platform.images.greyscaleSquare(
     source,
     ITEM_IMAGE_SIZE,
     pixelArt ? "nearest" : "lanczos3",
   );
+}
+
+/** Any picture as an item's 96 x 96: dithered for a photo, a plain threshold for a drawing. */
+export async function pictureToBitmap(
+  source: Uint8Array,
+  mode: "dither" | "threshold",
+): Promise<Bitmap> {
   const convert = mode === "dither" ? dither : threshold;
-  return convert(gray, ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
+  return convert(await itemGrey(source), ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
 }
 
 /**
- * A stored photo as the terminal draws it, worked out once when the photo is
- * uploaded (Item.terminalPhoto). A plain threshold: on product photos it keeps
- * the outline and some of the label, where dithering at this size is noise.
+ * A stored photo as the terminal draws it, worked out once when the photo is uploaded
+ * (Item.terminalPhoto, TERMINAL_PHOTO_BYTES): dithered at 96 px, then its opacity plane. The
+ * background is read on the grey levels, before dithering: the near white reachable from the
+ * edges, which a dot of the dithering cannot hold back.
  */
 export async function photoToTerminal(photo: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
-  return Uint8Array.from((await pictureToBitmap(photo, "threshold")).bits);
+  const grey = await itemGrey(photo);
+  const picture = dither(grey, ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE);
+  const background = surroundings(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE, (i) => grey[i] >= BACKGROUND_GREY);
+  return Uint8Array.from(planes(picture.bits, background, ITEM_IMAGE_SIZE * ITEM_IMAGE_SIZE));
+}
+
+/**
+ * Whether the item's terminal picture is still to be worked out from its photo: none yet, or one
+ * from before photos were dithered (a threshold without its opacity plane).
+ */
+export function needsTerminalPhoto(imageKey: string | null, terminalPhoto: Uint8Array | null): boolean {
+  return imageKey !== null && terminalPhoto?.length !== TERMINAL_PHOTO_BYTES;
 }
 
 /** The bytes of a stored photo: an `items/` key in storage, or an absolute URL. */
@@ -156,16 +174,36 @@ export async function loadPhoto(imageKey: string): Promise<Uint8Array> {
  * The picture followed by its opacity plane, the three colours the terminal draws: ink black,
  * paper white where it belongs to the object, transparent around it. The surroundings are the
  * paper reachable from the edges without crossing ink, so the white body of a can stays white
- * on the grey disc behind it and the space around the can shows the disc.
+ * on the grey disc behind it and the space around the can shows the disc. A picture with its
+ * own opacity (a dithered photo) keeps it.
  */
 export function withOpacity(b: Bitmap): Uint8Array {
   const { width, height, bits } = b;
+  if (b.opacity) return planes(bits, null, width * height, b.opacity);
   const ink = (i: number) => (bits[i >> 3] & (0x80 >> (i & 7))) !== 0;
+  return planes(bits, surroundings(width, height, (i) => !ink(i)), width * height);
+}
+
+/** The ink plane, then the opacity plane: `opacity` as given, else opaque wherever `outside` is not. */
+function planes(bits: Uint8Array, outside: Uint8Array | null, pixels: number, opacity?: Uint8Array): Uint8Array {
+  const out = new Uint8Array(bits.length * 2);
+  out.set(bits);
+  if (opacity) out.set(opacity, bits.length);
+  else if (outside) {
+    for (let i = 0; i < pixels; i++) {
+      if (!outside[i]) out[bits.length + (i >> 3)] |= 0x80 >> (i & 7);
+    }
+  }
+  return out;
+}
+
+/** 1 for each pixel that `open` lets through and that is reachable from the edges through such pixels. */
+function surroundings(width: number, height: number, open: (i: number) => boolean): Uint8Array {
   const outside = new Uint8Array(width * height);
   const stack: number[] = [];
   const reach = (x: number, y: number) => {
     const i = y * width + x;
-    if (!outside[i] && !ink(i)) {
+    if (!outside[i] && open(i)) {
       outside[i] = 1;
       stack.push(i);
     }
@@ -187,12 +225,7 @@ export function withOpacity(b: Bitmap): Uint8Array {
     if (y > 0) reach(x, y - 1);
     if (y < height - 1) reach(x, y + 1);
   }
-  const planes = new Uint8Array(bits.length * 2);
-  planes.set(bits);
-  for (let i = 0; i < width * height; i++) {
-    if (!outside[i]) planes[bits.length + (i >> 3)] |= 0x80 >> (i & 7);
-  }
-  return planes;
+  return outside;
 }
 
 /** A stored 96 x 96 picture, or null when there is none of that size. */
@@ -201,14 +234,25 @@ function stored(bits: Uint8Array | null): Bitmap | null {
   return { width: ITEM_IMAGE_SIZE, height: ITEM_IMAGE_SIZE, bits: Uint8Array.from(bits) };
 }
 
+/** A photo's stored picture: dithered with its opacity, or a threshold from before (`stored`). */
+function storedPhoto(bytes: Uint8Array | null): Bitmap | null {
+  if (bytes?.length !== TERMINAL_PHOTO_BYTES) return stored(bytes);
+  return {
+    width: ITEM_IMAGE_SIZE,
+    height: ITEM_IMAGE_SIZE,
+    bits: bytes.slice(0, ITEM_IMAGE_BYTES),
+    opacity: bytes.slice(ITEM_IMAGE_BYTES),
+  };
+}
+
 /**
  * What the terminal shows for an item: its own black and white picture,
- * else its photo in black and white, else the catalogue fallback. Both
+ * else its photo dithered, else the catalogue fallback. Both
  * pictures are stored, so this decodes nothing.
  */
 export function itemImage(
   terminalImage: Uint8Array | null,
   terminalPhoto: Uint8Array | null,
 ): Bitmap {
-  return stored(terminalImage) ?? stored(terminalPhoto) ?? fallbackProductImage();
+  return stored(terminalImage) ?? storedPhoto(terminalPhoto) ?? fallbackProductImage();
 }

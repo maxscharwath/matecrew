@@ -14,50 +14,7 @@ const WATCHED_SECONDS = 30;
 
 export const FRAME_BYTES = (800 * 480) / 8;
 
-export type ConsoleCommand =
-  | { kind: "key"; side: "left" | "right" }
-  /** Both keys together: the terminal's about page. Stored as a KEY row, arg "both". */
-  | { kind: "both" }
-  | { kind: "badge"; uid: string }
-  | { kind: "sync"; app?: "mate" | "showcase" }
-  | { kind: "tap"; x: number; y: number }
-  | { kind: "restart" }
-  | { kind: "forgetWifi" };
-
-const KIND_TO_ROW = {
-  key: "KEY",
-  both: "KEY",
-  badge: "BADGE",
-  sync: "SYNC",
-  tap: "KEY",
-  restart: "RESTART",
-  forgetWifi: "FORGET_WIFI",
-} as const;
-
-/** What a row stores besides its kind: the side, the UID, the point or the app. */
-function argOf(command: ConsoleCommand): string | null {
-  switch (command.kind) {
-    case "key":
-      return command.side;
-    case "both":
-      return "both";
-    case "badge":
-      return command.uid;
-    case "tap":
-      return `tap:${command.x}:${command.y}`;
-    case "sync":
-      return command.app ? `app:${command.app}` : null;
-    default:
-      return null;
-  }
-}
-
-export function toRow(command: ConsoleCommand): {
-  kind: CommandRow["kind"];
-  arg: string | null;
-} {
-  return { kind: KIND_TO_ROW[command.kind], arg: argOf(command) };
-}
+export { toRow, type ConsoleCommand } from "@/lib/device/console-commands";
 
 export function toWire(
   row: Pick<CommandRow, "id" | "kind" | "arg">,

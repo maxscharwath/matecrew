@@ -26,6 +26,9 @@ export type EnvName =
   | "EMAIL_FROM"
   | "DEVICE_UI_APP"
   | "DEVICE_UI_THEME"
+  // The terminals' realtime relay (realtime/): its public origin, "wss://…". Unset, terminals and
+  // consoles poll the site.
+  | "REALTIME_URL"
   // The Cloudflare Worker's platform bridge (src/platform/cloudflare/bridge):
   // its origin, for a deployment that shares that Worker's data (Vercel), and
   // the secret both sides sign with, a database credential.

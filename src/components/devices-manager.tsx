@@ -1,17 +1,18 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useFormatter, useNow, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { BatteryLow, BatteryMedium, Bluetooth, Cpu, Nfc, Plus } from "lucide-react";
+import { BatteryLow, BatteryMedium, Bluetooth, Cpu, Nfc, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { assignBadge } from "@/app/org/[officeId]/admin/devices/actions";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { assignBadge, deleteBadge } from "@/app/org/[officeId]/admin/devices/actions";
 import { FrameThumbnail } from "@/components/device-console/frame-canvas";
 
 const LOW_BATTERY_MV = 3500;
@@ -149,18 +150,27 @@ const NOBODY = "__nobody";
 /**
  * Every badge a terminal has read, last pass first. Members link their own
  * badge by scanning the QR the terminal shows for an unknown one; the select
- * is for an admin to assign, reassign or remove one.
+ * is for an admin to assign, reassign or remove one, the bin to forget it.
  */
 function Badges({ officeId, badges, members }: Readonly<{ officeId: string; badges: BadgeRow[]; members: Props["members"] }>) {
   const t = useTranslations("devices");
   const format = useFormatter();
   const now = useNow({ updateInterval: 60_000 });
   const [pending, startTransition] = useTransition();
+  const [deleting, setDeleting] = useState<BadgeRow | null>(null);
 
   const assign = (badgeId: string, userId: string | null) =>
     startTransition(async () => {
       const result = await assignBadge(officeId, badgeId, userId);
       if (result.success) toast.success(userId ? t("badgeAssigned") : t("badgeUnassignedToast"));
+      else toast.error(result.error);
+    });
+
+  const remove = (badge: BadgeRow) =>
+    startTransition(async () => {
+      const result = await deleteBadge(officeId, badge.id);
+      setDeleting(null);
+      if (result.success) toast.success(t("badgeDeleted"));
       else toast.error(result.error);
     });
 
@@ -192,28 +202,56 @@ function Badges({ officeId, badges, members }: Readonly<{ officeId: string; badg
                   </div>
                   <div className="font-mono text-[11px] text-muted-foreground">{badge.uid}</div>
                 </div>
-                <Select
-                  disabled={pending}
-                  value={badge.user?.id ?? NOBODY}
-                  onValueChange={(value) => assign(badge.id, value === NOBODY ? null : value)}
-                >
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder={t("assignTo")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NOBODY}>{t("badgeUnassigned")}</SelectItem>
-                    {members.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-1">
+                  <Select
+                    disabled={pending}
+                    value={badge.user?.id ?? NOBODY}
+                    onValueChange={(value) => assign(badge.id, value === NOBODY ? null : value)}
+                  >
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder={t("assignTo")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NOBODY}>{t("badgeUnassigned")}</SelectItem>
+                      {members.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={pending}
+                    onClick={() => setDeleting(badge)}
+                    title={t("badgeDelete")}
+                    aria-label={t("badgeDelete")}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </CardContent>
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+        title={t("badgeDeleteTitle")}
+        description={
+          deleting?.user
+            ? t("badgeDeleteConfirmLinked", { uid: deleting.uid, name: deleting.user.name })
+            : t("badgeDeleteConfirm", { uid: deleting?.uid ?? "" })
+        }
+        confirmLabel={t("badgeDelete")}
+        isPending={pending}
+        onConfirm={() => deleting && remove(deleting)}
+      />
     </Card>
   );
 }

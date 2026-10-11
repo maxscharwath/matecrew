@@ -271,10 +271,11 @@ impl Api {
         )?)
     }
 
-    /// Console commands from the site, waiting up to 25 s for one to arrive.
-    pub fn commands(&self) -> Result<CommandsResponse> {
-        let path = format!("/api/device/commands?wait={COMMANDS_WAIT_SECONDS}");
-        let timeout = Duration::from_secs(COMMANDS_WAIT_SECONDS + 10);
+    /// Console commands from the site, waiting up to `wait` seconds (at most 25) for one to arrive.
+    pub fn commands(&self, wait: u64) -> Result<CommandsResponse> {
+        let wait = wait.min(COMMANDS_WAIT_SECONDS);
+        let path = format!("/api/device/commands?wait={wait}");
+        let timeout = Duration::from_secs(wait + 10);
         expect_json(self.send(Method::Get, &path, Body::None, timeout)?)
     }
 

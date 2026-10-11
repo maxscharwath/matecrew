@@ -47,6 +47,13 @@ export const linkTokenError = z.object({
 /** What the screen writes above a key: left takes, right opens the badge holder's account. */
 export const deviceKey = z.object({ label: z.string() });
 
+/**
+ * A person's avatar at the side the screen draws it (`AVATAR_SIDE` in device/avatar.ts), packed
+ * 1-bit then its opacity plane, base64: dithered in a disc ringed in ink. Null without one: the
+ * screen shows initials or an icon.
+ */
+const personPicture = z.string().nullable();
+
 /** The main screen's content. The server supplies it; the terminal's compiled screens own layout and pixels. */
 export const deviceScreen = z.object({
   officeName: z.string(), time: z.string(),
@@ -71,7 +78,17 @@ export const deviceScreen = z.object({
       title: z.string(),
       total: z.string(),
       items: z.array(
-        z.object({ name: z.string(), count: z.number().int(), names: z.string(), picture: z.string() }),
+        z.object({
+          name: z.string(),
+          count: z.number().int(),
+          names: z.string(),
+          picture: z.string(),
+          /**
+           * The first ones `names` lists (PREPARATION_PEOPLE), each with `personPicture` at 32 px.
+           * A state kept from before has none.
+           */
+          people: z.array(z.object({ initials: z.string(), avatar: personPicture })).default([]),
+        }),
       ),
       /** The session to serve; null for orders without one. */
       sessionId: z.string().nullable(),
@@ -112,6 +129,13 @@ export const deviceState = z.object({
   firmware: z
     .object({ version: z.string(), url: z.string(), sha256: z.string(), size: z.number().int() })
     .nullable(),
+  /**
+   * The terminal's live channel (realtime/): a WebSocket at `url`, with its token, for console
+   * commands, its screen and "what you show changed". Null without a relay: it polls the site.
+   */
+  realtime: z.object({ url: z.string() }).nullable().default(null),
+  /** When this state changes by itself (a session's cutoff, a preparation ending), ISO 8601: sync then. */
+  refreshAt: z.string().nullable().default(null),
 });
 
 export const deviceTake = z.object({
@@ -176,6 +200,8 @@ export const deviceAccount = z.object({
   labels: z.array(z.string()),
   /** The latest purchases the site still counts (not cancelled), newest first. */
   purchases: z.array(purchase),
+  /** The member's `personPicture` at 40 px, before the title of "Mon compte" and "Mes achats". */
+  avatar: personPicture,
 });
 
 /** `POST /api/device/purchases/cancel`: the badge holder cancels one of their purchases. */
@@ -194,6 +220,8 @@ export const serveResponse = z.object({
   served: z.number().int(),
   /** Why nothing was served: "unknown_badge" or "invalid_badge". */
   reason: z.string().nullable(),
+  /** The runner's `personPicture` at 128 px, on the screen that thanks them; null with `reason`. */
+  avatar: personPicture,
 });
 
 export const statusRequest = z.object({

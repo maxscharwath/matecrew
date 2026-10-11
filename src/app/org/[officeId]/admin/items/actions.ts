@@ -7,7 +7,7 @@ import { BatchConflictError, commitBatch, expectRows, newId, prisma } from "@/li
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { buildItemImageKey } from "@/lib/storage";
 import { platform } from "@/platform";
-import { ITEM_IMAGE_BYTES, loadPhoto, photoToTerminal, pictureToBitmap } from "@/lib/device/bitmap";
+import { ITEM_IMAGE_BYTES, loadPhoto, needsTerminalPhoto, photoToTerminal, pictureToBitmap } from "@/lib/device/bitmap";
 
 type ActionResult = { success: true } | { success: false; error: string };
 
@@ -346,7 +346,7 @@ export async function terminalImageFromFile(
 
 /**
  * The item's photo at 96 x 96 in black and white, as a start for drawing. Worked out and kept
- * now when the photo has none yet (a photo stored before pictures were computed at upload).
+ * now when the photo has none yet, or one from before photos were dithered.
  */
 export async function terminalImageFromPhoto(officeId: string, itemId: string): Promise<PictureResult> {
   await requireOrgRoles(officeId, "ADMIN");
@@ -356,13 +356,17 @@ export async function terminalImageFromPhoto(officeId: string, itemId: string): 
     select: { imageKey: true, terminalPhoto: true },
   });
   if (!item) return { success: false, error: t("errors.itemNotFound") };
-  if (item.terminalPhoto) return { success: true, bits: Buffer.from(item.terminalPhoto).toString("base64") };
   if (!item.imageKey) return { success: false, error: t("items.terminalImage.noPhoto") };
+  // The ink only: the editor draws in black and white, the opacity follows the drawing.
+  const bits = (picture: Uint8Array) => Buffer.from(picture.subarray(0, ITEM_IMAGE_BYTES)).toString("base64");
+  if (item.terminalPhoto && !needsTerminalPhoto(item.imageKey, item.terminalPhoto)) {
+    return { success: true, bits: bits(item.terminalPhoto) };
+  }
   try {
     const terminalPhoto = await photoToTerminal(await loadPhoto(item.imageKey));
     await prisma.item.update({ where: { id: itemId }, data: { terminalPhoto } });
     revalidateItemPages(officeId);
-    return { success: true, bits: Buffer.from(terminalPhoto).toString("base64") };
+    return { success: true, bits: bits(terminalPhoto) };
   } catch (error) {
     console.error(`[items] terminal picture of ${itemId} failed`, error);
     return { success: false, error: t("items.terminalImage.photoFailed") };
@@ -370,16 +374,17 @@ export async function terminalImageFromPhoto(officeId: string, itemId: string): 
 }
 
 /**
- * Works out the terminal picture of every photo in the office that has none:
- * photos stored before pictures were computed at upload, as copied from the
+ * Works out the terminal picture of every photo in the office that has none, or one from before
+ * photos were dithered: photos stored before pictures were computed at upload, as copied from the
  * previous hosting. Run once from the items page; then nothing is left to do.
  */
 export async function computeTerminalPhotos(officeId: string): Promise<{ computed: number; failed: number }> {
   await requireOrgRoles(officeId, "ADMIN");
-  const items = await prisma.item.findMany({
-    where: { officeId, imageKey: { not: null }, terminalPhoto: null },
-    select: { id: true, imageKey: true },
+  const photos = await prisma.item.findMany({
+    where: { officeId, imageKey: { not: null } },
+    select: { id: true, imageKey: true, terminalPhoto: true },
   });
+  const items = photos.filter((item) => needsTerminalPhoto(item.imageKey, item.terminalPhoto));
   const results = await Promise.allSettled(
     items.map(async ({ id, imageKey }) => {
       const terminalPhoto = await photoToTerminal(await loadPhoto(imageKey ?? ""));

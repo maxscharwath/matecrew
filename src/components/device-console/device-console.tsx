@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import Link from "next/link";
 import { useFormatter, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -38,10 +47,11 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { sendDeviceCommand } from "@/app/org/[officeId]/admin/devices/actions";
-import type { ConsoleCommand } from "@/lib/device/commands";
+import { consoleSocket, sendDeviceCommand } from "@/app/org/[officeId]/admin/devices/actions";
+import { fromWire, toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
 import type { LiveStatus } from "@/lib/device/live";
-import { BadgeZone, DeviceShell, useDeviceShortcuts, type BadgeOption, type Side } from "./device-shell";
+import type { CommandEntry, TerminalStatus } from "../../../realtime/src/protocol";
+import { BadgeZone, DeviceShell, useDeviceShortcuts, useKeyChord, type BadgeOption, type Side } from "./device-shell";
 import { compareFrames, fetchFrame, PANEL_WIDTH, type MirrorFrame } from "./frame-bits";
 import { MirrorScreen, type Mirror } from "./mirror-screen";
 import { LogPanel } from "./log-panel";
@@ -53,6 +63,8 @@ import type { ConsoleKind, LogEntry } from "./device-log";
 import { battery, signalBand } from "./readings";
 import { DeviceSettings, RecentTakes, type DeviceSettingsProps, type Take } from "./device-settings";
 import { useBleScreen, useBleSession, useBleTerminal, type BleTerminal } from "./ble-link";
+import { useRelay, type RelaySocket } from "./relay-link";
+import type { MemorySample } from "./device-log";
 
 interface Props {
   readonly officeId: string;
@@ -63,6 +75,8 @@ interface Props {
   readonly badges: BadgeOption[];
   readonly takes: Take[];
   readonly initial: LiveStatus;
+  /** The terminal's relay socket for this console; null without a relay: the console polls. */
+  readonly relay: RelaySocket | null;
   /** When the server rendered the page: relative times start from it, so hydration matches. */
   readonly renderedAt: string;
   /** The office's, for every time shown: the same on the server and in the browser. */
@@ -71,8 +85,10 @@ interface Props {
 
 type Command = LiveStatus["commands"][number];
 
-/** The console polls this often while it is visible; it keeps the terminal awake and mirroring. */
+/** Without a relay, the console polls this often while it is visible; it keeps the terminal awake and mirroring. */
 const POLL_MS = 1000;
+/** Commands the status counts as waiting, as /live lists them. */
+const LISTED = 8;
 /** How long a key or the badge zone stays lit after a press. */
 const FLASH_MS = 700;
 /** Feedback per partial refresh of the mirror (BUSY on the case). */
@@ -101,7 +117,7 @@ export function DeviceConsole(props: Props) {
   );
 }
 
-function Console({ officeId, device, display, items, badges, takes, initial, renderedAt, timeZone }: Props) {
+function Console({ officeId, device, display, items, badges, takes, initial, relay, renderedAt, timeZone }: Props) {
   const t = useTranslations("devices.console");
   const format = useFormatter();
   const base = `/org/${officeId}/admin/devices/${device.id}`;
@@ -161,7 +177,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
     return () => clearInterval(clock);
   }, []);
 
-  // Poll /live while the page is visible: it records that someone watches, so
+  // Without a relay, poll /live while the page is visible: it records that someone watches, so
   // the terminal stays awake, takes commands at once and uploads its screen;
   // not the screen while it comes over Bluetooth.
   const failing = useRef(false);
@@ -183,26 +199,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
       }
     }
   }, [base, bleLive, addEvent, t]);
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    let stopped = false;
-    const tick = async () => {
-      if (!document.hidden) await poll();
-      if (!stopped) timer = setTimeout(tick, POLL_MS);
-    };
-    timer = setTimeout(tick, POLL_MS);
-    const visible = () => {
-      if (document.hidden) return;
-      clearTimeout(timer);
-      void tick();
-    };
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [poll]);
+  usePolling(poll, !relay);
 
   // What changed between two polls goes to the monitor.
   const seen = useRef(initial);
@@ -252,13 +249,24 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
     if (bleFrame) present(bleFrame, "bluetooth");
   }, [bleFrame, present]);
 
-  // Otherwise fetch the frame whenever the terminal uploaded a new one; one request at a time.
+  // With the relay, everything is pushed: presence, status, commands, the terminal's log, its screen.
+  const { link: relayLink, logs: relayLogs, memory: relayMemory, clearLogs: clearRelayLogs } = useLiveRelay({
+    relay,
+    renew: () => consoleSocket(officeId, device.id),
+    screen: !bleLive,
+    setLive,
+    setCommands,
+    present,
+    onConnection: (open) => addEvent("link", open ? t("log.relayOpen") : t("log.relayClosed")),
+  });
+
+  // Without a relay, fetch the frame whenever the terminal uploaded a new one; one request at a time.
   const fetching = useRef<AbortController | null>(null);
   const failedHash = useRef<string | null>(null);
   const [fetched, setFetched] = useState(0);
   const wanted = live.frame?.hash ?? null;
   useEffect(() => {
-    if (bleLive || !wanted || shown.current?.hash === wanted || fetching.current || failedHash.current === wanted) return;
+    if (relay || bleLive || !wanted || shown.current?.hash === wanted || fetching.current || failedHash.current === wanted) return;
     const controller = new AbortController();
     fetching.current = controller;
     fetchFrame(`${base}/frame?h=${encodeURIComponent(wanted)}`, controller.signal)
@@ -276,7 +284,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
         // The terminal may have uploaded another frame meanwhile: look again.
         setFetched((count) => count + 1);
       });
-  }, [wanted, fetched, bleLive, base, present, addEvent, t]);
+  }, [wanted, fetched, relay, bleLive, base, present, addEvent, t]);
   useEffect(
     () => () => {
       fetching.current?.abort();
@@ -327,6 +335,13 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
     [officeId, device.id, addEvent, t],
   );
 
+  // Over the relay's socket when it is open (the terminal gets it in a few tens of ms), else through the site.
+  const relaySend = relayLink.send;
+  const sendLive = useCallback(
+    (command: ConsoleCommand) => relaySend(withId(command, crypto.randomUUID())) || sendViaSite(command),
+    [relaySend, sendViaSite],
+  );
+
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const send = useCallback(
     (command: ConsoleCommand) => {
@@ -338,7 +353,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
       // Paired over Bluetooth (its screen comes): straight to the terminal, else through the site.
       const remote = bleLive ? toRemote(command) : null;
       const target = ble.device;
-      if (!remote || !target) return sendViaSite(command);
+      if (!remote || !target) return sendLive(command);
       void target.send(remote).then((sent) => {
         if (sent.ok) {
           const kind = command.kind === "key" || command.kind === "badge" || command.kind === "tap" ? "input" : "system";
@@ -346,19 +361,22 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
           return;
         }
         addEvent("error", t("ble.sendFailed", { message: sent.error.message }));
-        sendViaSite(command);
+        sendLive(command);
       });
     },
-    [bleLive, ble.device, sendViaSite, describeSent, addEvent, t],
+    [bleLive, ble.device, sendLive, describeSent, addEvent, t],
   );
 
+  // Both keys at once, as on the terminal: hold one (mouse, touch, arrow key) and press the other.
+  const chord = useKeyChord((key) => send(keyCommand(key)));
   const shortcuts = useMemo(
     () => ({
       key: (side: Side) => send({ kind: "key", side }),
+      keyLevel: chord.keyLevel,
       badge: () => setBadgeOpen(true),
       sync: () => send({ kind: "sync" }),
     }),
-    [send],
+    [send, chord.keyLevel],
   );
   // Only on the console: arrows in the settings must not press the terminal's keys.
   useDeviceShortcuts(shortcuts, badgeOpen || tab !== "console");
@@ -369,6 +387,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
         case "KEY": {
           const tap = /^tap:(\d+):(\d+)$/.exec(command.arg ?? "");
           if (tap) return t("kind.tap", { x: Number(tap[1]) * TAP_SCALE, y: Number(tap[2]) * TAP_SCALE });
+          if (command.arg === "both") return t("kind.both");
           return command.arg === "right" ? t("kind.keyRight") : t("kind.keyLeft");
         }
         case "BADGE":
@@ -386,7 +405,7 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
     [t],
   );
   // One log, oldest first: what the console noticed, the commands it sent, the terminal's own lines.
-  const deviceLogs = session.logs;
+  const deviceLogs = useMemo(() => [...session.logs, ...relayLogs], [session.logs, relayLogs]);
   const lines = useMemo(() => {
     const sent: LogEntry[] = Object.values(commands).map((command) => ({
       id: command.id,
@@ -418,6 +437,9 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
   };
 
   const waiting = live.commands.filter((c) => c.status === "waiting").length;
+  const lit = singleKey(pressed);
+  // The terminal's memory over Bluetooth, else from its log over the relay.
+  const memorySamples = [session.memory, relayMemory].find((samples) => samples.length > 0) ?? [];
   const active = new Set<number>();
   if (pressed === "left") active.add(5);
   if (pressed === "right") active.add(8);
@@ -459,8 +481,9 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
           terminal={
             <div className="space-y-3">
               <DeviceShell
-                pressed={pressed === "left" || pressed === "right" ? pressed : null}
+                pressed={chord.held.length > 0 ? chord.held : lit}
                 onKey={(side) => send({ kind: "key", side })}
+                onKeyLevel={chord.keyLevel}
                 indicator={
                   <Indicator
                     busy={busy?.passes ?? null}
@@ -502,8 +525,8 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
                 <FactList facts={statusFacts({ t, format, live, now, timeZone, info: session.info, hardwareId: device.hardwareId })} />
               </RailCard>
               <MemoryCard
-                samples={session.memory}
-                state={ble.device ? "live" : "bluetooth"}
+                samples={memorySamples}
+                state={ble.device || relayMemory.length > 0 ? "live" : "bluetooth"}
                 timeZone={timeZone}
                 action={<BleConnectHint ble={ble} />}
               />
@@ -528,9 +551,10 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
               onClear={() => {
                 setClearedAt(Date.now());
                 session.clearLogs();
+                clearRelayLogs();
               }}
               notice={
-                ble.device ? undefined : (
+                ble.device || relayLogs.length > 0 ? undefined : (
                   <>
                     <span className="min-w-0 flex-1">{t("logs.bluetoothNotice")}</span>
                     <BleConnectHint ble={ble} dark />
@@ -551,6 +575,132 @@ function Console({ officeId, device, display, items, badges, takes, initial, ren
       </TabsPrimitive.Content>
     </TabsPrimitive.Root>
   );
+}
+
+/** Runs `poll` every POLL_MS while the page is visible and `enabled`, and at once when it shows again. */
+function usePolling(poll: () => Promise<void>, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    const tick = async () => {
+      if (!document.hidden) await poll();
+      if (!stopped) timer = setTimeout(tick, POLL_MS);
+    };
+    timer = setTimeout(tick, POLL_MS);
+    const visible = () => {
+      if (document.hidden) return;
+      clearTimeout(timer);
+      void tick();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [poll, enabled]);
+}
+
+/** The key a press lit, for the case. */
+function singleKey(pressed: Side | "badge" | null): Side | null {
+  return pressed === "left" || pressed === "right" ? pressed : null;
+}
+
+/** A key, or both together, as a command. */
+function keyCommand(key: Side | "both"): ConsoleCommand {
+  return key === "both" ? { kind: "both" } : { kind: "key", side: key };
+}
+
+/** The console's commands as the relay lists them (`sent` is still on its way: waiting). */
+function listedCommands(entries: CommandEntry[]): Command[] {
+  return entries.flatMap((entry) => {
+    const command = fromWire(entry.command);
+    if (!command) return [];
+    const status = entry.status === "sent" ? "waiting" : entry.status;
+    return [{ id: entry.id, ...toRow(command), createdAt: new Date(entry.at).toISOString(), status } satisfies Command];
+  });
+}
+
+/** `current` with the terminal's report from `at` (ms) over it. */
+function withStatus(current: LiveStatus, status: TerminalStatus, at: number): LiveStatus {
+  const seen = Math.max(at, Date.parse(current.lastSeenAt ?? "") || 0);
+  return {
+    ...current,
+    lastSeenAt: seen > 0 ? new Date(seen).toISOString() : current.lastSeenAt,
+    batteryMv: typeof status.batteryMv === "number" ? status.batteryMv : current.batteryMv,
+    wifiRssi: typeof status.rssi === "number" ? status.rssi : current.wifiRssi,
+    firmwareVersion: typeof status.firmware === "string" ? status.firmware : current.firmwareVersion,
+  };
+}
+
+/** The last LISTED commands, newest first, with `listed` merged in. */
+function withCommands(current: LiveStatus, listed: Command[]): LiveStatus {
+  const merged = new Map(current.commands.map((c) => [c.id, c]));
+  listed.forEach((c) => merged.set(c.id, c));
+  const commands = [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, LISTED);
+  return { ...current, commands };
+}
+
+/** The console's state kept up to date by the relay's socket (`useRelay`). */
+function useLiveRelay({
+  relay,
+  renew,
+  screen,
+  setLive,
+  setCommands,
+  present,
+  onConnection,
+}: {
+  relay: RelaySocket | null;
+  renew: () => Promise<RelaySocket | null>;
+  screen: boolean;
+  setLive: Dispatch<SetStateAction<LiveStatus>>;
+  setCommands: Dispatch<SetStateAction<Record<string, Command>>>;
+  present: (frame: MirrorFrame, via: Mirror["via"]) => void;
+  onConnection: (open: boolean) => void;
+}) {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [memory, setMemory] = useState<MemorySample[]>([]);
+  const link = useRelay(
+    relay,
+    renew,
+    {
+      online: (online) =>
+        setLive((current) => ({
+          ...current,
+          reachable: online,
+          lastSeenAt: online ? new Date().toISOString() : current.lastSeenAt,
+        })),
+      status: (status, at) => setLive((current) => withStatus(current, status, at)),
+      commands: (entries) => {
+        const listed = listedCommands(entries);
+        setCommands((current) => ({ ...current, ...Object.fromEntries(listed.map((c) => [c.id, c])) }));
+        setLive((current) => withCommands(current, listed));
+      },
+      frame: (frame) => {
+        setLive((current) => ({ ...current, frame: { hash: frame.hash, drawnAt: frame.drawnAt } }));
+        present(frame, "wifi");
+      },
+      log: (entry, sample) => {
+        setLogs((current) => [...current, entry].slice(-MAX_LINES));
+        if (sample) setMemory((current) => [...current, sample].slice(-MAX_LINES));
+      },
+    },
+    screen,
+  );
+  const clearLogs = useCallback(() => setLogs([]), []);
+  const told = useRef(link.connected);
+  const tell = useRef(onConnection);
+  useEffect(() => {
+    tell.current = onConnection;
+  });
+  useEffect(() => {
+    if (link.connected === told.current) return;
+    told.current = link.connected;
+    tell.current(link.connected);
+  }, [link.connected]);
+  return { link, logs, memory, clearLogs };
 }
 
 /** The status bar's battery icon for a charge, or a plain one when there is no battery reading. */

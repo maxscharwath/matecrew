@@ -4,6 +4,7 @@ import type { AppEnv } from "./env";
 import type { ImageProcessor } from "./images";
 import type { JobQueue } from "./jobs";
 import type { PdfRenderer } from "./pdf";
+import type { TerminalRelay } from "./realtime";
 import type { BlobStore } from "./storage";
 
 /**
@@ -20,4 +21,5 @@ export interface Platform {
   readonly env: AppEnv;
   readonly images: ImageProcessor;
   readonly pdf: PdfRenderer;
+  readonly relay: TerminalRelay;
 }

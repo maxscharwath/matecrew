@@ -34,6 +34,7 @@ const eslintConfig = defineConfig([
     ".claude/**",
     ".open-next/**",
     ".wrangler/**",
+    "realtime/.wrangler/**",
     "src/generated/**",
     "device/dist/**",
     "device/**/target/**",

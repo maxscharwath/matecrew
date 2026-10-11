@@ -1,4 +1,5 @@
 import type { Platform } from "../ports";
+import { noRelay } from "../ports/realtime";
 import { createProcessEnv } from "../shared/process-env";
 import { runInBackground } from "./background";
 import { sqliteDatabase } from "./database";
@@ -16,4 +17,6 @@ export const platform: Platform = {
   env: createProcessEnv(),
   images: sharpImages,
   pdf: reactPdf,
+  // No Durable Objects: terminals and consoles poll the site.
+  relay: noRelay,
 };

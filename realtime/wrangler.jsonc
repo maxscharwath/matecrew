@@ -1,15 +1,26 @@
-// The terminals' realtime relay, on OWT's Cloudflare account.
-// Secrets: `bunx wrangler secret put REALTIME_SECRET` (the same value as the site's).
+// The terminals' realtime relay, on OWT's Cloudflare account: `bun run deploy` from this folder,
+// before the site (its binding to `Terminal` names this script). Nothing to configure: the site
+// reaches the Durable Object over RPC and terminals are looked up in the site's D1 database.
 {
-  "$schema": "https://unpkg.com/wrangler@4/config-schema.json",
+  "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "matecrew-realtime",
   "account_id": "fb4a07dcf42e0226490dbaea4aa55bba",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-01",
+  // Past 2026-04-07: the runtime answers a WebSocket's Close frame by itself.
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
   "durable_objects": {
     "bindings": [{ "name": "TERMINALS", "class_name": "Terminal" }]
   },
-  // SQLite-backed Durable Objects: on the Workers free plan, with WebSocket hibernation.
+  // SQLite-backed Durable Objects, with WebSocket hibernation.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Terminal"] }],
+  "d1_databases": [
+    {
+      // The site's database (../wrangler.jsonc), read only here: `Device.tokenHash`.
+      "binding": "DB",
+      "database_name": "matecrew",
+      "database_id": "fb35f4e1-3bc6-4035-9e37-d1895478780a"
+    }
+  ],
   "observability": { "enabled": true }
 }

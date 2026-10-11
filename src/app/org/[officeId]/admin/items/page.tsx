@@ -3,7 +3,7 @@ import { requireOrgRoles } from "@/lib/auth-utils";
 import { getTranslations } from "next-intl/server";
 import { resolveItemImageUrl } from "@/lib/storage";
 import { ITEM_DISPLAY_ORDER, sumStockQty } from "@/lib/items";
-import { itemImage } from "@/lib/device/bitmap";
+import { itemImage, needsTerminalPhoto } from "@/lib/device/bitmap";
 import { ItemsManager } from "@/components/items-manager";
 import { TerminalPhotoBackfill } from "@/components/terminal-photo-backfill";
 
@@ -60,8 +60,8 @@ export default async function ItemsPage({ params }: Props) {
     lowStockThreshold: i.lowStockThreshold,
     color: i.color,
   }));
-  // Photos stored before terminal pictures were computed at upload.
-  const missingTerminalPhotos = items.filter((i) => i.imageKey && !i.terminalPhoto).length;
+  // Photos stored before terminal pictures were computed at upload, or before they were dithered.
+  const missingTerminalPhotos = items.filter((i) => needsTerminalPhoto(i.imageKey, i.terminalPhoto)).length;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

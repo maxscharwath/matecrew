@@ -19,6 +19,7 @@ mod ota;
 mod portal;
 mod power;
 mod remote;
+mod socket;
 mod store;
 mod wifi;
 
@@ -60,8 +61,14 @@ const FIRMWARE_BUILD: &str = env!("MATECREW_BUILD");
 const FIRMWARE_COMMIT: &str = env!("MATECREW_COMMIT");
 /// Failed connections in a row before the device forgets the network and opens setup again.
 const MAX_WIFI_FAILURES: u8 = 3;
-/// Until deep sleep is wired, the device stays awake and syncs on a timer.
+/// Until deep sleep is wired, the device stays awake and syncs on a timer, as long as no relay
+/// tells it when to.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
+/// With the relay's socket open, the site says when what the terminal shows changed: the timer
+/// is only a safety net.
+const SYNC_EVERY_LIVE: Duration = Duration::from_secs(15 * 60);
+/// A socket reopened after this long without a sync syncs at once: changes may have been missed.
+const RESYNC_AFTER: Duration = Duration::from_secs(60);
 /// How soon to try again while the site does not answer.
 const OFFLINE_RETRY: Duration = Duration::from_secs(30);
 /// How often the NFC reader is asked for a badge while the flow waits for one.
@@ -92,6 +99,10 @@ pub enum Input {
     Net,
     /// A browser connected, paired or left over Bluetooth, or a pairing waits for the passkey.
     Bluetooth,
+    /// The relay says what the terminal shows changed on the site at this time (ms since 1970).
+    Changed(f64),
+    /// The relay's socket opened or closed.
+    Live(bool),
 }
 
 /// Failed attempts to reach the site, 30 s apart, before an unlinked terminal goes back to setup.
@@ -159,11 +170,9 @@ fn app() -> Result<()> {
     let buzzer = cores::on(Core::Core1, || {
         Buzzer::start(p.ledc.timer0, p.ledc.channel0, unsafe { Gpio6::steal() })
     })?;
-    buzzer.beep(matecrew_core::flow::Beep::Boot);
-    cores::on(Core::Core1, || {
-        keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone())
-    })?;
     // D5 (GPIO 6): half the battery voltage, and the piezo. Without the ADC the status bar says "--".
+    // Set up before the boot melody: configuring the channel turns the pin's output off, which
+    // cut the melody after its first milliseconds.
     let battery = (|| -> Result<_> {
         use esp_idf_svc::hal::adc::{
             attenuation::DB_12,
@@ -186,6 +195,10 @@ fn app() -> Result<()> {
             Box::new(|| None)
         }
     });
+    buzzer.beep(matecrew_core::flow::Beep::Boot);
+    cores::on(Core::Core1, || {
+        keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone())
+    })?;
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio43, p.pins.gpio44) {
         Ok(nfc) => Some(nfc),
         Err(e) => {
@@ -280,10 +293,15 @@ fn app() -> Result<()> {
     boot.done("siteReady", &[("host", api::host(&site))]);
     boot.start("apps", &[]);
     screen.show(|d| boot.render(d))?;
+    let live = remote::Live::new(
+        token.clone(),
+        matecrew_core::live::Status { firmware: Some(FIRMWARE_VERSION.to_owned()), ..Default::default() },
+    );
     let api = Api::with_token(&site, token);
-    let mirror = cores::on(Core::Core0, || remote::Mirror::start(api.clone()))?;
-    cores::on(Core::Core0, || remote::poll_commands(api.clone(), sender.clone(), mirror.clone()))?;
     let state = store.state()?;
+    // The relay from the last state: the socket opens before the first sync.
+    live.set_url(state.as_ref().and_then(|s| s.realtime.as_ref()).map(|r| r.url.clone()));
+    let mirror = cores::on(Core::Core0, || remote::start(api.clone(), live.clone(), sender.clone()))?;
     let mode = store.app_mode()?;
     let mut app = state
         .as_ref()
@@ -351,6 +369,8 @@ fn app() -> Result<()> {
         _sender: sender,
         confirmed: false,
         offline: false,
+        live,
+        synced: None,
     }
     .run()
 }
@@ -587,6 +607,10 @@ struct Terminal {
     confirmed: bool,
     /// The last sync failed: the main screen says so until one works.
     offline: bool,
+    /// The relay's socket: commands, the mirror, "what you show changed".
+    live: remote::Live,
+    /// When the last sync worked.
+    synced: Option<Instant>,
 }
 
 enum Next {
@@ -605,12 +629,7 @@ impl Terminal {
         self.sync(false);
         self.maybe_update();
         let mut touched = Instant::now();
-        let mut sync_at = Instant::now()
-            + if self.offline {
-                OFFLINE_RETRY
-            } else {
-                SYNC_EVERY
-            };
+        let mut sync_at = self.next_sync();
         loop {
             if self.flow.is_idle() {
                 if let Some(mode) = self.pending_app.take() {
@@ -696,13 +715,24 @@ impl Terminal {
                         }
                         self.screen.rest()?;
                         self.maybe_update();
-                        sync_at = Instant::now()
-                            + if self.offline {
-                                OFFLINE_RETRY
-                            } else {
-                                SYNC_EVERY
-                            };
+                        sync_at = self.next_sync();
                     }
+                }
+                Next::Input(Input::Changed(at)) => {
+                    let built = self.state.as_ref().and_then(|s| time::parse_iso(&s.server_time));
+                    if matecrew_core::live::is_news(at, built) {
+                        log::info!("relay: what the terminal shows changed, syncing");
+                        sync_at = sync_at.min(Instant::now());
+                    }
+                }
+                Next::Input(Input::Live(true)) => {
+                    if self.synced.is_none_or(|at| at.elapsed() >= RESYNC_AFTER) {
+                        sync_at = sync_at.min(Instant::now());
+                    }
+                }
+                Next::Input(Input::Live(false)) => {
+                    // Nothing says when to sync any more: the timer does again.
+                    sync_at = sync_at.min(Instant::now() + SYNC_EVERY);
                 }
                 Next::Input(Input::Restart) => {
                     log::info!("restart asked from the site");
@@ -860,9 +890,10 @@ impl Terminal {
 
     fn step(&mut self, event: Event) -> Result<()> {
         // A long left press is the short one for an app; the right one is the badge holder's
-        // purchases, like both keys (its about page), whatever app runs.
+        // purchases, like both keys (its about page), whatever app runs. Past the app (the
+        // purchases), either one held is the flow's: it leaves them.
         let event = match event {
-            Event::LongKey { side: matecrew_core::contract::Side::Left } if self.app.is_some() => {
+            Event::LongKey { side: matecrew_core::contract::Side::Left } if self.app.is_some() && self.flow.is_idle() => {
                 Event::Key { side: matecrew_core::contract::Side::Left }
             }
             event => event,
@@ -1082,6 +1113,7 @@ impl Terminal {
                 let screen = Screen::Served {
                     name,
                     count: reply.served,
+                    avatar: reply.avatar,
                 };
                 self.last_flow_screen = Some(screen.clone());
                 self.show(|d| ui::flow_screen(d, &screen))?;
@@ -1220,6 +1252,34 @@ impl Terminal {
         }
     }
 
+    /// When to sync next: soon while offline; else on the timer (a safety net while the relay says
+    /// when), or when the state changes by itself (`refresh_at`), whichever comes first.
+    fn next_sync(&self) -> Instant {
+        let now = Instant::now();
+        if self.offline {
+            return now + OFFLINE_RETRY;
+        }
+        let every = if self.live.connected() { SYNC_EVERY_LIVE } else { SYNC_EVERY };
+        let refresh = self
+            .state
+            .as_ref()
+            .and_then(|s| s.refresh_at.as_deref())
+            .and_then(time::parse_iso)
+            .map(|at| at - self::now())
+            .filter(|&ahead| ahead > 0)
+            .map(|ahead| Duration::from_secs(ahead as u64));
+        now + refresh.map_or(every, |refresh| refresh.min(every))
+    }
+
+    /// The app on the panel, for the console.
+    fn app_name(&self) -> &'static str {
+        match (self.app_mode, self.app.is_some()) {
+            (Some(matecrew_core::contract::BuiltinApp::Showcase), _) => "showcase",
+            (_, true) => "downloaded",
+            _ => "mate",
+        }
+    }
+
     /// Syncs and says whether it worked. A device the site no longer knows links again.
     fn sync(&mut self, redraw: bool) -> bool {
         // A sync holds this loop, so the arrows are drawn before it starts (the panel refreshes
@@ -1279,15 +1339,28 @@ impl Terminal {
             state.badges.len()
         );
         self.store.set_state(&state)?;
+        self.live.set_url(state.realtime.as_ref().map(|r| r.url.clone()));
         self.state = Some(state);
 
+        // The site refuses what no battery reads: without the divider, the pin floats.
+        let battery_mv = self.supply.read(self.buzzer.quiet()).plausible_millivolts();
+        let wifi_rssi = wifi::rssi();
         self.api.status(&StatusReport {
             firmware_version: FIRMWARE_VERSION,
-            // The site refuses what no battery reads: without the divider, the pin floats.
-            battery_mv: self.supply.read(self.buzzer.quiet()).plausible_millivolts(),
-            wifi_rssi: wifi::rssi(),
+            battery_mv,
+            wifi_rssi,
             unknown_badges: self.queue.unknown_badges(),
         })?;
+        self.synced = Some(Instant::now());
+        self.live.report(matecrew_core::live::Status {
+            firmware: Some(FIRMWARE_VERSION.to_owned()),
+            battery_mv,
+            rssi: wifi_rssi,
+            app: Some(self.app_name().to_owned()),
+            heap: Some(free_internal_heap()),
+            uptime: Some(self.started.elapsed().as_secs()),
+            synced_at: Some(now() * 1000),
+        });
         if !self.queue.unknown_badges().is_empty() {
             self.queue.clear_unknown_badges();
             self.save_queue();
@@ -1419,6 +1492,13 @@ fn refresh_app_images(app: &mut ui::engine::Runtime, api: &Api) {
             Err(error) => log::warn!("image download: {error:#}"),
         }
     }
+}
+
+/// Internal RAM free, bytes: task stacks, DMA, Wi-Fi timers.
+fn free_internal_heap() -> u32 {
+    use esp_idf_svc::sys::{heap_caps_get_free_size, MALLOC_CAP_8BIT, MALLOC_CAP_INTERNAL};
+    // SAFETY: a heap query with capability flags; borrows no memory.
+    unsafe { heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) as u32 }
 }
 
 /// Runtime diagnostics to verify that UI allocations leave room for Wi-Fi/USB.

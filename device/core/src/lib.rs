@@ -8,6 +8,7 @@ pub mod contract;
 pub mod flow;
 pub mod hardware;
 pub mod link;
+pub mod live;
 pub mod pn532;
 pub mod power;
 pub mod queue;

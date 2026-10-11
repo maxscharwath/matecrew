@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { COMMAND_INPUT_TTL_SECONDS, isReachable } from "@/lib/device/commands";
+import type { Presence } from "../../../realtime/src/protocol";
 
 /** What the console shows about a terminal, refreshed every second. */
 export type LiveStatus = {
@@ -18,13 +20,39 @@ export type LiveStatus = {
   }[];
 };
 
+/** What the relay knows of a terminal over what the site last recorded: whether it is connected now, its last report. */
+export function withPresence(
+  recorded: { polledAt: Date | null; lastSeenAt: Date | null; batteryMv: number | null; wifiRssi: number | null; firmwareVersion: string | null },
+  presence: Presence | null | undefined,
+  now = new Date(),
+) {
+  if (!presence) {
+    return { ...recorded, reachable: isReachable(recorded.polledAt, now) };
+  }
+  const { status, statusAt, online } = presence;
+  const heard = Math.max(recorded.lastSeenAt?.getTime() ?? 0, statusAt ?? 0);
+  const lastHeard = heard > 0 ? new Date(heard) : null;
+  return {
+    ...recorded,
+    reachable: online,
+    lastSeenAt: online ? now : lastHeard,
+    batteryMv: typeof status?.batteryMv === "number" ? status.batteryMv : recorded.batteryMv,
+    wifiRssi: typeof status?.rssi === "number" ? status.rssi : recorded.wifiRssi,
+    firmwareVersion: typeof status?.firmware === "string" ? status.firmware : recorded.firmwareVersion,
+  };
+}
+
 /**
- * Also records that someone is watching, which keeps the terminal awake and polling and makes it
- * upload its screen; not with `watch: false` (the console gets the screen over Bluetooth).
+ * With the realtime relay, the terminal's presence and last report come from it, and the console
+ * gets the rest over its socket. Without one, also records that someone is watching, which keeps
+ * the terminal awake and polling and makes it upload its screen; not with `watch: false` (the
+ * console gets the screen over Bluetooth).
  */
 export async function loadLiveStatus(deviceId: string, now = new Date(), { watch = true } = {}): Promise<LiveStatus> {
+  const presence = (await platform.relay.presence([deviceId]))?.get(deviceId) ?? null;
+  watch &&= presence === null;
   const select = { polledAt: true, lastSeenAt: true, batteryMv: true, wifiRssi: true, firmwareVersion: true } as const;
-  const [device, frame, commands] = await Promise.all([
+  const [recorded, stored, commands] = await Promise.all([
     watch
       ? prisma.device.update({ where: { id: deviceId }, data: { watchedAt: now }, select })
       : prisma.device.findUniqueOrThrow({ where: { id: deviceId }, select }),
@@ -38,8 +66,11 @@ export async function loadLiveStatus(deviceId: string, now = new Date(), { watch
   ]);
 
   const ttl = COMMAND_INPUT_TTL_SECONDS * 1000;
+  const device = withPresence(recorded, presence, now);
+  // The relay's screen when it has one ("r" + when: the frame route serves it), else the site's.
+  const frame = presence?.drawnAt ? { hash: `r${presence.drawnAt}`, drawnAt: new Date(presence.drawnAt) } : stored;
   return {
-    reachable: isReachable(device.polledAt, now),
+    reachable: device.reachable,
     lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
     batteryMv: device.batteryMv,
     wifiRssi: device.wifiRssi,

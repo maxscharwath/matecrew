@@ -1,6 +1,6 @@
 //! Data adaptation only. Dashboard layouts live in screens/terminal.tsx.
 use super::*;
-use matecrew_core::contract::{DeviceScreen, DeviceState};
+use matecrew_core::contract::{DeviceScreen, DeviceState, AVATAR_PREPARATION};
 pub fn state_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     state: &DeviceState,
@@ -56,6 +56,14 @@ pub fn dashboard_screen<D: DrawTarget<Color = BinaryColor>>(
                 "name":i.name,
                 "names":i.names,
                 "picture48":crate::picture::pictures(&decode_base64(&i.picture).unwrap_or_default()).1,
+                // Who: each one's avatar, else initials; `more` are only counted.
+                "people":i.people.iter().map(|p| {
+                    let raw = p.avatar.as_deref().and_then(decode_base64);
+                    let avatar = crate::picture::avatar(raw.as_deref(), AVATAR_PREPARATION);
+                    json!({"hasAvatar":!avatar.is_empty(),"avatar":avatar,"initials":p.initials})
+                }).collect::<Vec<_>>(),
+                "peopleCount":i.people.len(),
+                "more":(i.count as usize).saturating_sub(i.people.len()),
                 "visible":true
             }))
             .collect::<Vec<_>>());

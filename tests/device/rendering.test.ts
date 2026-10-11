@@ -39,6 +39,9 @@ function state() {
     screen: definition,
     appUrl: null,
     theme: "paper",
+    // No relay: the virtual terminal polls the site, as these tests expect.
+    realtime: null,
+    refreshAt: null,
   });
 }
 

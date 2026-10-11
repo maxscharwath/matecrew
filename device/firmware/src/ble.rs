@@ -147,7 +147,10 @@ pub fn init_logging() {
                     log::Level::Trace => 'V',
                 };
                 let target = target.rsplit("::").next().unwrap_or(target).to_owned();
-                send(Event::Log { level, target, msg: record.args().to_string() });
+                let msg = record.args().to_string();
+                // And to a console watching over the relay.
+                crate::remote::log_line(level, &target, &msg);
+                send(Event::Log { level, target, msg });
             }
         }
         fn flush(&self) {}

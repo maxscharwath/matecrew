@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { adminDevice } from "@/lib/device/admin";
+import { frameHash } from "@/lib/device/commands";
 
 /**
  * What the terminal last reported on its panel, for the console's mirror and
@@ -7,6 +9,7 @@ import { adminDevice } from "@/lib/device/admin";
  * MSB first, 1 = ink), base64 in JSON. The browser draws it on a canvas.
  * JSON rather than octet-stream because Vercel's CDN only compresses an
  * allowlist of types: a mostly blank panel's 48 000 bytes then travel as a few KB.
+ * With the realtime relay the screen is the one it keeps; else the one the terminal uploaded.
  */
 export async function GET(
   request: Request,
@@ -16,7 +19,10 @@ export async function GET(
   const found = await adminDevice(officeId, deviceId);
   if ("error" in found) return found.error;
 
-  const frame = await prisma.deviceFrame.findUnique({ where: { deviceId } });
+  const relayed = await platform.relay.screen(deviceId);
+  const frame = relayed
+    ? { bits: relayed.bits, hash: frameHash(relayed.bits), drawnAt: new Date(relayed.drawnAt) }
+    : await prisma.deviceFrame.findUnique({ where: { deviceId } });
   if (!frame) return new Response(null, { status: 404 });
 
   const etag = `"${frame.hash}"`;

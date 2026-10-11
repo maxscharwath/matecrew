@@ -18,7 +18,7 @@ import { and, not } from "../runtime/expr";
 import { ArrowDownIcon, ArrowDownUpIcon, ArrowUpIcon, BluetoothConnectedIcon, BluetoothIcon, NfcIcon } from "../icons/lucide";
 import { KEYS, MARGIN, SCREEN, STATUS, TABS } from "./tokens";
 import { Overlay, Separator, Surface } from "./surface";
-import { Label, Large, Muted, inline } from "./typography";
+import { Label, Large, Muted, Small, inline } from "./typography";
 
 /**
  * What this screen is, on the left; the time, Wi-Fi and battery the host reports on the right
@@ -122,17 +122,34 @@ export function ReaderHint({ children = "Badge" }: Readonly<{ children?: TextChi
 }
 
 /**
- * The two keys, each tab centred over its key (x 130 and 670), the reader hint between them.
- * A missing side keeps its place.
+ * Between the two tabs when no badge is read (`<Keys center>`): an icon and a few words on the
+ * tabs' line, such as how to leave. It has the 308 px between the tabs.
  */
-export function Keys({ children, reader = false }: Readonly<{ children?: Children; reader?: boolean | TextChildren }>): Element {
+export function KeyHint({ icon, children }: Readonly<{ icon: Element; children?: TextChildren }>): Element {
+  return (
+    <HStack gap={8} align="center" height="fill">
+      {icon}
+      <Small lines={1}>{children}</Small>
+    </HStack>
+  );
+}
+
+/**
+ * The two keys, each tab centred over its key (x 130 and 670), the reader hint between them, or
+ * `center` (a `KeyHint`) when no badge is read. A missing side keeps its place.
+ */
+export function Keys({
+  children,
+  reader = false,
+  center,
+}: Readonly<{ children?: Children; reader?: boolean | TextChildren; center?: Children }>): Element {
   const keys = [children].flat(Infinity as 1).filter(Boolean) as (Node & { [SIDE]?: string })[];
   const slot = (side: "left" | "right") => keys.find((k) => k[SIDE] === side) ?? <Group width={TAB} height={SCREEN.height - TABS} />;
   const inset = KEYS.left - TAB / 2;
   return (
     <HStack padding={[0, inset]} height={SCREEN.height - TABS} width="fill" align="start" justify="between">
       {slot("left")}
-      {reader ? <ReaderHint>{reader === true ? undefined : reader}</ReaderHint> : null}
+      {reader ? <ReaderHint>{reader === true ? undefined : reader}</ReaderHint> : (center ?? null)}
       {slot("right")}
     </HStack>
   );

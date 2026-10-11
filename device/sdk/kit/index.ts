@@ -26,7 +26,7 @@ export {
   Steps,
 } from "./feedback";
 export { Item, ItemMedia, ItemContent, ItemTitle, ItemDescription, ItemActions, ItemValue } from "./item";
-export { StatusBar, Main, Keys, Key, ReaderHint, BadgeInput } from "./device";
+export { StatusBar, Main, Keys, Key, KeyHint, ReaderHint, BadgeInput } from "./device";
 export { QrCode } from "./qr";
 export { OverlayHost } from "./overlays";
 export { MateCrewMark, OwtMark, OwtLogo, Logo } from "./brand";

@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "next-intl/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, newId } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { normalizeBadgeUid } from "@/lib/device/codes";
-import { toRow, type ConsoleCommand } from "@/lib/device/commands";
+import { toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
+import { notifyTerminals } from "@/lib/device/push";
 import { deviceTheme } from "@/lib/device/contract";
 import type { LiveStatus } from "@/lib/device/live";
 import { defaultDeviceTheme } from "@/lib/device/state";
@@ -63,7 +65,9 @@ export async function updateDevice(
   // at its next connection).
   const changed =
     device.name !== name || device.leftItemId !== firstItemId || device.locale !== locale || device.theme !== theme;
-  if (changed) {
+  if (changed && platform.relay.terminalUrl()) {
+    notifyTerminals([deviceId]);
+  } else if (changed) {
     await prisma.deviceCommand.create({ data: { deviceId, sentById: session.user.id, ...toRow({ kind: "sync" }) } });
   }
   revalidateDevices(officeId);
@@ -100,6 +104,7 @@ export async function assignBadge(
 
 const consoleCommand = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("key"), side: z.enum(["left", "right"]) }),
+  z.object({ kind: z.literal("both") }),
   z.object({ kind: z.literal("badge"), uid: z.string() }),
   z.object({ kind: z.literal("sync"), app: z.enum(["mate", "showcase"]).optional() }),
   z.object({ kind: z.literal("tap"), x: z.number().int().min(0).max(199), y: z.number().int().min(0).max(119) }),
@@ -108,8 +113,9 @@ const consoleCommand = z.discriminatedUnion("kind", [
 ]);
 
 /**
- * Queues a command from the console; the terminal picks it up on its next
- * poll. Returns it as the console's monitor lists it, waiting.
+ * A command from the console, when its socket to the relay is not open: through the relay
+ * (the terminal gets it now, or when it connects), else queued for the terminal's next poll.
+ * Returns it as the console's monitor lists it, waiting.
  */
 export async function sendDeviceCommand(
   officeId: string,
@@ -130,9 +136,39 @@ export async function sendDeviceCommand(
 
   const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
   if (!device) return { success: false, error: t("notFound") };
+  const id = newId();
+  const relayed = await platform.relay.command(deviceId, withId(command, id), session.user.id);
+  if (relayed) {
+    const status = relayed === "sent" ? "waiting" : relayed;
+    return { success: true, command: { id, ...toRow(command), createdAt: new Date().toISOString(), status } };
+  }
   const row = await prisma.deviceCommand.create({
     data: { deviceId, sentById: session.user.id, ...toRow(command) },
     select: { id: true, kind: true, arg: true, createdAt: true },
   });
   return { success: true, command: { ...row, createdAt: row.createdAt.toISOString(), status: "waiting" } };
+}
+
+/**
+ * Where the console opens its socket to the terminal's relay, with a one-time ticket: asked again
+ * at each reconnection. Null without a relay: the console polls.
+ */
+export async function consoleSocket(officeId: string, deviceId: string): Promise<{ url: string; ticket: string } | null> {
+  const { session } = await requireOrgRoles(officeId, "ADMIN");
+  const device = await prisma.device.findFirst({ where: { id: deviceId, officeId }, select: { id: true } });
+  if (!device) return null;
+  return platform.relay.console(deviceId, session.user.id);
+}
+
+/**
+ * Forgets a badge a terminal read, and so unlinks it from its holder. Read again, it comes back
+ * as an unknown badge. Its takes keep their UID (`DeviceTake.badgeUid` is not a relation).
+ */
+export async function deleteBadge(officeId: string, badgeId: string): Promise<ActionResult> {
+  await requireOrgRoles(officeId, "ADMIN");
+  const t = await getTranslations("devices");
+  const deleted = await prisma.badge.deleteMany({ where: { id: badgeId, officeId } });
+  if (deleted.count === 0) return { success: false, error: t("badgeNotFound") };
+  revalidateDevices(officeId);
+  return { success: true };
 }

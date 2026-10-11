@@ -47,6 +47,7 @@ yarn-error.log*
 # Cloudflare: OpenNext build, wrangler's local state, local Worker secrets
 /.open-next/
 /.wrangler/
+/realtime/.wrangler/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example

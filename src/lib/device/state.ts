@@ -5,6 +5,7 @@ import { effectiveLowStockThreshold } from "@/lib/stock";
 import { getCurrentTimeInTimezone, getDateInTimezone, getDayOfWeek, getTodayDate, timeToMinutes } from "@/lib/date";
 import { getSessionsForDay } from "@/lib/session-utils";
 import { itemImage, withOpacity } from "@/lib/device/bitmap";
+import { AVATAR_SIDE, avatarPicture, initials } from "@/lib/device/avatar";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
 import { deviceTheme, type DeviceState, type DeviceScreen, type DeviceTheme } from "@/lib/device/contract";
 import { parseSyncTimes } from "@/lib/device/sync-times";
@@ -18,6 +19,8 @@ export function defaultDeviceTheme(): DeviceTheme {
 export const LOW_BATTERY_MV = 3500;
 /** After a session's cutoff, the terminal shows what to prepare for this long, or until it is served. */
 export const PREPARATION_MINUTES = 90;
+/** People shown on an order's card of the preparation, with their avatar; the others are counted. */
+const PREPARATION_PEOPLE = 5;
 
 /** Interim app download until per-device apps: `DEVICE_UI_APP` names one of `device/dist/*.dui`. */
 const DOWNLOADABLE_APPS = ["hello", "showcase"] as const;
@@ -83,6 +86,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     keyLabels(device),
   ]);
   const release = await prisma.firmwareRelease.findFirst({ orderBy: { createdAt: "desc" } });
+  const relayUrl = platform.relay.terminalUrl();
   // The picker opens on the left key's item; the rest follow in shelf order.
   const first = items.findIndex((i) => i.id === device.leftItemId);
   const ordered = first > 0 ? [items[first], ...items.filter((_, i) => i !== first)] : items;
@@ -111,7 +115,26 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       sha256: release.sha256,
       size: release.size,
     },
+    realtime: relayUrl ? { url: relayUrl } : null,
+    refreshAt: await refreshAt(office.id, office.timezone),
   };
+}
+
+/**
+ * The next time today this state changes by itself: a session's cutoff (its preparation shows)
+ * or a preparation's end. Nothing is written then, so nothing tells the terminal: it syncs at
+ * this time on its own, a second after the minute turns.
+ */
+async function refreshAt(officeId: string, timezone: string, now = new Date()): Promise<string | null> {
+  const minutes = timeToMinutes(getCurrentTimeInTimezone(timezone));
+  const sessions = await getSessionsForDay(officeId, getDayOfWeek(timezone));
+  const next = sessions
+    .flatMap((s) => [timeToMinutes(s.cutoffTime), timeToMinutes(s.cutoffTime) + PREPARATION_MINUTES])
+    .filter((m) => m > minutes && m < 24 * 60)
+    .sort((a, b) => a - b)[0];
+  if (next === undefined) return null;
+  const minuteStart = now.getTime() - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds();
+  return new Date(minuteStart + (next - minutes) * 60_000 + 1_000).toISOString();
 }
 
 /** The device's own times plus today's cutoffs, so it wakes up for each preparation. */
@@ -156,22 +179,36 @@ async function preparation(officeId: string, timezone: string) {
     orderBy: { createdAt: "asc" },
     select: {
       item: { select: { id: true, name: true, terminalImage: true, terminalPhoto: true } },
-      user: { select: { name: true } },
+      user: { select: { id: true, name: true, image: true } },
     },
   });
   if (requests.length === 0) return null;
-  const byItem = new Map<string, { name: string; terminalImage: Uint8Array | null; terminalPhoto: Uint8Array | null; names: string[] }>();
+  type Person = { initials: string; avatar: Promise<string | null> };
+  const byItem = new Map<string, { name: string; terminalImage: Uint8Array | null; terminalPhoto: Uint8Array | null; names: string[]; people: Person[] }>();
+  // Only the people this preparation concerns, each avatar worked out once.
+  const avatars = new Map<string, Promise<string | null>>();
   for (const r of requests) {
     const entry = byItem.get(r.item.id) ?? {
       name: r.item.name,
       terminalImage: r.item.terminalImage,
       terminalPhoto: r.item.terminalPhoto,
       names: [],
+      people: [],
     };
     entry.names.push(r.user.name.split(" ")[0]);
+    if (entry.people.length < PREPARATION_PEOPLE) {
+      if (!avatars.has(r.user.id)) avatars.set(r.user.id, avatarPicture(r.user.id, r.user.image, AVATAR_SIDE.preparation));
+      entry.people.push({ initials: initials(r.user.name), avatar: avatars.get(r.user.id)! });
+    }
     byItem.set(r.item.id, entry);
   }
-  return { sessionId: session.id, label: session.label, total: requests.length, items: [...byItem.values()] };
+  const items = await Promise.all(
+    [...byItem.values()].map(async (item) => ({
+      ...item,
+      people: await Promise.all(item.people.map(async (p) => ({ initials: p.initials, avatar: await p.avatar }))),
+    })),
+  );
+  return { sessionId: session.id, label: session.label, total: requests.length, items };
 }
 
 export async function buildScreenData(
@@ -226,6 +263,7 @@ export async function buildScreenData(
         count: i.names.length,
         names: i.names.join(", "),
         picture: base64(withOpacity(itemImage(i.terminalImage, i.terminalPhoto))),
+        people: i.people,
       })),
       sessionId: prep.sessionId,
       serveLabel: t("serve"),

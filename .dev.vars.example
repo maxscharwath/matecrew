@@ -45,3 +45,7 @@ EMAIL_FROM=
 # Terminal: optional downloadable app (hello | showcase) and theme.
 DEVICE_UI_APP=
 DEVICE_UI_THEME=
+
+# Terminals' realtime relay (realtime/, `bunx wrangler dev` there): its origin, ws://localhost:8788
+# locally. Empty, terminals and consoles poll the site.
+REALTIME_URL=

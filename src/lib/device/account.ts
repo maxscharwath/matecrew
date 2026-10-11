@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getDateInTimezone } from "@/lib/date";
 import { buildCostingLedger, type CostingLedger } from "@/lib/costing";
 import { latestPurchases, panelMoney } from "@/lib/device/purchases";
+import { AVATAR_SIDE, avatarPicture } from "@/lib/device/avatar";
 import type { AuthenticatedDevice } from "@/lib/device/auth";
 import type { DeviceAccount } from "@/lib/device/contract";
 
@@ -15,18 +16,21 @@ const ACCOUNT_PRODUCTS = 3;
 /**
  * "Mon compte" on the terminal, asked live after a badge: what the member drank today, this week
  * (from Monday), this month and on each of the last ACCOUNT_DAYS days, in the office's time zone,
- * what this month cost them, and their latest purchases. Nothing of it is kept on the terminal.
+ * what this month cost them, their latest purchases and their avatar. Nothing of it is kept on the
+ * terminal.
  */
 export async function buildAccount(device: AuthenticatedDevice, userId: string): Promise<DeviceAccount> {
   const { office } = device;
   // One ledger for the month's cost and the purchases' prices; both stand without it.
   const ledgered = buildCostingLedger(office.id).catch(() => null);
-  const [ledger, user, t, consumption, purchases] = await Promise.all([
+  const holder = prisma.user.findUnique({ where: { id: userId }, select: { name: true, image: true } });
+  const [ledger, user, t, consumption, purchases, avatar] = await Promise.all([
     ledgered,
-    prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+    holder,
     getTranslations({ locale: office.locale, namespace: "devices.screen" }),
     consumed(office.id, office.timezone, userId),
     ledgered.then((ledger) => latestPurchases(device, userId, ledger)),
+    holder.then((user) => avatarPicture(userId, user?.image, AVATAR_SIDE.account)),
   ]);
   return {
     name: user?.name ?? "",
@@ -37,6 +41,7 @@ export async function buildAccount(device: AuthenticatedDevice, userId: string):
     ...stacks(consumption.byDay, t("others")),
     labels: dayLabels(office.timezone, office.locale),
     purchases,
+    avatar,
   };
 }
 

@@ -7,7 +7,9 @@ interface __BaseEnv_CloudflareEnv {
 	JOBS: Queue;
 	IMAGES: ImagesBinding;
 	ASSETS: Fetcher;
+	TERMINALS: DurableObjectNamespace<import("./realtime/src/terminal").Terminal>;
 	SCHEDULES_ENABLED: "true";
+	REALTIME_URL: "wss://matecrew-realtime.owt.workers.dev";
 	NEXTJS_ENV: string;
 	BETTER_AUTH_SECRET: string;
 	MICROSOFT_CLIENT_SECRET: string;
@@ -39,7 +41,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SCHEDULES_ENABLED" | "NEXTJS_ENV" | "BETTER_AUTH_SECRET" | "MICROSOFT_CLIENT_SECRET" | "SLACK_BOT_TOKEN" | "SLACK_SIGNING_SECRET" | "RESEND_API_KEY" | "PLATFORM_BRIDGE_SECRET" | "BETTER_AUTH_URL" | "NEXT_PUBLIC_APP_URL" | "ALLOWED_EMAIL_DOMAINS" | "DISABLE_PASSWORD_AUTH" | "EMAIL_DOMAIN_ALIASES" | "MICROSOFT_CLIENT_ID" | "MICROSOFT_TENANT_ID" | "SLACK_BOT_USERNAME" | "SLACK_BOT_ICON_URL" | "EMAIL_FROM" | "DEVICE_UI_APP" | "DEVICE_UI_THEME">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SCHEDULES_ENABLED" | "NEXTJS_ENV" | "BETTER_AUTH_SECRET" | "MICROSOFT_CLIENT_SECRET" | "SLACK_BOT_TOKEN" | "SLACK_SIGNING_SECRET" | "RESEND_API_KEY" | "PLATFORM_BRIDGE_SECRET" | "BETTER_AUTH_URL" | "NEXT_PUBLIC_APP_URL" | "ALLOWED_EMAIL_DOMAINS" | "DISABLE_PASSWORD_AUTH" | "EMAIL_DOMAIN_ALIASES" | "MICROSOFT_CLIENT_ID" | "MICROSOFT_TENANT_ID" | "SLACK_BOT_USERNAME" | "SLACK_BOT_ICON_URL" | "EMAIL_FROM" | "DEVICE_UI_APP" | "DEVICE_UI_THEME" | "REALTIME_URL">> {}
 }
 declare module "*.txt" {
 	const value: string;

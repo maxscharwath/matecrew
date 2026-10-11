@@ -1,8 +1,9 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { requireOrgRoles } from "@/lib/auth-utils";
 import { getBaseUrl } from "@/lib/base-url";
-import { isReachable } from "@/lib/device/commands";
+import { withPresence } from "@/lib/device/live";
 import { DevicesManager } from "@/components/devices-manager";
 
 interface Props {
@@ -23,6 +24,8 @@ export default async function DevicesPage({ params }: Props) {
         name: true,
         hardwareId: true,
         batteryMv: true,
+        wifiRssi: true,
+        firmwareVersion: true,
         lastSeenAt: true,
         polledAt: true,
         frame: { select: { hash: true } },
@@ -45,6 +48,9 @@ export default async function DevicesPage({ params }: Props) {
     }),
   ]);
   const takes = new Map(takesByBadge.map((row) => [row.badgeUid, row._count._all]));
+  // Connected now, last report and last screen, from the realtime relay when there is one.
+  const presence = await platform.relay.presence(devices.map((d) => d.id));
+  const now = new Date();
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -64,15 +70,19 @@ export default async function DevicesPage({ params }: Props) {
           takes: takes.get(b.uid) ?? 0,
           user: b.user,
         }))}
-        devices={devices.map((d) => ({
-          id: d.id,
-          name: d.name,
-          virtual: d.hardwareId.startsWith("sim-"),
-          batteryMv: d.batteryMv,
-          lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
-          online: isReachable(d.polledAt),
-          frameHash: d.frame?.hash ?? null,
-        }))}
+        devices={devices.map((d) => {
+          const live = presence?.get(d.id);
+          const seen = withPresence(d, live, now);
+          return {
+            id: d.id,
+            name: d.name,
+            virtual: d.hardwareId.startsWith("sim-"),
+            batteryMv: seen.batteryMv,
+            lastSeenAt: seen.lastSeenAt?.toISOString() ?? null,
+            online: seen.reachable,
+            frameHash: live?.drawnAt ? `r${live.drawnAt}` : (d.frame?.hash ?? null),
+          };
+        })}
       />
     </div>
   );

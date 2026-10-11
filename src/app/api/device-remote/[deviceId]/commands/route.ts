@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import { prisma, newId } from "@/lib/prisma";
+import { platform } from "@/platform";
 import { adminDevice } from "@/lib/device/admin";
 import { normalizeBadgeUid } from "@/lib/device/codes";
-import { toRow, type ConsoleCommand } from "@/lib/device/commands";
+import { toRow, withId, type ConsoleCommand } from "@/lib/device/console-commands";
 
 /** The command shape of `@matecrew/device-link`, the same as over Bluetooth. */
 const remoteCommand = z.discriminatedUnion("cmd", [
@@ -16,9 +17,9 @@ const remoteCommand = z.discriminatedUnion("cmd", [
 ]);
 
 /**
- * `HttpRemote` (`@matecrew/device-link`) for an admin of the terminal's office: queues the
- * command for the terminal's console long-poll, as the console page does. Notifications have
- * no console command yet: 501.
+ * `HttpRemote` (`@matecrew/device-link`) for an admin of the terminal's office: hands the
+ * command to the terminal's relay, or queues it for its console long-poll without one, as the
+ * console page does. Notifications have no console command yet: 501.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ deviceId: string }> }) {
   const { deviceId } = await params;
@@ -55,6 +56,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ dev
       break;
     default:
       return Response.json({ error: "unsupported", message: `no remote "${body.cmd}" through the site` }, { status: 501 });
+  }
+  if (await platform.relay.command(deviceId, withId(command, newId()), found.userId)) {
+    return new Response(null, { status: 204 });
   }
   await prisma.deviceCommand.create({ data: { deviceId, sentById: found.userId, ...toRow(command) } });
   return new Response(null, { status: 204 });

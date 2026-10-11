@@ -1,4 +1,5 @@
 import type { Platform } from "../ports";
+import { noRelay } from "../ports/realtime";
 import { reactPdf } from "../node/pdf";
 import { sharpImages } from "../node/images";
 import { createProcessEnv } from "../shared/process-env";
@@ -25,4 +26,6 @@ export const platform: Platform = {
   env,
   images: sharpImages,
   pdf: reactPdf,
+  // The relay's Durable Objects are reached through the Cloudflare Worker only: poll the site.
+  relay: noRelay,
 };

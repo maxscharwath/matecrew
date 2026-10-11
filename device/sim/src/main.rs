@@ -164,9 +164,11 @@ fn main() {
     save(&out, "pick", |d| ui::pick_screen(d, &info));
     save(&out, "leave", |d| ui::leave_screen(d, "Alex"));
     save(&out, "taken", |d| {
-        ui::taken_screen(d, "Alex", "Maté Classic")
+        ui::taken_screen(d, "Alex", "Maté Classic", &picture)
     });
     let labels = ["ven", "sam", "dim", "lun", "mar", "mer", "jeu"].map(String::from);
+    // Drawn busts, dithered by the site's code (scripts/device/avatar-fixtures.ts).
+    let avatars: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/avatars.json")).unwrap();
     save(&out, "account", |d| {
         ui::account_screen(
             d,
@@ -180,6 +182,7 @@ fn main() {
                 labels: &labels,
                 cost: Some("CHF 12.40"),
                 recent: &[],
+                avatar: avatars["account"].as_str(),
             },
         )
     });
