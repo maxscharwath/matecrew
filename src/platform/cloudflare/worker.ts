@@ -28,6 +28,9 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
+    // Off while another deployment still sends the notifications (wrangler.jsonc `vars`).
+    const enabled: string = env.SCHEDULES_ENABLED;
+    if (enabled !== "true") return;
     await withContext(env, ctx, () => runScheduledTasks(controller.cron, new Date(controller.scheduledTime)));
   },
 

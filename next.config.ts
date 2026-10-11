@@ -23,6 +23,16 @@ function selectedPlatform(): PlatformName {
 const platform = selectedPlatform();
 const platformEntry = `./src/platform/${platform}/index.ts`;
 
+/**
+ * Hosts a browser may post server actions from besides the request's own: the public origin
+ * (NEXT_PUBLIC_APP_URL) when a proxy fronts this deployment, as matecrew.vercel.app fronts the
+ * Cloudflare Worker during the transition (docs/cloudflare-migration.md).
+ */
+function publicHosts(): string[] {
+  const url = process.env.NEXT_PUBLIC_APP_URL;
+  return url ? [new URL(url).host] : [];
+}
+
 const nextConfig: NextConfig = {
   // Release-note articles live as .mdx under content/whats-new, so MDX has to
   // be a recognised page/module extension.
@@ -39,6 +49,7 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
+      allowedOrigins: publicHosts(),
     },
     // `import app from "….dui" with { type: "bytes" }`: the device apps ship
     // inside the server bundle (src/app/api/device/ui/route.ts).

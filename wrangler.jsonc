@@ -75,6 +75,12 @@
     // Must match src/jobs/schedules.ts (checked by tests/platform/schedules.test.ts).
     "crons": ["*/5 * * * *", "0 2 * * *", "0 2 1 * *"]
   },
+  "vars": {
+    // "false" until the cutover: Vercel and Neon still serve production and send the Slack
+    // notifications and mails; this copy would send them a second time. Set "true" and deploy at
+    // the cutover (docs/cloudflare-migration.md).
+    "SCHEDULES_ENABLED": "false"
+  },
   // Rendering and mailing statement PDFs and replaying a month's costing
   // ledger exceed the default 30 s of CPU on large offices. Workers Paid only.
   "limits": {
