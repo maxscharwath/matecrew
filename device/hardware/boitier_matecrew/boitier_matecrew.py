@@ -46,7 +46,7 @@ PARAMS = [
     ("BOX_H", "P_Y + P_H + PANEL_GAP + T_WALL", "hauteur extérieure"),
     ("PANEL_GAP", "(BOX_R - T_WALL) * (1 - 1 / sqrt(2)) + 0.1 mm",
      "jeu entre la dalle et les parois : ses coins passent dans les arrondis de la cavité"),
-    ("BOX_D", "15.2 mm", "épaisseur ; au moins 15,2 pour que le passage USB-C reste au-dessus du capot"),
+    ("BOX_D", "11.1 mm + T_FRONT + CH_FLOOR + DB_FLOAT + XIAO_GAP", "épaisseur : le passage USB-C reste au-dessus du capot ; la poche de la carte et le support du XIAO la reculent"),
     ("BOX_R", "8 mm", "rayon des coins"),
     ("FRONT_CH", "1.5 mm", "chanfrein de l'arête avant, à 45° : imprimée contre le plateau, un congé s'affaisserait"),
     ("FRONT_FR", "2 mm", "congé au-dessus du chanfrein avant : l'arête paraît arrondie et reste imprimable"),
@@ -54,11 +54,11 @@ PARAMS = [
     ("BACK_FR", "1 mm", "congé de l'arête arrière (la lèvre fait 1,2 mm)"),
     ("T_WALL", "1.6 mm", "parois latérales"),
     ("CAV_R", "BOX_R - T_WALL", "rayon intérieur des coins de la cavité : parois d'épaisseur constante"),
-    ("T_FRONT", "1.6 mm", "façade, devant le lecteur NFC et les touches"),
+    ("T_FRONT", "2 mm", "façade, devant le lecteur NFC et les touches ; les pièces noires la traversent : à 1,6 elles étaient trop fines"),
     ("T_COVER", "1.2 mm", "capot ; tenu sur son tour par la feuillure et au milieu par la cage de la batterie"),
     ("LIP", "1.2 mm", "lèvre extérieure autour du capot"),
-    ("GAP", "0.15 mm", "jeu capot / feuillure"),
-    ("CAV_CLR", "0.2 mm", "jeu entre les pièces internes et les parois"),
+    ("GAP", "0.25 mm", "jeu capot / feuillure"),
+    ("CAV_CLR", "0.3 mm", "jeu entre les pièces internes et les parois"),
     ("PAD", "2 mm", "plots des vis sous le capot : 1,4 mm de matière sous les têtes noyées"),
     ("Z_PLATE", "BOX_D - T_FRONT", "face intérieure de la façade"),
     ("Z_PAD", "T_COVER + PAD", "dessus des plots du capot"),
@@ -76,7 +76,7 @@ PARAMS = [
     ("AA_H", "97.92 mm", "zone affichée, hauteur"),
     ("AA_X", "P_X + P_BORDER", "gauche de la zone affichée"),
     ("AA_Y", "P_Y + P_BORDER", "bas de la zone affichée"),
-    ("P_CLR", "0.25 mm", "jeu autour de la dalle"),
+    ("P_CLR", "0.35 mm", "jeu autour de la dalle"),
     ("Z_PANEL_BACK", "Z_PLATE - P_T", "dos de la dalle, face avant du châssis"),
     ("RIB_W", "1 mm", "nervure sous la dalle"),
     ("RIB_L", "12 mm", "nervures de centrage de la dalle, sur les côtés et en haut"),
@@ -86,14 +86,16 @@ PARAMS = [
     ("FRAME_W", "1.5 mm", "largeur visible du cadre, autour de la zone affichée"),
     ("FRAME_R", "2 mm", "rayon extérieur du cadre"),
     ("FRAME_IN_R", "0.5 mm", "rayon intérieur du cadre"),
-    ("FRAME_CLR", "0.15 mm", "jeu entre le cadre et la fenêtre de la façade"),
+    ("FRAME_CLR", "0.25 mm", "jeu entre le cadre et la fenêtre de la façade"),
     ("FLANGE_W", "2 mm", "collerette du cadre, au-delà de la fenêtre"),
-    ("FLANGE_T", "0.6 mm", "épaisseur de la collerette, logée dans la façade"),
+    ("FLANGE_T", "1 mm", "épaisseur des collerettes du cadre et du pavé, logées dans la façade"),
     ("WIN_CH", "0.4 mm", "chanfrein des arêtes de la fenêtre et du cadre"),
     # Châssis derrière la dalle : languettes dans la paroi du haut, deux vis en bas
-    ("CH_T", "1.6 mm", "épaisseur de la plaque du châssis (= épaisseur de la carte driver)"),
+    ("CH_T", "1.6 mm", "épaisseur de la plaque du châssis"),
+    ("CH_FLOOR", "0.6 mm", "fond de la poche de la carte driver : ses broches coupées ne touchent pas le verre ; 0 rend la découpe traversante (boîtier de 15,2, carte contre le verre)"),
     ("CH_FRAME", "6 mm", "cadre du châssis sur la bordure de la dalle, autour des fenêtres"),
     ("CH_BAR", "6 mm", "barres qui portent l'îlot de la batterie"),
+    ("CH_WIN_R", "4 mm", "rayon des coins des fenêtres : la buse les suit sans s'arrêter"),
     ("CH_TAB_W", "10 mm", "languettes du haut du châssis"),
     ("CH_TAB_L", "0.9 mm", "débord des languettes dans la paroi"),
     ("CH_SLOT_D", "1 mm", "profondeur des logements des languettes dans la paroi"),
@@ -103,7 +105,7 @@ PARAMS = [
     ("CH_REST_D", "6 mm", "colonnes du capot qui plaquent le bas du châssis (et la dalle) contre la façade"),
     # Vis M2 x 5 Torx T6 à tête cylindrique Ø 3,8 x 1,6 et inserts laiton M2 x 3 Ø 3,6 de la commande.
     # Chaque vis traverse 1,4 à 1,6 mm de pièce puis prend toute la longueur de l'insert (3 mm).
-    ("SCREW_D", "2.4 mm", "passage des vis M2"),
+    ("SCREW_D", "2.6 mm", "passage des vis M2"),
     ("INS_HOLE", "3.2 mm", "trou des inserts, cote du fabricant"),
     ("INS_DEPTH", "4 mm", "profondeur des trous d'inserts (3,5 au moins) : le bout de la vis y finit"),
     # Lecteur NFC PN532 V3
@@ -118,7 +120,7 @@ PARAMS = [
     ("PN_Y", "T_WALL + 0.8 mm", "bas du module ; sa puce dépasse un peu du bord du circuit (modèle)"),
     ("PN_RAISE", "9.75 mm", "le PN532 monte sous la dalle au-dessus du pavé NFC : un badge (85 x 54) couvre "
                             "quand même son antenne"),
-    ("PN_STANDOFF", "INS_DEPTH + 0.5 mm", "plot plein : trou d'insert borgne, 2,1 mm de matière devant lui "
+    ("PN_STANDOFF", "INS_DEPTH + 0.5 mm", "plot plein : trou d'insert borgne, T_FRONT + 0,5 mm de matière devant lui "
                                           "pour que la pose à chaud ne marque pas la face avant"),
     ("PN_H1_X", "7.59 mm", "trou en haut à gauche, sous la dalle : pion du châssis devant, appui du capot derrière"),
     ("PN_H1_Y", "35.29 mm", "trou en haut à gauche"),
@@ -142,7 +144,7 @@ PARAMS = [
     ("KEY_Y", "PN_Y + PN_H / 2 - PN_RAISE", "centre des touches et du pavé NFC, devant le PN532"),
     ("KEY_DROP", "13.3 mm", "touches sous la zone affichée (12,5 sur le site) : les collerettes du pavé et du "
                             "cadre ne se chevauchent pas"),
-    ("TT_CLR", "0.2 mm", "jeu autour des modules"),
+    ("TT_CLR", "0.4 mm", "jeu autour des modules : à 0,2 ils entraient à peine dans leurs rails"),
     ("TT_FRAME", "1 mm", "paroi des rails"),
     ("TT_LIP", "0.6 mm", "débord des lèvres sur le circuit"),
     ("TT_LIP_T", "0.8 mm", "épaisseur des lèvres"),
@@ -153,14 +155,14 @@ PARAMS = [
     # Pastilles noires des touches, comme le cadre : partie visible et épaulement posé par l'arrière
     ("KEY_DOT_D", "8 mm", "pastille visible de chaque touche"),
     ("KEY_DOT_BACK_D", "9 mm", "épaulement de la pastille, qui l'empêche de sortir par l'avant"),
-    ("INLAY_LIP", "0.6 mm", "épaisseur de la partie visible des pastilles"),
-    ("INLAY_CLR", "0.15 mm", "jeu des pastilles et du pavé dans la façade"),
+    ("INLAY_LIP", "0.8 mm", "épaisseur de la partie visible des pastilles"),
+    ("INLAY_CLR", "0.25 mm", "jeu des pastilles et du pavé dans la façade"),
     # Buzzer piézo passif Ø 16 x 4 à câble, emmanché dans sa bague, derrière une micro-grille
     ("BUZ_X", "15 mm", "centre du buzzer, dans le coin bas gauche, au-dessus du gousset du plot d'angle"),
     ("BUZ_Y", "12 mm", "centre du buzzer"),
     ("BUZ_D", "16 mm", "diamètre du buzzer"),
     ("BUZ_H", "4 mm", "épaisseur du buzzer"),
-    ("BUZ_FIT", "0 mm", "jeu radial dans la bague ; négatif pour serrer davantage"),
+    ("BUZ_FIT", "0.3 mm", "jeu radial dans la bague : un trou imprimé sort 0,2 à 0,3 mm trop petit ; le buzzer se colle"),
     ("BUZ_RING", "1.2 mm", "paroi de la bague"),
     ("BUZ_RING_H", "3 mm", "hauteur de la bague"),
     ("BUZ_SLOT", "3 mm", "encoche de la bague pour le câble du buzzer"),
@@ -180,20 +182,37 @@ PARAMS = [
     ("DB_HOLE_U2", "40.26 mm", "trous de la carte, côté nappe"),
     ("DB_HOLE_V1", "1.9 mm", "trous de la carte, depuis le bord côté encoche"),
     ("DB_HOLE_V2", "23.2 mm", "trous de la carte, côté interrupteur"),
-    ("DB_Z", "Z_PANEL_BACK - DB_T", "face composants de la carte, plaquée contre la dalle"),
-    ("DB_CLR", "0.3 mm", "jeu de la carte dans la découpe du châssis"),
+    ("DB_FLOAT", "0.2 mm", "air entre la carte et le fond de sa poche : ses soudures dépassent un peu"),
+    ("DB_Z", "Z_PANEL_BACK - CH_FLOOR - DB_FLOAT - DB_T", "face composants de la carte (côté capot), au-dessus du fond de sa poche"),
+    ("DB_CLR", "0.4 mm", "jeu de la carte dans sa poche du châssis"),
     ("TAB_W", "4.5 mm", "largeur des pattes qui retiennent la carte, sur les zones de ses trous"),
     ("TAB_OVER", "1.9 mm", "recouvrement des pattes sur la carte : jusqu'à l'axe de ses trous"),
     ("TAB_BASE", "2.5 mm", "accroche des pattes sur le châssis, à distance de la paroi du haut"),
     ("TAB_T", "1 mm", "épaisseur des pattes"),
     ("USB_OVER", "1.53 mm", "la prise USB-C dépasse du bord du XIAO"),
-    ("XIAO_GAP", "2.5 mm", "entretoise des barrettes : place pour les fils sous le XIAO"),
+    ("USB_TOP", "13 mm", "haut de la prise USB-C depuis le dessous de la carte driver (mesuré : le XIAO, sur ses "
+                         "barrettes mâles, est enfiché dans le support femelle de la carte)"),
     ("XIAO_USB_Z", "2.37 mm", "centre de la prise USB-C depuis le dessous du XIAO (modèle Seeed)"),
+    ("XIAO_USB_H", "3.16 mm", "hauteur de la prise USB-C du XIAO"),
+    ("XIAO_GAP", "USB_TOP - DB_T - XIAO_USB_Z - XIAO_USB_H / 2", "support femelle et barrettes mâles, de la carte au dessous du XIAO"),
     ("USB_Z", "DB_Z - XIAO_GAP - XIAO_USB_Z", "centre de la prise USB-C"),
-    ("DB_PIN_V2", "23.74 mm", "rangée de broches du haut de la carte (5V, GND, 3V3, D10 à D7), depuis le bord "
-                              "de l'encoche"),
-    ("PIN_ROOM", "15 mm", "place entre cette rangée et la paroi du haut, pour les fils soudés et leur coude"),
-    ("USB_CY", "BOX_H - T_WALL - PIN_ROOM - (DB_PIN_V2 - XIAO_CV)", "hauteur de la prise USB-C sur la tranche droite"),
+    ("USB_CY", "BOX_H / 2", "hauteur de la prise USB-C : centrée sur la tranche droite"),
+    # Nappes de l'écran (photos de montage Seeed du kit 7,5") : celle de la dalle fait le tour du haut du
+    # verre et descend derrière lui jusqu'au raccord, un connecteur double ; la nappe plate en ressort dans
+    # le prolongement, vers le bas, descend tout droit, se plie une fois à 45° et entre dans le connecteur
+    # de la carte par la gauche. Le pli la retourne : contacts côté écran au raccord, côté capot à la carte.
+    ("FPC_L", "28 mm", "nappe de la dalle, du bord du verre au raccord (mesurée)"),
+    ("FPC_WRAP", "2.2 mm", "longueur que prend son pli autour du haut du verre"),
+    ("RACC_W", "17 mm", "raccord de nappe, largeur"),
+    ("RACC_H", "5 mm", "raccord, longueur dans le sens des nappes"),
+    ("RACC_T", "3 mm", "raccord, épaisseur ; il est derrière le châssis"),
+    ("RACC_Y", "P_Y + P_H - (FPC_L - FPC_WRAP) - RACC_H", "bas du raccord, d'où sort la nappe plate"),
+    ("NAPPE_L", "95 mm", "longueur de la nappe plate, du raccord au connecteur de la carte (mesurée)"),
+    ("NAPPE_W", "12.5 mm", "largeur de la nappe (24 conducteurs au pas de 0,5)"),
+    ("NAPPE_X", "BOX_W / 2", "axe de la descente de la nappe, dans le prolongement du raccord"),
+    ("NAPPE_Z", "DB_Z - 1.1 mm", "plan de la nappe, à hauteur de la fente du connecteur"),
+    ("FPC_U", "41.1 mm", "entrée du connecteur de nappe de la carte, depuis le bout côté XIAO (modèle Seeed)"),
+    ("FPC_V", "12.55 mm", "axe du connecteur de nappe, depuis le bord de l'encoche (modèle Seeed)"),
     ("USB_OPEN_W", "12.5 mm", "passage du surmoulage d'une fiche USB-C courante, largeur"),
     ("USB_OPEN_H", "7 mm", "passage du surmoulage, épaisseur"),
     ("USB_OPEN_R", "2 mm", "rayon des coins du passage : accepte les surmoulages ronds et rectangulaires"),
@@ -202,17 +221,22 @@ PARAMS = [
     ("BAT_W", "60 mm", "longueur de la batterie"),
     ("BAT_H", "40 mm", "largeur de la batterie"),
     ("BAT_T", "6.5 mm", "épaisseur de la batterie"),
-    ("BAT_CX", "BOX_W / 2", "centre de la batterie"),
-    ("BAT_CY", "P_Y + P_H / 2 + 4 mm", "centre de la batterie, au-dessus des Dupont du PN532"),
-    ("BAT_CLR", "0.5 mm", "jeu sur les côtés : les cellules souples dépassent leur cote"),
-    ("BAT_END_CLR", "1 mm", "jeu aux extrémités"),
-    ("BAT_T_CLR", "0.5 mm", "jeu sous les lèvres"),
+    ("BAT_TAPE", "1 mm", "place pour un adhésif double face entre la batterie et le châssis (mousse de 1 mm au plus)"),
+    ("BAT_CX", "BOX_W / 2 + FPC_WIN_W / 2 + 1 mm + BAT_W / 2 + BAT_END_CLR + BAT_WALL", "centre de la batterie, en haut à droite : toute sa cage sur la plaque pleine, à droite de la fenêtre de la nappe"),
+    ("BAT_CY", "DB_Y + DB_H + DB_CLR + TAB_BASE + 1 mm + BAT_H / 2 + BAT_CLR + BAT_WALL", "centre de la batterie, au-dessus de la carte driver, près du XIAO"),
+    ("BAT_CLR", "0.4 mm", "jeu sur les côtés : les cellules souples dépassent leur cote"),
+    ("BAT_END_CLR", "0.6 mm", "jeu aux extrémités"),
+    ("BAT_T_CLR", "0.3 mm", "jeu sous les lèvres"),
     ("BAT_WALL", "1.2 mm", "parois de la cage"),
-    ("BAT_WALL_L", "24 mm", "longueur des parois à lèvre"),
+    ("BAT_WALL_L", "44 mm", "longueur des parois à lèvre : presque toute la batterie, pour qu'elle ne bascule pas"),
     ("BAT_STOP_L", "6 mm", "longueur des butées d'extrémité"),
-    ("BAT_LIP", "0.8 mm", "débord des lèvres sur la batterie"),
+    ("BAT_END_L", "20 mm", "butée droite de la cage, au milieu du petit côté"),
+    ("BAT_LIP", "1.2 mm", "débord des lèvres sur la batterie"),
     ("BAT_LIP_T", "0.8 mm", "épaisseur des lèvres"),
-    ("CAGE_Z", "Z_PANEL_BACK - CH_T - BAT_T - BAT_T_CLR - BAT_LIP_T", "bas de la cage de la batterie"),
+    ("CAGE_Z", "Z_PANEL_BACK - CH_T - BAT_TAPE - BAT_T - BAT_T_CLR - BAT_LIP_T", "bas de la cage de la batterie"),
+    ("BAT_PRESS_W", "2 mm", "nervures du capot qui tiennent le dos de la batterie, entre les lèvres"),
+    ("BAT_PRESS_CLR", "BAT_T_CLR", "jeu entre ces nervures et la batterie : comme sous les lèvres"),
+    ("BAT_WIRE_L", "10 mm", "bout gauche de la batterie laissé libre : ses fils et leur protection"),
     ("COVER_REST_CLR", "0.1 mm", "jeu entre les appuis du capot et la cage : le capot porte dessus dès qu'on le "
                                  "presse, sans l'empêcher de se poser à plat"),
     # Aimants néodyme 10 x 1,6 mm, serrés dans leurs logements
@@ -231,7 +255,7 @@ PARAMS = [
     ("HEAD_DEPTH", "1.8 mm", "profondeur du lamage : tête de 1,6 en retrait de 0,2 du dos, qui reste plat"),
     # Aimants néodyme 10 x 1,6 mm collés à fleur du dos : 6 pour le frigo (environ 3 fois le poids
     # en glissement), dont les 2 du bas tiennent aussi le boîtier contre le socle ; 2 dans le socle
-    ("MAG_D", "10.1 mm", "logement des aimants"),
+    ("MAG_D", "10.4 mm", "logement des aimants : un trou imprimé sort 0,2 à 0,3 mm trop petit ; l'aimant se colle"),
     ("MAG_T", "1.6 mm", "épaisseur des aimants"),
     ("MAG_PAD_H", "0.8 mm", "renfort derrière chaque logement, côté intérieur du capot"),
     ("MAG_LOW_DX", "45 mm", "aimants du bas, en face de ceux du socle"),
@@ -273,6 +297,8 @@ PARAMS = [
     ("LIP_L", "5 mm", "longueur de la lèvre avant : elle arrête le pied du boîtier sans cacher le pavé NFC"),
     ("SLOT_CLR", "0.6 mm", "jeu entre le boîtier et la lèvre"),
     ("SOCLE_SKIN", "0.8 mm", "peau devant les aimants du socle (deux passes de buse de 0,4) : face avant lisse"),
+    ("SOCLE_RAIL", "8 mm", "bandes pleines de la semelle autour de ses fenêtres et entre elles"),
+    ("SOCLE_WIN_R", "6 mm", "rayon des coins des fenêtres de la semelle"),
 ]
 
 P3 = adsk.core.Point3D.create
@@ -902,9 +928,10 @@ def build_chassis(comp):
     """Plaque derrière la dalle : accrochée en haut par trois languettes, plaquée en bas par quatre
     colonnes du capot, sans vis.
 
-    Elle plaque la dalle, tient la carte driver par quatre pattes (le bord gauche de sa découpe
-    retient la carte quand on enfonce la fiche USB-C, une butée quand on la retire), porte la batterie
-    dans une cage à lèvres et tient le haut du PN532 par un pion.
+    Ajourée seulement là où rien n'est derrière : la dalle ne touche aucune pièce. Elle plaque la dalle,
+    tient la carte driver dans une poche à fond de CH_FLOOR par quatre pattes (le bord gauche de la
+    poche retient la carte quand on enfonce la fiche USB-C, une butée quand on la retire), porte la
+    batterie dans une cage à lèvres et tient le haut du PN532 par un pion.
     """
     face = plane(comp, "Z_PANEL_BACK")
     back = plane(comp, "Z_PANEL_BACK - CH_T")
@@ -916,24 +943,34 @@ def build_chassis(comp):
             rect(sk, f"{x} - CH_TAB_W / 2", "P_Y + P_H - 1 mm", "CH_TAB_W", "1 mm + CH_TAB_L")
     body = new_body(comp, sk.profiles, "CH_T", "chassis", negative=True)
 
-    # Fenêtres : il reste le cadre sur la bordure de la dalle, l'îlot de la batterie et ses barres.
-    # Celle du haut laisse passer le pli de la nappe et son raccord.
-    bat_l = "BAT_CX - BAT_W / 2 - BAT_END_CLR - BAT_WALL"
-    bat_r = "BAT_CX + BAT_W / 2 + BAT_END_CLR + BAT_WALL"
+    # Fenêtres là où rien n'est derrière la dalle : il reste le cadre sur sa bordure, la descente et le
+    # pli de la nappe plate, l'îlot de la batterie et la zone de la carte driver. Celle du haut laisse
+    # passer le pli de la nappe de la dalle. Coins arrondis.
     bot, top = "P_Y + CH_FRAME", "P_Y + P_H - CH_FRAME"
+    # À gauche, la grille s'arrête à une barre de la fenêtre de la nappe de la dalle, qui ouvre le bord du
+    # haut : le cadre au-dessus de la grille garde un appui de chaque côté, aucune barre ne pend dans le vide
+    left_r, right_l = "BOX_W / 2 - FPC_WIN_W / 2 - CH_BAR", "NAPPE_X + NAPPE_W / 2 + CH_BAR"
     top_r = "DB_Y - DB_CLR - TAB_BASE - CH_BAR"
     sk = sketch(comp, face, "Fenêtres")
-    poly(sk, [("P_X + CH_FRAME", bot), (f"{bat_l} - CH_BAR", bot), (f"{bat_l} - CH_BAR", top), ("P_X + CH_FRAME", top)])
-    poly(sk, [(f"{bat_r} + CH_BAR", bot), ("P_X + P_W - CH_FRAME", bot), ("P_X + P_W - CH_FRAME", top_r),
-              (f"{bat_r} + CH_BAR", top_r)])
-    under = "BAT_CY - BAT_H / 2 - BAT_CLR - BAT_WALL - CH_BAR"
-    poly(sk, [(bat_l, bot), (bat_r, bot), (bat_r, under), (bat_l, under)])
-    rect(sk, "BOX_W / 2 - FPC_WIN_W / 2", "P_Y + P_H - FPC_WIN_H", "FPC_WIN_W", "FPC_WIN_H + 1 mm")
+
+    def grid(x0, y0, x1, y1, cols, rows):
+        """Fenêtres en grille, séparées par des barres de CH_BAR : la plaque reste raide."""
+        w = f"(({x1}) - ({x0}) - {cols - 1} * CH_BAR) / {cols}"
+        h = f"(({y1}) - ({y0}) - {rows - 1} * CH_BAR) / {rows}"
+        for i in range(cols):
+            for j in range(rows):
+                rrect(sk, f"{x0} + {i} * ({w} + CH_BAR)", f"{y0} + {j} * ({h} + CH_BAR)", w, h, "CH_WIN_R")
+
+    grid("P_X + CH_FRAME", bot, left_r, top, 2, 3)
+    grid(right_l, bot, "P_X + P_W - CH_FRAME", top_r, 2, 1)
+    rrect(sk, "BOX_W / 2 - FPC_WIN_W / 2", "P_Y + P_H - FPC_WIN_H", "FPC_WIN_W", "FPC_WIN_H + CH_WIN_R + 1 mm",
+          "CH_WIN_R")
     extrude(comp, sk.profiles, "CH_T + 1 mm", CUT, negative=True, bodies=[body], name="Fenêtres")
 
-    sk = sketch(comp, face, "Découpe carte")
+    # Poche de la carte : un fond de CH_FLOOR reste entre ses broches coupées à ras et le verre
+    sk = sketch(comp, plane(comp, "Z_PANEL_BACK - CH_FLOOR"), "Poche carte")
     rect(sk, "DB_X - DB_CLR", "DB_Y - DB_CLR", "BOX_W - DB_X", "DB_H + 2 * DB_CLR")
-    extrude(comp, sk.profiles, "CH_T + 1 mm", CUT, negative=True, bodies=[body], name="Découpe carte")
+    extrude(comp, sk.profiles, "CH_T - CH_FLOOR + 1 mm", CUT, negative=True, bodies=[body], name="Poche carte")
     # Butée au bout de la carte, contre la paroi : en débranchant la fiche USB-C (8 à 20 N), la carte ne
     # glisse pas vers la droite et ne tire pas sur la nappe. Le XIAO et sa prise passent derrière.
     # Elle tient à la plaque par deux bras, au-dessus et au-dessous de la découpe.
@@ -959,48 +996,63 @@ def build_chassis(comp):
     extrude(comp, sk.profiles, "PN_T + 0.5 mm", JOIN, negative=True, bodies=[body], name="Pion PN532")
 
     # Coins du haut coupés à 45° (plaque et haut de la butée) : les goussets des plots d'angle passent
-    sk = sketch(comp, face, "Coins coupés")
-    for cx in ("0 mm", "BOX_W"):
-        corner_triangle(sk, cx, "BOX_H", "CH_NOTCH_T")
-    extrude(comp, sk.profiles, "CH_T + 1 mm", CUT, negative=True, bodies=[body], name="Coins coupés")
-    # Pattes sur les zones des quatre trous de la carte, libres de composants
-    sk = sketch(comp, back, "Pattes carte")
-    side_w = "TAB_BASE + DB_CLR + TAB_OVER"
+    # (dans un boîtier épais, ils s'arrêtent avant le châssis : rien à couper)
+    if ev("CH_NOTCH_T") > ev("(PANEL_GAP + T_WALL) * sqrt(2)"):
+        sk = sketch(comp, face, "Coins coupés")
+        for cx in ("0 mm", "BOX_W"):
+            corner_triangle(sk, cx, "BOX_H", "CH_NOTCH_T")
+        extrude(comp, sk.profiles, "CH_T + 1 mm", CUT, negative=True, bodies=[body], name="Coins coupés")
+    # Pattes sur les zones des quatre trous de la carte, libres de composants. La carte dépasse du dos de
+    # la plaque (sa poche a un fond) : le pied de chaque patte monte jusqu'à son dos, le bout la recouvre.
+    sk = sketch(comp, back, "Pieds des pattes")
     for u in ("DB_HOLE_U1", "DB_HOLE_U2"):
         tx = f"DB_X + DB_W - {u}"
-        rect(sk, f"{tx} - TAB_W / 2", "DB_Y - DB_CLR - TAB_BASE", "TAB_W", side_w)
-        rect(sk, f"{tx} - TAB_W / 2", "DB_Y + DB_H - TAB_OVER", "TAB_W", side_w)
+        rect(sk, f"{tx} - TAB_W / 2", "DB_Y - DB_CLR - TAB_BASE", "TAB_W", "TAB_BASE + DB_CLR")
+        rect(sk, f"{tx} - TAB_W / 2", "DB_Y + DB_H", "TAB_W", "DB_CLR + TAB_BASE")
+    extrude(comp, sk.profiles, "CH_FLOOR + DB_FLOAT + DB_T - CH_T + TAB_T", JOIN, negative=True, bodies=[body],
+            name="Pieds des pattes")
+    sk = sketch(comp, plane(comp, "DB_Z"), "Pattes carte")
+    for u in ("DB_HOLE_U1", "DB_HOLE_U2"):
+        tx = f"DB_X + DB_W - {u}"
+        rect(sk, f"{tx} - TAB_W / 2", "DB_Y", "TAB_W", "TAB_OVER")
+        rect(sk, f"{tx} - TAB_W / 2", "DB_Y + DB_H - TAB_OVER", "TAB_W", "TAB_OVER")
     extrude(comp, sk.profiles, "TAB_T", JOIN, negative=True, bodies=[body], name="Pattes carte")
 
-    # Cage de la batterie : deux parois à lèvre sur les grands côtés, une butée à gauche,
-    # deux butées d'angle à droite entre lesquelles sortent les fils
+    # Cage de la batterie : deux parois à lèvre sur les grands côtés, une butée à droite,
+    # deux butées d'angle à gauche entre lesquelles sortent les fils
     bx0, by0, by1 = "BAT_CX - BAT_W / 2 - BAT_END_CLR", "BAT_CY - BAT_H / 2 - BAT_CLR", "BAT_CY + BAT_H / 2 + BAT_CLR"
     wx = "BAT_CX - BAT_WALL_L / 2"
     sk = sketch(comp, back, "Cage batterie")
     cage_walls(sk)
-    extrude(comp, sk.profiles, "BAT_T + BAT_T_CLR + BAT_LIP_T", JOIN, negative=True, bodies=[body],
+    extrude(comp, sk.profiles, "BAT_TAPE + BAT_T + BAT_T_CLR + BAT_LIP_T", JOIN, negative=True, bodies=[body],
             name="Cage batterie")
-    sk = sketch(comp, plane(comp, "Z_PANEL_BACK - CH_T - BAT_T - BAT_T_CLR"), "Lèvres batterie")
+    sk = sketch(comp, plane(comp, "Z_PANEL_BACK - CH_T - BAT_TAPE - BAT_T - BAT_T_CLR"), "Lèvres batterie")
     rect(sk, wx, f"{by1} - BAT_LIP", "BAT_WALL_L", "BAT_LIP + BAT_WALL")
     rect(sk, wx, f"{by0} - BAT_WALL", "BAT_WALL_L", "BAT_WALL + BAT_LIP")
     extrude(comp, sk.profiles, "BAT_LIP_T", JOIN, negative=True, bodies=[body], name="Lèvres batterie")
+
+    # Poche sous les queues de la barrette du PN532, qui dépassent de 2 mm devant son circuit : un fond
+    # de CH_FLOOR reste entre elles et le verre
+    sk = sketch(comp, back, "Poche queues PN532")
+    rrect(sk, "PN_X + PN_HDR_X - 2.4 mm", "PN_Y + PN_HDR_Y - 1.5 mm", "4 * 2.54 mm + 2.3 mm", "3 mm", "1 mm")
+    extrude(comp, sk.profiles, "CH_T - CH_FLOOR", CUT, bodies=[body], name="Poche queues PN532")
 
     paint(body, "Plastic - Matte (Black)", pla())
     return body
 
 
 def cage_walls(sk, lips=False):
-    """Parois de la cage de la batterie : deux longues sur les grands côtés, une butée à gauche, deux
-    butées d'angle à droite entre lesquelles sortent les fils. Avec lips, les longues parois prennent
+    """Parois de la cage de la batterie : deux longues sur les grands côtés, une butée à droite, deux
+    butées d'angle à gauche entre lesquelles sortent les fils. Avec lips, les longues parois prennent
     aussi la largeur de leur lèvre (dessous de la cage, où s'appuie le capot)."""
     bx0, bx1 = "BAT_CX - BAT_W / 2 - BAT_END_CLR", "BAT_CX + BAT_W / 2 + BAT_END_CLR"
     by0, by1 = "BAT_CY - BAT_H / 2 - BAT_CLR", "BAT_CY + BAT_H / 2 + BAT_CLR"
     wx, lip = "BAT_CX - BAT_WALL_L / 2", "BAT_WALL + BAT_LIP" if lips else "BAT_WALL"
     rect(sk, wx, f"{by1} - BAT_LIP" if lips else by1, "BAT_WALL_L", lip)
     rect(sk, wx, f"{by0} - BAT_WALL", "BAT_WALL_L", lip)
-    rect(sk, f"{bx0} - BAT_WALL", "BAT_CY - BAT_WALL_L / 2", "BAT_WALL", "BAT_WALL_L")
-    rect(sk, bx1, f"{by1} - BAT_STOP_L", "BAT_WALL", "BAT_STOP_L")
-    rect(sk, bx1, by0, "BAT_WALL", "BAT_STOP_L")
+    rect(sk, bx1, "BAT_CY - BAT_END_L / 2", "BAT_WALL", "BAT_END_L")
+    rect(sk, f"{bx0} - BAT_WALL", f"{by1} - BAT_STOP_L", "BAT_WALL", "BAT_STOP_L")
+    rect(sk, f"{bx0} - BAT_WALL", by0, "BAT_WALL", "BAT_STOP_L")
 
 
 # ---------------------------------------------------------------- capot
@@ -1035,6 +1087,17 @@ def build_capot(comp):
     sk = sketch(comp, top, "Appuis cage")
     cage_walls(sk, lips=True)
     extrude(comp, sk.profiles, "CAGE_Z - COVER_REST_CLR - T_COVER", JOIN, bodies=[body], name="Appuis cage")
+
+    # Nervures en croix sur le dos de la batterie, entre les lèvres : si une lèvre fléchit, la batterie
+    # ne recule pas pour autant. Le bout des fils reste libre.
+    sk = sketch(comp, top, "Nervures batterie")
+    x0, x1 = "BAT_CX - BAT_W / 2 + BAT_WIRE_L", "BAT_CX + BAT_W / 2 - 3 mm"
+    y0, y1 = "BAT_CY - BAT_H / 2 + BAT_LIP + 2 mm", "BAT_CY + BAT_H / 2 - BAT_LIP - 2 mm"
+    rect(sk, x0, "BAT_CY - BAT_PRESS_W / 2", f"{x1} - ({x0})", "BAT_PRESS_W")
+    for x in (f"{x0} + BAT_PRESS_W", "BAT_CX - BAT_PRESS_W / 2", f"{x1} - 2 * BAT_PRESS_W"):
+        rect(sk, x, y0, "BAT_PRESS_W", f"{y1} - ({y0})")
+    extrude(comp, sk.profiles, "Z_PANEL_BACK - CH_T - BAT_TAPE - BAT_T - BAT_PRESS_CLR - T_COVER", JOIN, bodies=[body],
+            name="Nervures batterie")
 
     # Colonnes qui plaquent le bas du châssis, et la dalle avec lui, contre la façade
     sk = sketch(comp, top, "Appuis châssis")
@@ -1111,6 +1174,16 @@ def build_socle(comp):
             for e in f.edges if min(e.startVertex.geometry.z, e.endVertex.geometry.z) > EPS]
     fillet(comp, ends, "SOCLE_END_FR", "Bouts")
     chamfer(comp, [planar_face(body, -1, 0)], "BASE_CH", "Chanfrein de pose")
+
+    # Trois fenêtres dans la semelle, derrière le dossier : moins de plastique, et le bord arrière qui
+    # empêche de basculer reste plein
+    sk = sketch(comp, comp.xYConstructionPlane, "Fenêtres semelle")
+    w0 = f"REST_Y + REST_L * sin(TILT) + {slab} + SOCLE_RAIL"
+    win_w = "(SOCLE_W - 4 * SOCLE_RAIL) / 3"
+    for i in range(3):
+        rrect(sk, f"SOCLE_X + SOCLE_RAIL + {i} * ({win_w} + SOCLE_RAIL)", w0, win_w, f"SOCLE_D - SOCLE_RAIL - ({w0})",
+              "SOCLE_WIN_R")
+    extrude(comp, sk.profiles, "SOCLE_T + 1 mm", CUT, bodies=[body], name="Fenêtres semelle")
 
     # Logements ronds des deux aimants du socle, en face des aimants du bas du capot. Ouverts au dos du
     # dossier : l'aimant s'y colle contre une peau de SOCLE_SKIN (polarité : il doit attirer celui du
@@ -1259,8 +1332,14 @@ def build_composants(comp):
     for i, dy in enumerate(("-7.62 mm", "7.62 mm")):
         box(f"barrette xiao {i + 1}", f"{xiao_end} - 19.43 mm", f"USB_CY + ({dy}) - 1.27 mm", "17.78 mm", "2.54 mm",
             "DB_Z - XIAO_GAP", "XIAO_GAP", "Plastic - Matte (Black)")
-    box("raccord nappe", "BOX_W / 2 - 8 mm", "P_Y + P_H - 20 mm", "16 mm", "8 mm", "Z_PANEL_BACK - 3 mm", "3 mm",
-        "Plastic - Matte (White)")
+    box("raccord nappe", "BOX_W / 2 - RACC_W / 2", "RACC_Y", "RACC_W", "RACC_H", "Z_PANEL_BACK - CH_T - RACC_T",
+        "RACC_T", "Plastic - Matte (Black)")
+    # Nappe plate : descente tout droit sous le raccord, un pli à 45°, entrée dans le connecteur par la gauche
+    half, nz, y_fpc = "NAPPE_W / 2", "NAPPE_Z", "DB_Y + FPC_V"
+    box("nappe descente", f"NAPPE_X - {half}", f"{y_fpc} - {half}", "NAPPE_W", f"RACC_Y - ({y_fpc} - {half})", nz,
+        "0.3 mm", "Plastic - Matte (Blue)")
+    box("nappe entrée", f"NAPPE_X + {half}", f"{y_fpc} - {half}", f"DB_X + DB_W - FPC_U - (NAPPE_X + {half})",
+        "NAPPE_W", nz, "0.3 mm", "Plastic - Matte (Blue)")
 
     # Surmoulage d'une fiche courante, 12 x 6,5 mm : le passage doit le laisser venir jusqu'à la prise.
     # Sur ce plan, x d'esquisse = -z.
@@ -1294,7 +1373,7 @@ def build_composants(comp):
         screw(f"vis capot {i + 1}", x, y, "HEAD_DEPTH")
 
     box("batterie", "BAT_CX - BAT_W / 2", "BAT_CY - BAT_H / 2", "BAT_W", "BAT_H",
-        "Z_PANEL_BACK - CH_T - BAT_T", "BAT_T", "Plastic - Matte (Yellow)")
+        "Z_PANEL_BACK - CH_T - BAT_TAPE - BAT_T", "BAT_T", "Plastic - Matte (Yellow)")
     for i, (x, y) in enumerate(BACK_MAGNETS):
         cyl(f"aimant {i + 1}", x, y, "10 mm", "0 mm", "MAG_T", "Stainless Steel - Polished")  # néodyme nickelé
 
@@ -1536,8 +1615,17 @@ def check_design():
         "esquisses non contraintes": loose_sketches(),
         "pièces en plusieurs morceaux": split_parts(),
         "interferences": interferences(("facade", "cadre", "chassis", "capot", "composants", "modeles", "ecran")),
+        "nappe": nappe_length(),
         "volumes cm3": volumes(),
     }
+
+
+def nappe_length():
+    """Longueur du trajet de la nappe plate sur son axe, 3 mm enfoncés dans chaque connecteur compris (le
+    pli à 45° ne prend presque rien), face à sa longueur mesurée."""
+    path = ev("3 mm + (RACC_Y - (DB_Y + FPC_V)) + (DB_X + DB_W - FPC_U + 3 mm - NAPPE_X)") * 10
+    spare = ev("NAPPE_L") * 10 - path
+    return f"{path:.1f} mm de trajet, {spare:.1f} mm de mou" + ("" if spare >= 3 else " : TROP COURTE")
 
 
 # Pièces imprimées face avant sur le plateau ; les autres gardent leur dos sur le plateau (capot : face

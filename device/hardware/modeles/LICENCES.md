@@ -2,7 +2,8 @@
 
 Modèles des fabricants ou de la communauté, gardés tels quels pour contrôler l'encombrement
 dans Fusion. Ils ne sont pas imprimés et restent la propriété de leurs auteurs : usage interne
-au projet seulement, pas de redistribution.
+au projet seulement, pas de redistribution. La vue 3D du site en montre une version simplifiée,
+servie seulement aux utilisateurs connectés, jamais par un fichier public.
 
 | Fichier | Composant | Auteur | Source | Licence |
 |---|---|---|---|---|
@@ -15,6 +16,6 @@ au projet seulement, pas de redistribution.
 ## Écarts connus avec les pièces de la commande
 
 - `ttp223.step` : circuit de 0,57 mm, le nôtre fait 1 mm. Le script cote les rails avec `TT_PCB`.
-- `carte-driver.step` : porte encore le support femelle du XIAO (4,5 mm). Le nôtre est retiré, le XIAO est soudé avec l'entretoise de 2,5 mm de ses barrettes.
+- `carte-driver.step` : porte le support femelle du XIAO (4,5 mm), gardé sur la nôtre : le XIAO y est enfiché par ses barrettes mâles (haut de sa prise USB-C à 13 mm sous la carte, `USB_TOP`).
 - `pn532.step` : son circuit fait 0,41 mm dans le modèle, sans doute 1,6 en vrai (`PN_T`, à mesurer). Il contient un objet « CE » parasite sous la carte.
 - Le buzzer piézo Ø 16 × 4 à câble n'a pas de modèle : le script le dessine.
