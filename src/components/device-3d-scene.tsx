@@ -6,11 +6,10 @@ import {
   Html,
   Lightformer,
   OrbitControls,
-  SoftShadows,
   useGLTF,
 } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Box, Layers, Nfc, Volume2, VolumeX } from "lucide-react";
+import { Box, Download, Layers, Nfc, Volume2, VolumeX } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Suspense,
@@ -23,6 +22,14 @@ import {
 import * as THREE from "three";
 import { paintFrame, PANEL_HEIGHT, PANEL_WIDTH } from "@/components/device-console/frame-bits";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { VirtualBuzzer } from "@matecrew/device-ui/emulator";
 import { DemoTerminal, type DemoOffice } from "@/lib/device/virtual/demo";
 import type { Side } from "@/lib/device/virtual/wasm";
@@ -30,13 +37,15 @@ import { cn } from "@/lib/utils";
 
 /**
  * The terminal in 3D, as built: its parts come from the Fusion model
- * (device/hardware/boitier_matecrew), printed parts and hardware as exported,
- * boards, panel and battery redrawn at their measured sizes: the makers' STEP
- * models in device/hardware/modeles may not be redistributed. The GLB
- * (public/models/matecrew-terminal.glb, meshopt) is in metres, in the device's
- * own frame: x right, y up, z out of the screen, z = 0 on its back. One node per
- * layer, each with its explode offset in its extras; the scene tilts it onto its
- * stand.
+ * (device/hardware/boitier_matecrew), printed parts as exported, the boards and
+ * the panel as their makers modelled them, with the silkscreen we draw on them,
+ * screws, inserts and magnets after their standards, one mesh each, instanced.
+ * The makers' models may not be redistributed: the GLB
+ * (assets/models/matecrew-terminal.glb, meshopt) is served to signed-in users
+ * only, by src/app/api/models/terminal/route.ts. It is in metres, in the
+ * device's own frame: x right, y up, z out of the screen, z = 0 on its back. One
+ * node per layer, each with its explode offset in its extras; the scene tilts it
+ * onto its stand.
  *
  * The panel shows a live frame: the terminal's firmware screens in WebAssembly,
  * either the page's own terminal (`screen`) or, without one, a demo terminal
@@ -50,7 +59,7 @@ import { cn } from "@/lib/utils";
  * draws while nothing moves.
  */
 
-const MODEL_URL = "/models/matecrew-terminal.glb";
+const MODEL_URL = "/api/models/terminal";
 /** The main screen as the snapshot tests draw it (device/apps/mate/__snapshots__/stock.png). */
 const SCREEN_FALLBACK_URL = "/models/matecrew-screen.png";
 /** Seconds for a full explode or assembly. */
@@ -79,9 +88,9 @@ const LAYERS = [
   "inlays",
   "keys",
   "screen",
+  "chassis",
   "driver",
   "xiao",
-  "chassis",
   "nfc",
   "battery",
   "cover",
@@ -327,7 +336,16 @@ const LOOKS: Record<string, THREE.MeshPhysicalMaterialParameters> = {
   nickel: { envMapIntensity: 1.4 },
   steel: { envMapIntensity: 1.2 },
   shield: { envMapIntensity: 1.2 },
+  "plastic-white": { roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.5 },
+  ceramic: { roughness: 0.75 },
+  "led-amber": { roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05 },
+  "dip-red": { roughness: 0.45, clearcoat: 0.3 },
+  "panel-back": { roughness: 0.45, envMapIntensity: 1.1 },
+  ffc: { roughness: 0.55, clearcoat: 0.2, clearcoatRoughness: 0.4 },
+  "ffc-panel": { roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.15 },
 };
+/** The boards' prints, laid over their faces: ink on a solder mask's clear coat. */
+const PRINT: THREE.MeshPhysicalMaterialParameters = { roughness: 0.6, clearcoat: 0.9, clearcoatRoughness: 0.3, polygonOffset: true, polygonOffsetFactor: -2 };
 
 function dressMaterials(root: THREE.Object3D, screen: THREE.Texture, lines: THREE.Texture) {
   const cache = new Map<THREE.Material, THREE.Material>();
@@ -344,8 +362,12 @@ function dressMaterials(root: THREE.Object3D, screen: THREE.Texture, lines: THRE
         color: source.color,
         metalness: source.metalness,
         roughness: source.roughness,
-        ...LOOKS[source.name],
+        map: source.map,
+        transparent: source.transparent,
+        depthWrite: source.depthWrite,
+        ...(source.name.startsWith("decal-") ? PRINT : LOOKS[source.name]),
       });
+      if (source.name.startsWith("decal-")) mesh.castShadow = false;
       if (source.name === "pla-white" || source.name === "pla-black") {
         next.normalMap = lines;
         next.normalScale = new THREE.Vector2(0.35, 0.35);
@@ -581,8 +603,6 @@ function Studio() {
         shadow-camera-far={2}
       />
       <directionalLight position={[0.5, 0.3, -0.4]} intensity={0.5} color="#e6eeff" />
-      {/* Shadows with penumbras that widen with distance, as under a real softbox. */}
-      <SoftShadows size={18} samples={12} focus={0.6} />
       {/* The desk: the key light's shadow, and the soft contact under the stand. */}
       <mesh rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[3, 3]} />
@@ -716,6 +736,7 @@ export function Device3DScene({ screen: shared, office, className }: Device3DSce
             {sound ? <Volume2 /> : <VolumeX />}
           </Button>
         )}
+        <HardwareFiles />
         <p className="ml-auto hidden items-center gap-3 text-xs text-muted-foreground md:flex">
           {screen.onKey && <span>{t("hint")}</span>}
           {screen.live && (
@@ -741,6 +762,55 @@ export function Device3DScene({ screen: shared, office, className }: Device3DSce
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The case's files, in public/hardware: copies of device/hardware (`bun run hardware:public`),
+ * exported from the Fusion script. Printed parts in their print orientation, then the assembly.
+ */
+const HARDWARE_FILES = [
+  { file: "facade.stl", part: "facade", colour: "white" },
+  { file: "cadre.stl", part: "frame", colour: "black" },
+  { file: "pastille-gauche.stl", part: "keyLeft", colour: "black" },
+  { file: "pastille-droite.stl", part: "keyRight", colour: "black" },
+  { file: "pavé-nfc.stl", part: "pad", colour: "black" },
+  { file: "chassis.stl", part: "chassis", colour: "black" },
+  { file: "capot.stl", part: "cover", colour: "white" },
+  { file: "socle.stl", part: "stand", colour: "white" },
+] as const;
+const ASSEMBLY_FILE = "boitier-matecrew.step";
+
+/** The printable parts to download, and the whole assembly as STEP. */
+function HardwareFiles() {
+  const t = useTranslations("devices.terminal3d.files");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="sm" variant="outline" className="pointer-events-auto">
+          <Download />
+          {t("button")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel>{t("title")}</DropdownMenuLabel>
+        {HARDWARE_FILES.map(({ file, part, colour }) => (
+          <DropdownMenuItem key={file} asChild>
+            <a href={`/hardware/${encodeURIComponent(file)}`} download>
+              <span className="min-w-0 flex-1 truncate">{t(`parts.${part}`)}</span>
+              <span className="text-xs text-muted-foreground">{t(colour)}</span>
+            </a>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a href={`/hardware/${ASSEMBLY_FILE}`} download>
+            <span className="min-w-0 flex-1 truncate">{t("assembly")}</span>
+            <span className="text-xs text-muted-foreground">STEP</span>
+          </a>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

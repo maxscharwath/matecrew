@@ -1698,15 +1698,15 @@
         },
         "driver": {
           "title": "Carte driver",
-          "detail": "ePaper Driver Board, connecteur 24 broches"
+          "detail": "ePaper Driver Board, nappe 24 broches, support du XIAO"
         },
         "xiao": {
           "title": "XIAO ESP32-S3",
-          "detail": "Wi-Fi, BLE, USB-C, sur ses barrettes"
+          "detail": "Wi-Fi, BLE, USB-C, enfiché sur la carte driver"
         },
         "chassis": {
           "title": "Châssis",
-          "detail": "PLA noir, plaque la dalle, cage de batterie"
+          "detail": "PLA noir, poche de la carte, cage de batterie"
         },
         "nfc": {
           "title": "Lecteur NFC",
@@ -1718,7 +1718,7 @@
         },
         "cover": {
           "title": "Capot",
-          "detail": "PLA blanc, 2 trous de serrure"
+          "detail": "PLA blanc, 2 trous de serrure, nervures sur la batterie"
         },
         "screws": {
           "title": "Vis",
@@ -1730,7 +1730,24 @@
         },
         "stand": {
           "title": "Socle",
-          "detail": "Incliné à 15°, 2 aimants"
+          "detail": "Incliné à 15°, semelle ajourée, 2 aimants"
+        }
+      },
+      "files": {
+        "button": "Fichiers 3D",
+        "title": "Pièces à imprimer",
+        "white": "PLA blanc",
+        "black": "PLA noir",
+        "assembly": "Assemblage complet",
+        "parts": {
+          "facade": "Façade",
+          "frame": "Cadre de l'écran",
+          "keyLeft": "Pastille gauche",
+          "keyRight": "Pastille droite",
+          "pad": "Pavé NFC",
+          "chassis": "Châssis",
+          "cover": "Capot",
+          "stand": "Socle"
         }
       },
       "demo": {

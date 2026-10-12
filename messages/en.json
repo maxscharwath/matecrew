@@ -1698,15 +1698,15 @@
         },
         "driver": {
           "title": "Driver board",
-          "detail": "ePaper Driver Board, 24-pin connector"
+          "detail": "ePaper Driver Board, 24-pin flex, XIAO socket"
         },
         "xiao": {
           "title": "XIAO ESP32-S3",
-          "detail": "Wi-Fi, BLE, USB-C, on its headers"
+          "detail": "Wi-Fi, BLE, USB-C, plugged into the driver board"
         },
         "chassis": {
           "title": "Chassis",
-          "detail": "Black PLA, holds the panel and the battery"
+          "detail": "Black PLA, board pocket, battery cage"
         },
         "nfc": {
           "title": "NFC reader",
@@ -1718,7 +1718,7 @@
         },
         "cover": {
           "title": "Back cover",
-          "detail": "White PLA, 2 keyholes"
+          "detail": "White PLA, 2 keyholes, ribs on the battery"
         },
         "screws": {
           "title": "Screws",
@@ -1730,7 +1730,24 @@
         },
         "stand": {
           "title": "Stand",
-          "detail": "15° tilt, 2 magnets"
+          "detail": "15° tilt, open sole, 2 magnets"
+        }
+      },
+      "files": {
+        "button": "3D files",
+        "title": "Parts to print",
+        "white": "White PLA",
+        "black": "Black PLA",
+        "assembly": "Full assembly",
+        "parts": {
+          "facade": "Front",
+          "frame": "Screen frame",
+          "keyLeft": "Left key dot",
+          "keyRight": "Right key dot",
+          "pad": "NFC pad",
+          "chassis": "Chassis",
+          "cover": "Back cover",
+          "stand": "Stand"
         }
       },
       "demo": {
