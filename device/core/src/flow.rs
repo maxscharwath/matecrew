@@ -771,7 +771,9 @@ impl Flow {
         let name = badge.name.clone();
         let screen = menu_screen(state, &name, None);
         self.stage = Stage::Menu { uid: uid.clone(), name, until: cx.now_ms + MENU_MS };
-        vec![beep(Beep::Badge), show(screen), Effect::FetchAvatar { uid }]
+        // The picture is asked for first: the site answers while the panel draws the menu (about
+        // 2 s for a new screen), instead of after it.
+        vec![beep(Beep::Badge), Effect::FetchAvatar { uid }, show(screen)]
     }
 
     /// The menu's left key: the picker, which needs items and the clock (a take is dated).
@@ -982,9 +984,9 @@ mod tests {
         show(Screen::Menu { name: "Alex".into(), left: "Prendre".into(), right: right.into(), avatar: None })
     }
 
-    /// What Alex's badge does on the main screen: the menu, and the picture asked for.
+    /// What Alex's badge does on the main screen: the picture asked for, then the menu.
     fn opened(right: &str) -> [Effect; 3] {
-        [beep(Beep::Badge), menu(right), Effect::FetchAvatar { uid: UID.into() }]
+        [beep(Beep::Badge), Effect::FetchAvatar { uid: UID.into() }, menu(right)]
     }
 
     /// Alex badges on the main screen at `at`, then presses `side` on the menu.
@@ -1131,7 +1133,7 @@ mod tests {
         let mut other = state();
         other.badges.push(Badge { uid: "04B1B2C3D4E5F6".into(), name: "Sam".into(), items: vec![] });
         let effects = flow.handle(badge("04B1B2C3D4E5F6"), cx(&other, 300));
-        assert!(matches!(&effects[1], Effect::Show { screen: Screen::Menu { name, .. } } if name == "Sam"), "{effects:?}");
+        assert!(matches!(&effects[2], Effect::Show { screen: Screen::Menu { name, .. } } if name == "Sam"), "{effects:?}");
         // After a key, the badge counts even if it never left the reader.
         let mut flow = Flow::default();
         badge_then(&mut flow, &s, Side::Left, 0);
