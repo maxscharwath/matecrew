@@ -110,8 +110,13 @@ fn previews() -> Value {
     let served = avatar("served");
     all.add("served", "The site served the session: the runner's avatar", |d| served_screen(d, "Alex", 9, served.as_deref()));
     all.add("served-no-avatar", "Served by someone without an avatar", |d| served_screen(d, "Alex", 9, None));
-    all.add("setup", "First start: join the setup Wi-Fi", |d| {
-        setup_screen(d, &SetupInfo { ap_ssid: "matecrew-setup-50E4", ap_password: "k7m2xq9pab", portal_url: "http://192.168.71.1", bluetooth: "matecrew-50E4 · 482913" })
+    let setup = SetupInfo { ap_ssid: "matecrew-setup-50E4", ap_password: "k7m2xq9pab", portal_url: "http://192.168.71.1", bluetooth: "matecrew-50E4 · 482913", missing: "", later: false };
+    all.add("setup", "First start: join the setup Wi-Fi", |d| setup_screen(d, &setup));
+    all.add("setup-missing", "Not linked yet, none of the networks kept answers", |d| {
+        setup_screen(d, &SetupInfo { missing: "OWT-Office, OWT-Guest", ..setup })
+    });
+    all.add("setup-later", "Linked, none of the networks kept answers: add one, or later", |d| {
+        setup_screen(d, &SetupInfo { missing: "OWT-Office, OWT-Guest", later: true, ..setup })
     });
     all.add("link", "Waiting for an admin to approve the code", |d| {
         link_screen(d, &LinkInfo { code: "QFH7-FXRT", url: "matecrew.vercel.app/link", url_with_code: "https://matecrew.vercel.app/link?code=QFH7-FXRT", bluetooth: "matecrew-50E4 · 482913" })
@@ -252,6 +257,7 @@ fn previews() -> Value {
     for (name, from) in [
         ("stock-en", "stock"),
         ("setup-en", "setup"),
+        ("setup-later-en", "setup-later"),
         ("pick-en", "pick"),
         ("account-en", "account"),
         ("account-site-error-en", "account-site-error"),

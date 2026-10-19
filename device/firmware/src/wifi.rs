@@ -2,51 +2,83 @@
 
 use anyhow::{bail, Context, Result};
 use esp_idf_svc::wifi::{
-    AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi,
+    AccessPointConfiguration, AccessPointInfo, AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi,
 };
 
-use crate::store::WifiCredentials;
+use matecrew_core::networks::{Network, Networks};
 
 pub type Wifi = BlockingWifi<EspWifi<'static>>;
 
 /// An access point by its channel and BSSID: joined without scanning every channel first.
 pub type AccessPoint = (u8, [u8; 6]);
 
-/// Joins the office network. `known`: the access point joined before a deep sleep, tried first
-/// (no scan, half a second sooner); a scan of every channel if it does not answer.
-pub fn connect(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
+/// Joins one of the networks kept, and says which. `known`: the access point joined before a
+/// deep sleep, tried first with the network joined last (no scan, half a second sooner). Then a
+/// scan: the networks kept that it hears, strongest first (`Networks::candidates`).
+pub fn connect(wifi: &mut Wifi, networks: &Networks, known: Option<AccessPoint>) -> Result<String> {
+    let last = networks.last().context("no network kept")?;
     if known.is_some() {
-        configure(wifi, creds, known)?;
+        configure(wifi, last, known)?;
         wifi.start()?;
-        if wifi.connect().and_then(|()| wifi.wait_netif_up()).is_ok() {
-            return Ok(());
+        if join(wifi) {
+            return Ok(last.ssid.clone());
         }
         log::warn!("wifi: the last access point did not answer, scanning");
         let _ = wifi.disconnect();
     }
-    configure(wifi, creds, None)?;
+    configure(wifi, last, None)?;
     wifi.start()?;
-    let joined = wifi.connect().and_then(|()| wifi.wait_netif_up());
-    if joined.is_err() {
-        log_signal(wifi, &creds.ssid);
+    let heard = match wifi.scan() {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("wifi: scan failed: {e:#}");
+            Vec::new()
+        }
+    };
+    let names: Vec<(String, i8)> = heard.iter().map(|ap| (ap.ssid.to_string(), ap.signal_strength)).collect();
+    // A browser nearby offers them when it adds a network (`ble.rs`).
+    crate::ble::set_networks(strongest_first(heard.clone()));
+    for network in networks.candidates(&names) {
+        // The strongest access point of the network, on its channel: no second scan.
+        let ap = heard
+            .iter()
+            .filter(|ap| ap.ssid.as_str() == network.ssid)
+            .max_by_key(|ap| ap.signal_strength)
+            .map(|ap| (ap.channel, ap.bssid, ap.signal_strength));
+        match ap {
+            Some((channel, _, rssi)) => log::info!("wifi: joining {} on channel {channel} at {rssi} dBm", network.ssid),
+            None => log::info!("wifi: joining {}, not heard (hidden?)", network.ssid),
+        }
+        configure(wifi, network, ap.map(|(channel, bssid, _)| (channel, bssid)))?;
+        if join(wifi) {
+            return Ok(network.ssid.clone());
+        }
+        log::warn!("wifi: {} did not let the terminal in", network.ssid);
+        let _ = wifi.disconnect();
     }
-    Ok(joined?)
+    log::warn!("wifi: none of {} answers; {} networks heard", networks.names(), heard.len());
+    bail!("none of the {} networks kept answers", networks.len())
 }
 
-/// Starts joining without waiting: a key woke the terminal, which answers it first. A later sync
-/// finds the network up (`reconnect`), or joins again with a scan.
-pub fn start_joining(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
-    configure(wifi, creds, known)?;
+fn join(wifi: &mut Wifi) -> bool {
+    wifi.connect().and_then(|()| wifi.wait_netif_up()).is_ok()
+}
+
+/// Starts joining the network joined last without waiting: a key woke the terminal, which
+/// answers it first. A later sync finds the network up (`reconnect`), or tries the others.
+pub fn start_joining(wifi: &mut Wifi, networks: &Networks, known: Option<AccessPoint>) -> Result<String> {
+    let last = networks.last().context("no network kept")?;
+    configure(wifi, last, known)?;
     wifi.start()?;
     wifi.wifi_mut().connect()?;
-    Ok(())
+    Ok(last.ssid.clone())
 }
 
-fn configure(wifi: &mut Wifi, creds: &WifiCredentials, known: Option<AccessPoint>) -> Result<()> {
+fn configure(wifi: &mut Wifi, network: &Network, known: Option<AccessPoint>) -> Result<()> {
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: creds.ssid.as_str().try_into().ok().context("SSID too long")?,
-        password: creds.password.as_str().try_into().ok().context("password too long")?,
-        auth_method: if creds.password.is_empty() { AuthMethod::None } else { AuthMethod::WPA2Personal },
+        ssid: network.ssid.as_str().try_into().ok().context("SSID too long")?,
+        password: network.password.as_str().try_into().ok().context("password too long")?,
+        auth_method: if network.password.is_empty() { AuthMethod::None } else { AuthMethod::WPA2Personal },
         bssid: known.map(|(_, bssid)| bssid),
         channel: known.map(|(channel, _)| channel),
         ..Default::default()
@@ -62,38 +94,32 @@ pub fn access_point() -> Option<AccessPoint> {
     ok.then_some((info.primary, info.bssid))
 }
 
-/// How strongly `ssid` is heard, in the log: why joining it failed (a weak signal is usually
-/// the antenna, unplugged from the XIAO).
-fn log_signal(wifi: &mut Wifi, ssid: &str) {
-    let _ = wifi.disconnect();
-    match wifi.scan() {
-        Ok(found) => match found.iter().filter(|ap| ap.ssid.as_str() == ssid).map(|ap| (ap.signal_strength, ap.channel)).max() {
-            Some((rssi, channel)) => log::warn!("wifi: {ssid} heard at {rssi} dBm on channel {channel}"),
-            None => log::warn!("wifi: {ssid} not heard, {} other networks are", found.len()),
-        },
-        Err(e) => log::warn!("wifi: scan failed: {e:#}"),
-    }
-}
-
-/// Joins again if the access point dropped the connection since the last sync, without waiting:
-/// the attempt goes on in the driver while the terminal answers its keys, and a later sync finds
+/// The network joined, if the connection is up. Otherwise joins again without waiting: the
+/// attempt goes on in the driver while the terminal answers its keys, and a later sync finds
 /// the network up. Waiting held the keys for about 20 s at every try on a weak signal.
-pub fn reconnect(wifi: &mut Wifi) -> Result<()> {
+///
+/// Each try goes to the next network kept: a terminal moved to another office, or whose
+/// office network is down, finds the other one within a few tries.
+pub fn reconnect(wifi: &mut Wifi, networks: &Networks) -> Result<String> {
+    let Configuration::Client(client) = wifi.get_configuration()? else {
+        bail!("Wi-Fi not in station mode");
+    };
+    let ssid = client.ssid.as_str().to_owned();
     if wifi.is_connected()? {
         if !wifi.is_up()? {
             bail!("Wi-Fi joined, waiting for an address");
         }
-        return Ok(());
+        return Ok(ssid);
     }
-    log::info!("Wi-Fi lost, joining again in the background");
-    // The access point of the last wake may be gone (`start_joining`): any of the network's now.
-    if let Configuration::Client(mut client) = wifi.get_configuration()? {
-        if client.bssid.is_some() {
-            (client.bssid, client.channel) = (None, None);
-            crate::sleep::keep_access_point(None);
-            wifi.set_configuration(&Configuration::Client(client))?;
-        }
-    }
+    // The access point of the last wake may be gone (`start_joining`): first any of the same
+    // network's, then the next network.
+    let next = if client.bssid.is_some() { networks.get(&ssid) } else { networks.after(&ssid) };
+    let next = next.or(networks.last()).context("no network kept")?;
+    log::info!("Wi-Fi lost, joining {} again in the background", next.ssid);
+    crate::sleep::keep_access_point(None);
+    // A connection still under way refuses a new configuration (ESP_ERR_WIFI_STATE).
+    let _ = wifi.wifi_mut().disconnect();
+    configure(wifi, next, None)?;
     if let Err(e) = wifi.wifi_mut().connect() {
         log::warn!("Wi-Fi: {e}");
     }
@@ -130,15 +156,7 @@ pub fn start_setup_access_point(wifi: &mut Wifi) -> Result<SetupAccessPoint> {
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
     wifi.start()?;
-    let mut found = wifi.scan().unwrap_or_default();
-    found.sort_by_key(|ap| -i16::from(ap.signal_strength));
-    let mut networks: Vec<String> = Vec::new();
-    for ap in found {
-        let name = ap.ssid.to_string();
-        if !name.is_empty() && !networks.contains(&name) {
-            networks.push(name);
-        }
-    }
+    let networks = strongest_first(wifi.scan().unwrap_or_default());
     wifi.stop()?;
 
     wifi.set_configuration(&Configuration::AccessPoint(AccessPointConfiguration {
@@ -154,6 +172,19 @@ pub fn start_setup_access_point(wifi: &mut Wifi) -> Result<SetupAccessPoint> {
     let ip = wifi.wifi().ap_netif().get_ip_info()?.ip;
     announce_dns(wifi, ip)?;
     Ok(SetupAccessPoint { ssid, password, ip: ip.to_string(), networks })
+}
+
+/// The names heard, strongest first, once each.
+fn strongest_first(mut found: Vec<AccessPointInfo>) -> Vec<String> {
+    found.sort_by_key(|ap| -i16::from(ap.signal_strength));
+    let mut networks: Vec<String> = Vec::new();
+    for ap in found {
+        let name = ap.ssid.to_string();
+        if !name.is_empty() && !networks.contains(&name) {
+            networks.push(name);
+        }
+    }
+    networks
 }
 
 /// Tells phones over DHCP to use the device as DNS server, so their

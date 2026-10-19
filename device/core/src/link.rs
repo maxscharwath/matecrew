@@ -10,6 +10,7 @@
 //! Protocol 1:
 //! - `INFO` (read): JSON [`Info`], at most [`ATTRIBUTE_MAX`] bytes.
 //! - `SETUP` (write, authenticated): JSON [`Setup`]; accepted while the terminal is not linked.
+//!   Once linked, a Wi-Fi alone (no site, no secret) is accepted: it joins the networks kept.
 //! - `CONTROL` (write, authenticated): JSON [`Control`].
 //! - `EVENTS` (notify, authenticated links only): JSON [`Event`], one per notification.
 //! - `OTA` (write, authenticated): binary [`OtaFrame`]s.
@@ -18,7 +19,8 @@
 //!   [`ScreenRequest`]s: the whole screen again, a tap on it.
 //!
 //! `SCREEN` came later within protocol 1: an addition an older peer does not misread (an older
-//! terminal has no such characteristic).
+//! terminal has no such characteristic). So did several networks: `Info::wifi_open` and
+//! `Info::saved`, which an older terminal leaves out, and `Control::ForgetWifi`.
 
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +54,8 @@ pub struct Info {
     pub linked: bool,
     /// `SETUP` is accepted (not linked).
     pub setup_open: bool,
+    /// `SETUP` takes a Wi-Fi alone, linked or not, and `Control::ForgetWifi` works.
+    pub wifi_open: bool,
     pub site: Option<String>,
     pub uptime: u64,
     /// Free internal heap, in bytes.
@@ -59,6 +63,8 @@ pub struct Info {
     pub wifi: Option<Wifi>,
     /// Networks it heard, strongest first; as many as fit in the attribute.
     pub networks: Vec<String>,
+    /// Networks it keeps (names only), most recently joined first.
+    pub saved: Vec<String>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]
@@ -76,15 +82,18 @@ pub struct Wifi {
 }
 
 impl Info {
-    /// JSON within [`ATTRIBUTE_MAX`]: networks are dropped from the weakest until it fits.
+    /// JSON within [`ATTRIBUTE_MAX`]: networks heard are dropped from the weakest until it
+    /// fits, then networks kept from the oldest.
     pub fn encode(&self) -> Vec<u8> {
         let mut info = self.clone();
         loop {
             let bytes = serde_json::to_vec(&info).unwrap_or_default();
-            if bytes.len() <= ATTRIBUTE_MAX || info.networks.is_empty() {
+            if bytes.len() <= ATTRIBUTE_MAX || (info.networks.is_empty() && info.saved.is_empty()) {
                 return bytes;
             }
-            info.networks.pop();
+            if info.networks.pop().is_none() {
+                info.saved.pop();
+            }
         }
     }
 }
@@ -136,6 +145,8 @@ pub enum Control {
     /// Deep sleep now: the link closes with it.
     Sleep,
     Notify { text: String },
+    /// Forget one of the networks kept.
+    ForgetWifi { ssid: String },
 }
 
 impl Control {
@@ -143,6 +154,7 @@ impl Control {
         let control: Self = serde_json::from_slice(bytes).map_err(|_| LinkError::Malformed)?;
         match &control {
             Self::Notify { text } if text.is_empty() || text.len() > 256 => Err(LinkError::Invalid("text")),
+            Self::ForgetWifi { ssid } if ssid.is_empty() || ssid.len() > 32 => Err(LinkError::Invalid("wifi")),
             _ => Ok(control),
         }
     }
@@ -456,6 +468,8 @@ mod tests {
         assert_eq!(Control::parse(br#"{"cmd":"tap","x":3,"y":4}"#).unwrap(), Control::Tap { x: 3, y: 4 });
         assert_eq!(Control::parse(br#"{"cmd":"notify","text":""}"#), Err(LinkError::Invalid("text")));
         assert_eq!(Control::parse(br#"{"cmd":"format"}"#), Err(LinkError::Malformed));
+        assert_eq!(Control::parse(br#"{"cmd":"forgetWifi","ssid":"Office"}"#).unwrap(), Control::ForgetWifi { ssid: "Office".into() });
+        assert_eq!(Control::parse(br#"{"cmd":"forgetWifi","ssid":""}"#), Err(LinkError::Invalid("wifi")));
     }
 
     #[test]
@@ -483,6 +497,11 @@ mod tests {
         let back: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(back["protocol"], 1);
         assert!(!back["networks"].as_array().unwrap().is_empty());
+        let saved = (0..5).map(|i| format!("{i}").repeat(32)).collect::<Vec<_>>();
+        let info = Info { protocol: PROTOCOL, networks: vec!["x".repeat(32); 20], saved: saved.clone(), ..Default::default() };
+        let back: serde_json::Value = serde_json::from_slice(&info.encode()).unwrap();
+        assert!(info.encode().len() <= ATTRIBUTE_MAX);
+        assert_eq!(back["saved"].as_array().unwrap().len(), 5, "networks heard go before those kept");
     }
 
     /// What a browser does with the updates (`device/sdk/link`), for the tests.

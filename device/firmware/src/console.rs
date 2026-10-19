@@ -49,6 +49,9 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
                 Some(Command::BothKeys) => Input::Flow(Event::BothKeys),
                 Some(Command::Site(url)) => Input::MoveSite(url),
                 Some(Command::Sleep(seconds)) => Input::Doze(seconds.map(|s| std::time::Duration::from_secs(s.into()))),
+                Some(Command::Networks) => Input::Networks,
+                Some(Command::WifiSetup) => Input::WifiSetup,
+                Some(Command::WifiForget(ssid)) => Input::ForgetNetwork(ssid),
                 Some(Command::Help) => {
                     log::info!("console: {}", console::HELP);
                     continue;

@@ -30,7 +30,18 @@ Deux étapes, rien à saisir à part le mot de passe du Wi-Fi.
 1. **Wi-Fi.** Au premier démarrage, l'écran affiche un QR. Le téléphone qui le scanne rejoint un point d'accès protégé par un mot de passe aléatoire, et la page de réglage s'ouvre toute seule : on choisit le Wi-Fi du bureau et on tape son mot de passe. Sous « Site matécrew », l'adresse du site est pré-remplie ; on ne la change que si le bureau a son propre site. L'écran suit chaque étape : connexion au Wi-Fi, connecté, contact du site.
 2. **Liaison.** L'appareil affiche un code court, par exemple `MATE-4F2K`, avec un QR vers `<site>/link?code=MATE-4F2K`. Un admin du bureau ouvre le lien, choisit le bureau, nomme l'appareil et valide. L'appareil reçoit son jeton tout seul, puis affiche « Lié au bureau de Lausanne ».
 
-Le site n'est pas figé dans le firmware : il est gardé en mémoire avec le Wi-Fi, et le jeton ne vaut que pour lui. Si le site ne répond pas pendant 5 minutes, un appareil pas encore lié revient à l'étape 1. `MATECREW_URL` à la compilation ne fait que changer l'adresse proposée.
+Le site n'est pas figé dans le firmware : il est gardé en mémoire avec le Wi-Fi, et le jeton ne vaut que pour lui. Si le site ne répond pas pendant 5 minutes, un appareil pas encore lié revient à l'étape 1, réseaux gardés. `MATECREW_URL` à la compilation ne fait que changer l'adresse proposée.
+
+### Plusieurs Wi-Fi
+
+Le terminal garde jusqu'à 5 réseaux (`core/src/networks.rs`), le dernier rejoint en premier. Ajouter un réseau garde les autres.
+
+- **Au démarrage** : il essaie d'abord le point d'accès du dernier réveil, puis il scanne et essaie les réseaux gardés qu'il entend, du plus fort au plus faible. Un réseau caché est essayé par son nom s'il est le dernier rejoint.
+- **Aucun réseau ne répond** : le QR de configuration revient, avec « Introuvable : » et les noms des réseaux gardés. Le téléphone ajoute un réseau. Sans réponse, le terminal réessaie ses réseaux après 10 minutes. Un terminal lié propose « Plus tard » sur les deux touches et part tout seul après 3 minutes : il fonctionne alors hors ligne, depuis son état en cache. Après un réveil de deep sleep, un terminal lié ne montre pas le QR : il part directement hors ligne.
+- **En marche** : quand le réseau tombe, chaque synchro manquée (toutes les 30 s) essaie le réseau gardé suivant. Le réseau qui répond passe en tête.
+- **Par Bluetooth** (Admin > Appareils > Bluetooth) : sur un terminal lié, la carte « Wi-Fi du terminal » montre les réseaux gardés, ajoute un réseau et en oublie un. Le site et la liaison ne changent pas. Un terminal sans réseau redémarre sur le nouveau ; un terminal en ligne le garde pour plus tard.
+- **Console série** : `wifi` liste les réseaux, `wifi setup` rouvre la configuration sans rien oublier, `wifi forget <ssid>` oublie un réseau.
+- « Oublier le Wi-Fi » depuis la console du site oublie tous les réseaux.
 
 ### Sur le site, dans Admin > Appareils
 

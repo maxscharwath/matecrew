@@ -15,6 +15,7 @@ export {
   decodeInfo,
   encodeCommand,
   encodeProvisioning,
+  encodeForgetWifi,
   imageVersion,
   otaBegin,
   otaChunks,

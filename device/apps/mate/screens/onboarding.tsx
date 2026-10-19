@@ -25,6 +25,8 @@ import {
   Alert,
   AlertDescription,
   type Children,
+  cond,
+  type TextChildren,
 } from "@matecrew/device-ui";
 import { BluetoothIcon, CircleCheckBigIcon, IdCardIcon, InfoIcon, TriangleAlertIcon, WifiIcon } from "@matecrew/device-ui/icons/lucide";
 import { Facts, Frame, Instruction, useT, view } from "./shared";
@@ -50,29 +52,53 @@ function Bluetooth() {
   );
 }
 
+/**
+ * The QR to the settings page and what to do with it. `view.missing`: the networks kept, none of
+ * which answered, named in place of the step; the page adds one and keeps them.
+ */
+function SetupBody({ step, heading, qr }: Readonly<{ step: TextChildren; heading: TextChildren; qr: number }>) {
+  const t = useT();
+  return (
+    <HStack gap={32} align="start" height="fill">
+      <VStack gap={10} align="center">
+        <QrCode value={view("qr")} size={qr}>{t("setup.noCamera", { url: view("portal") })}</QrCode>
+        <Bluetooth />
+      </VStack>
+      <VStack gap={14} width="fill" height="fill">
+        <Label lines={1} fit>{cond(view("missing", ""), t("setup.missing", { networks: view("missing", "") }), step)}</Label>
+        <H2>{heading}</H2>
+        <VStack gap={10}>
+          <Instruction n={1}>{t("setup.scan")}</Instruction>
+          <Instruction n={2}>{t("setup.open")}</Instruction>
+          <Instruction n={3}>{t("setup.choose")}</Instruction>
+        </VStack>
+        <Spacer />
+        <Facts rows={[[t("setup.network"), view("ssid")], [t("setup.key"), view("password")]]} />
+      </VStack>
+    </HStack>
+  );
+}
+
 /** Step 1: the phone joins the terminal's own Wi-Fi and opens its settings page. */
 export function setup() {
   const t = useT();
   return (
     <Onboarding step={0}>
-      <HStack gap={32} align="start" height="fill">
-        <VStack gap={10} align="center">
-          <QrCode value={view("qr")} size={280}>{t("setup.noCamera", { url: view("portal") })}</QrCode>
-          <Bluetooth />
-        </VStack>
-        <VStack gap={14} width="fill" height="fill">
-          <Label>{t("setup.step")}</Label>
-          <H2>{t("setup.heading")}</H2>
-          <VStack gap={10}>
-            <Instruction n={1}>{t("setup.scan")}</Instruction>
-            <Instruction n={2}>{t("setup.open")}</Instruction>
-            <Instruction n={3}>{t("setup.choose")}</Instruction>
-          </VStack>
-          <Spacer />
-          <Facts rows={[[t("setup.network"), view("ssid")], [t("setup.key"), view("password")]]} />
-        </VStack>
-      </HStack>
+      <SetupBody step={t("setup.step")} heading={t("setup.heading")} qr={280} />
     </Onboarding>
+  );
+}
+
+/**
+ * A linked terminal hears none of its networks: the same page adds one. Either key goes on
+ * without it, offline from what the terminal kept (badges still count).
+ */
+export function setupLater() {
+  const t = useT();
+  return (
+    <Frame title={t("setup.wifiTitle")} keys left={t("setup.later")} right={t("setup.later")}>
+      <SetupBody step={t("setup.wifiTitle")} heading={t("setup.addHeading")} qr={224} />
+    </Frame>
   );
 }
 

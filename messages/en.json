@@ -1246,7 +1246,20 @@
       "elsewhere": "This terminal is linked to another office or site ({site}).",
       "openConsole": "Open its console"
     },
-    "actionsHint": "Straight to the terminal over Bluetooth."
+    "actionsHint": "Straight to the terminal over Bluetooth.",
+    "wifi": {
+      "title": "Terminal Wi-Fi",
+      "description": "The terminal keeps up to 5 networks. When its own stops answering, it tries the others, starting with the one joined last.",
+      "current": "Connected",
+      "last": "Joined last",
+      "forget": "Forget",
+      "none": "No network kept: the terminal opens its Wi-Fi setup at its next start.",
+      "addTitle": "Add a network",
+      "add": "Add this network",
+      "added": "{network} added. The terminal tries it when its current network stops answering.",
+      "addedJoining": "{network} added. The terminal restarts to join it.",
+      "forgotten": "{network} forgotten."
+    }
   },
   "devices": {
     "keys": {

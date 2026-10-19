@@ -22,17 +22,33 @@ use std::sync::{
 use std::thread;
 
 use crate::api::normalize_site;
-use crate::store::{Setup, WifiCredentials};
+use crate::store::Setup;
+use matecrew_core::networks::Network;
 
 const PAGE: &str = include_str!("portal.html");
 const SAVED: &str = include_str!("portal-saved.html");
 
-pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Setup>) -> Result<EspHttpServer<'static>> {
+/// The portal while it runs: dropped, its page and its DNS stop (a linked terminal goes on
+/// without a new network).
+pub struct Portal {
+    _server: EspHttpServer<'static>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Portal {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Setup>) -> Result<Portal> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
     thread::Builder::new()
         .name("dns".into())
         .stack_size(6 * 1024)
         .spawn(move || {
-            if let Err(e) = answer_dns(ip) {
+            if let Err(e) = answer_dns(ip, &stopped) {
                 log::error!("captive DNS stopped: {e}");
             }
         })?;
@@ -67,7 +83,7 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Se
         let other = field(&fields, "other").unwrap_or("").trim();
         let ssid = if other.is_empty() { field(&fields, "ssid").unwrap_or("") } else { other };
         let password = field(&fields, "password").unwrap_or("");
-        let creds = WifiCredentials { ssid: ssid.to_owned(), password: password.to_owned() };
+        let creds = Network { ssid: ssid.to_owned(), password: password.to_owned() };
         // A site that is not a web address keeps the one proposed.
         let chosen = field(&fields, "site").and_then(normalize_site).unwrap_or_else(|| site.clone());
         let page = SAVED
@@ -127,15 +143,20 @@ pub fn serve(ip: Ipv4Addr, networks: Vec<String>, site: String, saved: Sender<Se
         })?;
     }
 
-    Ok(server)
+    Ok(Portal { _server: server, stop })
 }
 
-/// Answers A questions with `ip` and every other type with no record.
-fn answer_dns(ip: Ipv4Addr) -> Result<()> {
+/// Answers A questions with `ip` and every other type with no record, until `stop`.
+fn answer_dns(ip: Ipv4Addr, stop: &AtomicBool) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:53")?;
+    socket.set_read_timeout(Some(std::time::Duration::from_secs(1)))?;
     let mut buf = [0u8; 512];
-    loop {
-        let (len, from) = socket.recv_from(&mut buf)?;
+    while !stop.load(Ordering::Relaxed) {
+        let (len, from) = match socket.recv_from(&mut buf) {
+            Ok(received) => received,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(e) => return Err(e.into()),
+        };
         if let Some((name, qtype)) = question(&buf[..len]) {
             log::info!("portal: dns {name} type {qtype} from {}", from.ip());
         }
@@ -143,4 +164,5 @@ fn answer_dns(ip: Ipv4Addr) -> Result<()> {
             socket.send_to(&reply, from)?;
         }
     }
+    Ok(())
 }

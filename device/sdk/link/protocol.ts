@@ -33,12 +33,19 @@ export type DeviceInfo = {
   linked: boolean;
   /** `provision` is accepted. */
   setupOpen: boolean;
+  /**
+   * `provision` takes a Wi-Fi alone even once linked (added to the networks kept), and
+   * `forgetWifi` works. Missing on firmware older than several networks.
+   */
+  wifiOpen?: boolean;
   site: string | null;
   uptime: number;
   heap: number;
   wifi: { ssid: string; rssi: number | null } | null;
   /** Networks the device heard, strongest first. */
   networks: string[];
+  /** Networks the device keeps (names only), most recently joined first. Missing on older firmware. */
+  saved?: string[];
 };
 
 export type Provisioning = {
@@ -133,6 +140,13 @@ export function encodeCommand(command: RemoteCommand): Result<Uint8Array> {
     return fail("invalid", "a tap is within 200 × 120");
   }
   return ok(encoder.encode(JSON.stringify(command)));
+}
+
+/** Asks the device to forget one of the networks it keeps (a `CONTROL` write, not a remote command). */
+export function encodeForgetWifi(ssid: string): Result<Uint8Array> {
+  const bytes = encoder.encode(ssid).length;
+  if (bytes === 0 || bytes > 32) return fail("invalid", "the network name must be 1 to 32 bytes");
+  return ok(encoder.encode(JSON.stringify({ cmd: "forgetWifi", ssid })));
 }
 
 export function decodeInfo(bytes: Uint8Array): Result<DeviceInfo> {

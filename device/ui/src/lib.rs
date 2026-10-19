@@ -129,12 +129,17 @@ fn message<D: DrawTarget<Color = BinaryColor>>(
     )
 }
 /// What the setup screen shows so a phone can join the setup access point.
+#[derive(Clone, Copy)]
 pub struct SetupInfo<'a> {
     pub ap_ssid: &'a str,
     pub ap_password: &'a str,
     pub portal_url: &'a str,
     /// "matecrew-50E4 · 123456": the Bluetooth name and passkey, empty without Bluetooth.
     pub bluetooth: &'a str,
+    /// The networks kept, none of which answered ("OWT-Office, Maison"); empty on a first setup.
+    pub missing: &'a str,
+    /// A linked terminal: either key goes on without a new network.
+    pub later: bool,
 }
 
 /// Shown while the terminal waits for an admin to approve its code on the site.
@@ -178,8 +183,8 @@ pub fn setup_screen<D: DrawTarget<Color = BinaryColor>>(
 ) -> Result<(), D::Error> {
     render(
         d,
-        "setup",
-        json!({"title":"Mise en service","ssid":info.ap_ssid,"password":info.ap_password,"portal":info.portal_url.trim_start_matches("http://"),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password),"bluetooth":info.bluetooth}),
+        if info.later { "setupLater" } else { "setup" },
+        json!({"title":"Mise en service","ssid":info.ap_ssid,"password":info.ap_password,"portal":info.portal_url.trim_start_matches("http://"),"qr":wifi_qr_payload(info.ap_ssid,info.ap_password),"bluetooth":info.bluetooth,"missing":info.missing}),
     )
 }
 pub fn link_screen<D: DrawTarget<Color = BinaryColor>>(

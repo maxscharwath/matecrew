@@ -11,6 +11,7 @@ import {
   decodeEvent,
   decodeInfo,
   encodeCommand,
+  encodeForgetWifi,
   encodeProvisioning,
   fail,
   imageVersion,
@@ -303,12 +304,21 @@ export class BleDevice implements DeviceRemote {
 
   /**
    * Sends Wi-Fi, site and secret in one write; the device saves them and restarts onto the
-   * network. Refused once the device is linked (`info().setupOpen`).
+   * network. Once the device is linked (`info().setupOpen` false), a Wi-Fi alone is still
+   * accepted where `info().wifiOpen`: it joins the networks kept, and the device restarts onto
+   * it only if it is on no network.
    */
   async provision(setup: Provisioning): Promise<Result<void>> {
     const bytes = encodeProvisioning(setup);
     if (!bytes.ok) return bytes;
     return this.write("setup", bytes.value);
+  }
+
+  /** Forgets one of the networks the device keeps (`info().saved`); refused if it keeps no such network. */
+  async forgetWifi(ssid: string): Promise<Result<void>> {
+    const bytes = encodeForgetWifi(ssid);
+    if (!bytes.ok) return bytes;
+    return this.write("control", bytes.value);
   }
 
   /** A tap goes to the screen it touches (`hasScreen`), every other command to `CONTROL`. */

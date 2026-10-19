@@ -1246,7 +1246,20 @@
       "elsewhere": "Ce terminal est relié à un autre bureau ou site ({site}).",
       "openConsole": "Ouvrir sa console"
     },
-    "actionsHint": "Directement au terminal, par Bluetooth."
+    "actionsHint": "Directement au terminal, par Bluetooth.",
+    "wifi": {
+      "title": "Wi-Fi du terminal",
+      "description": "Le terminal garde jusqu'à 5 réseaux. Quand le sien ne répond plus, il essaie les autres, en commençant par le dernier rejoint.",
+      "current": "Connecté",
+      "last": "Dernier rejoint",
+      "forget": "Oublier",
+      "none": "Aucun réseau gardé : le terminal ouvrira sa configuration Wi-Fi au prochain démarrage.",
+      "addTitle": "Ajouter un réseau",
+      "add": "Ajouter ce réseau",
+      "added": "{network} ajouté. Le terminal l'essaiera quand son réseau actuel ne répondra plus.",
+      "addedJoining": "{network} ajouté. Le terminal redémarre pour le rejoindre.",
+      "forgotten": "{network} oublié."
+    }
   },
   "devices": {
     "keys": {

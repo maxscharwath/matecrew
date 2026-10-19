@@ -8,6 +8,7 @@ import {
   decodeInfo,
   encodeCommand,
   encodeProvisioning,
+  encodeForgetWifi,
   imageVersion,
   otaBegin,
   otaChunks,
@@ -60,6 +61,10 @@ test("provisioning and commands are checked as the device will", () => {
   assert.ok(key.ok && new TextDecoder().decode(key.value) === '{"cmd":"key","side":"left"}');
   assert.equal(encodeCommand({ cmd: "badge", uid: "not hex!" }).ok, false);
   assert.equal(encodeCommand({ cmd: "notify", text: "" }).ok, false);
+
+  const forget = encodeForgetWifi("OWT Guest");
+  assert.ok(forget.ok && new TextDecoder().decode(forget.value) === '{"cmd":"forgetWifi","ssid":"OWT Guest"}');
+  assert.equal(encodeForgetWifi("").ok, false);
 });
 
 test("info and events decode, and a newer protocol is reported", () => {

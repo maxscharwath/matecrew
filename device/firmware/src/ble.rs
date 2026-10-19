@@ -8,7 +8,8 @@
 //! while a pairing waits for it): the browser's system dialog asks for it, so only someone who
 //! can read the panel gets in. Events, the log among
 //! them, go to such a link only. Nothing is bonded: pairing again each session keeps the 24 KB
-//! of NVS for settings. `SETUP` is refused once the terminal is linked to a site.
+//! of NVS for settings. Once the terminal is linked to a site, `SETUP` only adds a Wi-Fi to the
+//! networks kept: the site and the link stay.
 //!
 //! A firmware update writes the other app slot as frames arrive (sequential erase, so no write
 //! waits seconds), checks size, CRC-32 per frame and SHA-256 at the end, then restarts on it;
@@ -33,6 +34,7 @@ use esp_idf_svc::{
 };
 use matecrew_core::{
     action::Action,
+    networks::Network,
     link::{self, Control, Event, OtaFrame, ScreenRequest, Setup},
 };
 use sha2::{Digest, Sha256};
@@ -48,7 +50,7 @@ use std::{
 };
 
 use crate::{
-    store::{Store, WifiCredentials},
+    store::Store,
     Input,
 };
 
@@ -277,21 +279,22 @@ pub fn start(store: Store, inputs: Sender<Input>, identity: Identity) -> Result<
         setup.lock().on_write(move |args| {
             MTU.store(args.desc().mtu(), Ordering::Relaxed);
             let done = apply_setup(&store, args.recv_data());
-            if done.is_ok() {
+            match done {
                 // Time for the answer to reach the browser, then start over on the new Wi-Fi.
-                restart_in(Duration::from_millis(1500));
-            } else {
-                args.reject_with_error_code(REFUSED);
+                Ok(true) => restart_in(Duration::from_millis(1500)),
+                Ok(false) => {}
+                Err(_) => args.reject_with_error_code(REFUSED),
             }
-            answer("setup", done);
+            answer("setup", done.map(|_| ()));
         });
     }
 
     let taps = inputs.clone();
     let control = service.lock().create_characteristic(uuid(link::CONTROL), changes);
+    let settings = store.clone();
     control.lock().on_write(move |args| {
         MTU.store(args.desc().mtu(), Ordering::Relaxed);
-        let done = apply_control(&inputs, args.recv_data());
+        let done = apply_control(&inputs, &settings, args.recv_data());
         if done.is_err() {
             args.reject_with_error_code(REFUSED);
         }
@@ -480,13 +483,13 @@ fn restart_in(delay: Duration) {
 }
 
 fn info_value(identity: &Identity, store: &Mutex<Store>, started: Instant) -> Vec<u8> {
-    let (linked, site, wifi) = match store.lock() {
+    let (linked, site, saved) = match store.lock() {
         Ok(store) => (
             store.token().ok().flatten().is_some(),
             store.site().ok().flatten(),
-            store.wifi().ok().flatten(),
+            store.networks().unwrap_or_default(),
         ),
-        Err(_) => (false, None, None),
+        Err(_) => (false, None, Default::default()),
     };
     // SAFETY: plain heap statistics query.
     let heap = unsafe { sys::heap_caps_get_free_size(sys::MALLOC_CAP_INTERNAL | sys::MALLOC_CAP_8BIT) } as u32;
@@ -497,42 +500,62 @@ fn info_value(identity: &Identity, store: &Mutex<Store>, started: Instant) -> Ve
         firmware: identity.firmware.clone(),
         linked,
         setup_open: !linked,
+        wifi_open: true,
         site,
         uptime: started.elapsed().as_secs(),
         heap,
-        wifi: wifi.map(|creds| link::Wifi { ssid: creds.ssid, rssi: crate::wifi::rssi() }),
+        wifi: saved.last().map(|network| link::Wifi { ssid: network.ssid.clone(), rssi: crate::wifi::rssi() }),
         networks: NETWORKS.lock().map(|n| n.clone()).unwrap_or_default(),
+        saved: saved.iter().map(|network| network.ssid.clone()).collect(),
     }
     .encode()
 }
 
-/// Wi-Fi, site and link secret from a browser, while the terminal is not linked.
-fn apply_setup(store: &Mutex<Store>, bytes: &[u8]) -> Result<(), String> {
+/// Wi-Fi, site and link secret from a browser, while the terminal is not linked; a Wi-Fi alone
+/// once it is, added to the networks kept. Whether to restart onto it: not while the terminal
+/// is on a network already (it tries the new one when that one goes).
+fn apply_setup(store: &Mutex<Store>, bytes: &[u8]) -> Result<bool, String> {
     let setup = Setup::parse(bytes).map_err(|e| e.to_string())?;
     let store = store.lock().map_err(|_| "busy".to_owned())?;
     if store.token().map_err(|e| e.to_string())?.is_some() {
-        return Err("already linked to a site".into());
+        if setup.site.is_some() || setup.secret.is_some() {
+            return Err("already linked to a site".into());
+        }
+        store
+            .remember_wifi(Network { ssid: setup.ssid.clone(), password: setup.password })
+            .map_err(|e| e.to_string())?;
+        let online = crate::wifi::rssi().is_some();
+        log::info!("ble: Wi-Fi {:?} added{}", setup.ssid, if online { "" } else { ", joining it" });
+        return Ok(!online);
     }
     let site = match &setup.site {
         Some(site) => Some(crate::api::normalize_site(site).ok_or("not a web address")?),
         None => None,
     };
     let save = || -> anyhow::Result<()> {
-        store.set_wifi(&WifiCredentials { ssid: setup.ssid.clone(), password: setup.password.clone() })?;
+        store.remember_wifi(Network { ssid: setup.ssid.clone(), password: setup.password.clone() })?;
         if let Some(site) = &site {
             store.set_site(site)?;
         }
         store.set_link_secret(setup.secret.as_deref())?;
-        store.set_wifi_failures(0)?;
         Ok(())
     };
     save().map_err(|e| e.to_string())?;
     log::info!("ble: Wi-Fi {:?} saved{}", setup.ssid, if setup.secret.is_some() { " with a pre-approved link" } else { "" });
-    Ok(())
+    Ok(true)
 }
 
-fn apply_control(inputs: &Sender<Input>, bytes: &[u8]) -> Result<(), String> {
+fn apply_control(inputs: &Sender<Input>, store: &Mutex<Store>, bytes: &[u8]) -> Result<(), String> {
     let control = Control::parse(bytes).map_err(|e| e.to_string())?;
+    if let Control::ForgetWifi { ssid } = &control {
+        let store = store.lock().map_err(|_| "busy".to_owned())?;
+        if !store.forget_wifi(ssid).map_err(|e| e.to_string())? {
+            return Err("no such network kept".into());
+        }
+        // The one in use stays joined until it goes; with none left, setup opens at the next start.
+        log::info!("ble: Wi-Fi {ssid:?} forgotten");
+        return Ok(());
+    }
     let action = Action::from_control(control).ok_or("not a badge UID, or a tap off the screen")?;
     // Restarted from here, after the answer is out (`Done`), rather than by the main loop.
     if action == Action::Restart {

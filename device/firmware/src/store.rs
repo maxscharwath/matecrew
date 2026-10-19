@@ -5,16 +5,15 @@ use crate::cache::{self, Cache};
 use anyhow::Result;
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
 use matecrew_cache::Error;
-use matecrew_core::{contract::DeviceState, queue::Queue};
-
-pub struct WifiCredentials {
-    pub ssid: String,
-    pub password: String,
-}
+use matecrew_core::{
+    contract::DeviceState,
+    networks::{Network, Networks},
+    queue::Queue,
+};
 
 /// What the setup page sends: the office Wi-Fi and the site to link to.
 pub struct Setup {
-    pub wifi: WifiCredentials,
+    pub wifi: Network,
     pub site: String,
 }
 
@@ -78,33 +77,73 @@ impl Store {
         }
         kept(self.1.put(&cache::SHOWCASE, &data))
     }
-    pub fn wifi(&self) -> Result<Option<WifiCredentials>> {
-        Ok(match (self.get("wifi_ssid")?, self.get("wifi_pass")?) {
-            (Some(ssid), Some(password)) => Some(WifiCredentials { ssid, password }),
-            _ => None,
-        })
+    /// The networks kept, most recently joined first. A terminal set up before there were
+    /// several keeps its one network (`wifi_ssid`, `wifi_pass`), moved to the list here.
+    pub fn networks(&self) -> Result<Networks> {
+        if let Some(bytes) = self.get_blob("wifi_nets")? {
+            return Ok(Networks::from_bytes(&bytes));
+        }
+        let mut networks = Networks::default();
+        if let (Some(ssid), Some(password)) = (self.get("wifi_ssid")?, self.get("wifi_pass")?) {
+            networks.remember(Network { ssid, password });
+            self.set_networks(&networks)?;
+            log::info!("wifi: the one network kept is now the first of a list");
+        }
+        Ok(networks)
     }
 
-    pub fn set_wifi(&self, creds: &WifiCredentials) -> Result<()> {
-        self.set("wifi_ssid", &creds.ssid)?;
-        self.set("wifi_pass", &creds.password)?;
-        self.0.set_u8("wifi_fail", 0)?;
+    fn set_networks(&self, networks: &Networks) -> Result<()> {
+        self.0.set_blob("wifi_nets", &networks.to_bytes())?;
+        for key in ["wifi_ssid", "wifi_pass", "wifi_fail"] {
+            self.0.remove(key)?;
+        }
         Ok(())
     }
 
+    /// Adds a network set up from a phone or a browser, first; the others stay.
+    pub fn remember_wifi(&self, network: Network) -> Result<()> {
+        let mut networks = self.networks()?;
+        networks.remember(network);
+        self.set_networks(&networks)
+    }
+
+    /// The network just joined goes first: the next wake tries it before the others. Written
+    /// only when it changes, not at every sync.
+    pub fn joined_wifi(&self, ssid: &str) -> Result<()> {
+        let mut networks = self.networks()?;
+        if networks.joined(ssid) {
+            self.set_networks(&networks)?;
+        }
+        Ok(())
+    }
+
+    /// Forgets one network; false when it was not kept.
+    pub fn forget_wifi(&self, ssid: &str) -> Result<bool> {
+        let mut networks = self.networks()?;
+        let forgotten = networks.forget(ssid);
+        if forgotten {
+            self.set_networks(&networks)?;
+        }
+        Ok(forgotten)
+    }
+
+    /// Forgets every network: setup opens at the next start.
     pub fn clear_wifi(&self) -> Result<()> {
-        self.0.remove("wifi_ssid")?;
-        self.0.remove("wifi_pass")?;
+        self.set_networks(&Networks::default())
+    }
+
+    /// Setup asked for the next start (`wifi setup` on the serial console), networks kept.
+    pub fn wifi_setup_asked(&self) -> Result<bool> {
+        Ok(self.0.get_u8("wifi_setup")?.unwrap_or(0) != 0)
+    }
+
+    pub fn ask_wifi_setup(&self, asked: bool) -> Result<()> {
+        if asked {
+            self.0.set_u8("wifi_setup", 1)?;
+        } else {
+            self.0.remove("wifi_setup")?;
+        }
         Ok(())
-    }
-
-    /// Counts failed Wi-Fi connections in a row; reset by a success.
-    pub fn wifi_failures(&self) -> Result<u8> {
-        Ok(self.0.get_u8("wifi_fail")?.unwrap_or(0))
-    }
-
-    pub fn set_wifi_failures(&self, count: u8) -> Result<()> {
-        Ok(self.0.set_u8("wifi_fail", count)?)
     }
 
     /// The bearer token the site issued when the device was linked.

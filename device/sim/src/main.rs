@@ -37,6 +37,8 @@ fn main() {
         ap_password: "k7m2xq9pab",
         portal_url: "http://192.168.71.1",
         bluetooth: "matecrew-50E4 · 482913",
+        missing: "",
+        later: false,
     };
 
     let mut dashboard =

@@ -19,16 +19,26 @@ pub enum Command {
     /// Deep sleep now, as after two idle minutes, even with the USB cable in; with a number, the
     /// timer wakes it after that many seconds at the latest. To try sleep and wake at the desk.
     Sleep(Option<u32>),
+    /// `wifi`: the networks kept, in the log.
+    Networks,
+    /// `wifi setup`: the setup access point, to add a network; the others stay.
+    WifiSetup,
+    /// `wifi forget <ssid>`: forgets one network (its name may hold spaces).
+    WifiForget(String),
     Help,
 }
 
-pub const HELP: &str = "l: touche gauche, r: touche droite, both: les deux (a propos), b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>, site <url>, sleep [s]: veille (reveil apres s secondes)";
+pub const HELP: &str = "l: touche gauche, r: touche droite, both: les deux (a propos), b <uid>: badge, s: synchro, app mate|showcase, tap <x> <y>, notify <message>, site <url>, sleep [s]: veille (reveil apres s secondes), wifi: reseaux gardes, wifi setup: ajouter un reseau, wifi forget <ssid>";
 
 pub fn parse(line: &str) -> Option<Command> {
     if let Some(message) = line.trim().strip_prefix("notify ") {
         let message = message.trim();
         return (!message.is_empty() && message.len() <= 256)
             .then(|| Command::Notify(message.into()));
+    }
+    if let Some(ssid) = line.trim().strip_prefix("wifi forget ") {
+        let ssid = ssid.trim();
+        return (!ssid.is_empty() && ssid.len() <= 32).then(|| Command::WifiForget(ssid.into()));
     }
     let mut words = line.split_whitespace();
     let command = match words.next()?.to_ascii_lowercase().as_str() {
@@ -62,6 +72,11 @@ pub fn parse(line: &str) -> Option<Command> {
             }
             Command::Tap(x, y)
         }
+        "wifi" => match words.next() {
+            None => Command::Networks,
+            Some("setup") => Command::WifiSetup,
+            Some(_) => return None,
+        },
         "h" | "help" | "?" => Command::Help,
         _ => return None,
     };
@@ -97,6 +112,15 @@ mod tests {
         assert_eq!(parse("sleep 60"), Some(Command::Sleep(Some(60))));
         assert_eq!(parse("sleep 0"), None);
         assert_eq!(parse("sleep soon"), None);
+    }
+
+    #[test]
+    fn reads_the_wifi_commands() {
+        assert_eq!(parse("wifi"), Some(Command::Networks));
+        assert_eq!(parse("wifi setup"), Some(Command::WifiSetup));
+        assert_eq!(parse("wifi forget OWT Guest \r"), Some(Command::WifiForget("OWT Guest".into())));
+        assert_eq!(parse("wifi forget "), None);
+        assert_eq!(parse("wifi reset"), None);
     }
 
     #[test]

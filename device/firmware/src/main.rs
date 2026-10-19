@@ -62,8 +62,10 @@ const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// When (UTC) and from which commit this firmware was built (build.rs), for the about page.
 const FIRMWARE_BUILD: &str = env!("MATECREW_BUILD");
 const FIRMWARE_COMMIT: &str = env!("MATECREW_COMMIT");
-/// Failed connections in a row before the device forgets the network and opens setup again.
-const MAX_WIFI_FAILURES: u8 = 3;
+/// How long setup waits for a new network when some are kept already, before trying those again:
+/// a linked terminal goes on from its cached state sooner (badges still count offline).
+const SETUP_WAIT: Duration = Duration::from_secs(10 * 60);
+const SETUP_WAIT_LINKED: Duration = Duration::from_secs(3 * 60);
 /// Awake without the relay (a console watches over the long poll, a computer on USB), the
 /// terminal syncs on a timer.
 const SYNC_EVERY: Duration = Duration::from_secs(120);
@@ -92,6 +94,12 @@ pub enum Input {
     ForgetWifi,
     /// The serial console's `site <url>`: the same site at a new address.
     MoveSite(String),
+    /// The serial console's `wifi setup`: setup at the next start, the networks kept stay.
+    WifiSetup,
+    /// The serial console's `wifi forget <ssid>`.
+    ForgetNetwork(String),
+    /// The serial console's `wifi`: the networks kept, in the log.
+    Networks,
     /// An app's data or image, from the fetching thread.
     Fetched(fetch::Fetched),
     /// A badge put on the reader while nobody asked for one.
@@ -277,59 +285,58 @@ fn app() -> Result<()> {
         .site()?
         .unwrap_or_else(|| api::DEFAULT_SITE.to_owned());
     log::info!("site {site}");
-    let Some(creds) = store.wifi()? else {
-        setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth)?;
-        reset::restart();
-    };
-
+    let networks = store.networks()?;
     let linked = store.token()?.is_some();
-    boot.start("wifiJoining", &[("ssid", &creds.ssid)]);
+    if networks.is_empty() || store.wifi_setup_asked()? {
+        store.ask_wifi_setup(false)?;
+        setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth, &inputs, &networks, false, linked)?;
+        reset::restart();
+    }
+
+    let last = networks.last().map(|network| network.ssid.clone()).unwrap_or_default();
+    boot.start("wifiJoining", &[("ssid", &last)]);
     if !warm {
         screen.show(|d| boot.render(d))?;
     }
     if !linked {
         // Setting up: say what happens at each step.
-        screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
+        screen.show(|d| ui::connecting_screen(d, &last))?;
     }
     let joined = if warm && matches!(wake, sleep::Wake::Key(_)) {
         // A key woke it: the key first, the network meanwhile.
-        wifi::start_joining(&mut wifi, &creds, sleep::access_point())
+        wifi::start_joining(&mut wifi, &networks, sleep::access_point())
     } else {
-        wifi::connect(&mut wifi, &creds, sleep::access_point())
+        wifi::connect(&mut wifi, &networks, sleep::access_point())
     };
-    if let Err(e) = joined {
-        if linked {
+    let ssid = match joined {
+        Ok(ssid) => {
+            store.joined_wifi(&ssid)?;
+            match wifi::rssi() {
+                Some(rssi) => boot.done("wifiJoined", &[("ssid", &ssid), ("rssi", &rssi.to_string())]),
+                None => boot.done("wifiJoinedQuiet", &[("ssid", &ssid)]),
+            }
+            ssid
+        }
+        Err(e) if linked && warm => {
             // A paired terminal must still boot and accept badges using cached state.
             log::warn!("Wi-Fi unavailable, starting from cached state: {e:#}");
             boot.fail("wifiOffline", &[]);
-        } else {
-            let failures = store.wifi_failures()?.saturating_add(1);
-            log::warn!(
-                "Wi-Fi {:?} failed ({failures}/{MAX_WIFI_FAILURES}): {e:#}",
-                creds.ssid
-            );
-            let detail = if failures >= MAX_WIFI_FAILURES {
-                store.clear_wifi()?;
-                store.set_wifi_failures(0)?;
-                "Le réseau est oublié : le QR de configuration revient dans une minute.".to_owned()
-            } else {
-                store.set_wifi_failures(failures)?;
-                format!(
-                    "« {} » ne répond pas. Nouvel essai dans une minute.",
-                    creds.ssid
-                )
-            };
-            screen.show(|d| ui::error_screen(d, "Wi-Fi introuvable", &detail))?;
-            thread::sleep(Duration::from_secs(60));
-            reset::restart();
+            last
         }
-    } else {
-        store.set_wifi_failures(0)?;
-        match wifi::rssi() {
-            Some(rssi) => boot.done("wifiJoined", &[("ssid", &creds.ssid), ("rssi", &rssi.to_string())]),
-            None => boot.done("wifiJoinedQuiet", &[("ssid", &creds.ssid)]),
+        Err(e) => {
+            // None of the networks kept answers (moved to another office, a new password):
+            // setup, to add one. Those kept stay, and are tried again if nobody adds one.
+            log::warn!("Wi-Fi: {e:#}; setup opens");
+            boot.fail("wifiOffline", &[]);
+            if !setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth, &inputs, &networks, true, linked)? || !linked {
+                reset::restart();
+            }
+            // Later: from the cached state, offline; the syncs try the networks kept in turn.
+            log::info!("setup left for later, starting from cached state");
+            wifi.stop()?;
+            wifi::start_joining(&mut wifi, &networks, None)?
         }
-    }
+    };
     // The clock from the internet (NTP, every hour), whether the site answers or not: the status
     // bar and the takes' times are right after a restart. A sync with the site sets it too.
     let sntp = cores::on(Core::Core0, || {
@@ -343,7 +350,7 @@ fn app() -> Result<()> {
     .ok();
     if !linked {
         let ip = wifi.wifi().sta_netif().get_ip_info()?.ip.to_string();
-        screen.show(|d| ui::connected_screen(d, &creds.ssid, &ip))?;
+        screen.show(|d| ui::connected_screen(d, &ssid, &ip))?;
     }
 
     let token = match store.token()? {
@@ -423,7 +430,7 @@ fn app() -> Result<()> {
         last_flow_screen: None,
         started: Instant::now(),
         wifi,
-        ssid: creds.ssid.clone(),
+        ssid,
         rssi: None,
         supply,
         slot: ota::running_slot(),
@@ -510,13 +517,31 @@ fn link_with_secret(api: &Api, store: &Store, screen: &mut Panel, secret: &str) 
     Ok(None)
 }
 
-/// Opens the setup access point, shows its QR and waits for the phone to send the office Wi-Fi.
-/// A browser can send it over Bluetooth meanwhile (`ble.rs` saves it and restarts).
-fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str, bluetooth: &str) -> Result<()> {
+/// Opens the setup access point, shows its QR and waits for the phone to send a Wi-Fi, added to
+/// the networks kept. A browser can send it over Bluetooth meanwhile (`ble.rs` saves it and
+/// restarts). `missing`: none of the networks kept answered, which the screen names.
+///
+/// With networks kept, setup does not wait forever: they are tried again after `SETUP_WAIT`. A
+/// linked terminal also goes on at a key ("Plus tard"), from its cached state. False when it
+/// ends so, without a new network.
+#[allow(clippy::too_many_arguments)]
+fn setup_wifi(
+    wifi: &mut Wifi,
+    screen: &mut Panel,
+    store: &Store,
+    site: &str,
+    bluetooth: &str,
+    inputs: &Receiver<Input>,
+    kept: &matecrew_core::networks::Networks,
+    missing: bool,
+    linked: bool,
+) -> Result<bool> {
     let ap = wifi::start_setup_access_point(wifi)?;
     log::info!("setup access point {} at {}", ap.ssid, ap.ip);
     ble::set_networks(ap.networks.clone());
     let portal_url = format!("http://{}", ap.ip);
+    let later = linked && !kept.is_empty();
+    let missing = if missing { kept.names() } else { String::new() };
     screen.show(|d| {
         ui::setup_screen(
             d,
@@ -525,22 +550,45 @@ fn setup_wifi(wifi: &mut Wifi, screen: &mut Panel, store: &Store, site: &str, bl
                 ap_password: &ap.password,
                 portal_url: &portal_url,
                 bluetooth,
+                missing: &missing,
+                later,
             },
         )
     })?;
 
     let (saved, received) = mpsc::channel();
-    let _server = portal::serve(ap.ip.parse()?, ap.networks, site.to_owned(), saved)?;
-    let setup: store::Setup = received.recv()?;
+    let _portal = portal::serve(ap.ip.parse()?, ap.networks, site.to_owned(), saved)?;
+    let until = (!kept.is_empty()).then(|| Instant::now() + if linked { SETUP_WAIT_LINKED } else { SETUP_WAIT });
+    let setup = loop {
+        match received.recv_timeout(Duration::from_millis(200)) {
+            Ok(setup) => break setup,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => bail!("the setup page stopped"),
+        }
+        // Keys and console lines while setup shows: a key is "later" when it can be.
+        while let Ok(input) = inputs.try_recv() {
+            if later && matches!(input, Input::Pressed(_) | Input::Flow(Event::Key { .. })) {
+                return Ok(false);
+            }
+        }
+        if until.is_some_and(|until| Instant::now() >= until) {
+            log::info!("nobody added a network: trying {} again", kept.names());
+            return Ok(false);
+        }
+    };
     let creds = setup.wifi;
     log::info!("Wi-Fi {:?} and site {} saved", creds.ssid, setup.site);
-    store.set_wifi(&creds)?;
-    store.set_site(&setup.site)?;
+    let ssid = creds.ssid.clone();
+    store.remember_wifi(creds)?;
+    // A linked terminal keeps its site: the page only adds a network.
+    if !linked {
+        store.set_site(&setup.site)?;
+    }
     // Drawing takes a few seconds: time enough for the confirmation page to
     // reach the phone before the access point goes away. The panel keeps the
     // message through the restart.
-    screen.show(|d| ui::connecting_screen(d, &creds.ssid))?;
-    Ok(())
+    screen.show(|d| ui::connecting_screen(d, &ssid))?;
+    Ok(true)
 }
 
 /// Shows a code until an office admin approves it on the site, then keeps the token. A link the
@@ -561,8 +609,8 @@ fn link(wifi: &Wifi, screen: &mut Panel, store: &Store, site: &str, bluetooth: &
                 failures += 1;
                 log::warn!("link start failed ({failures}/{MAX_SITE_FAILURES}): {e:#}");
                 if failures >= MAX_SITE_FAILURES {
-                    // Maybe the wrong site or the wrong network: set up again.
-                    store.clear_wifi()?;
+                    // Maybe the wrong site or the wrong network: set up again, networks kept.
+                    store.ask_wifi_setup(true)?;
                     let detail = format!(
                         "{} ne répond toujours pas. Retour à la configuration du Wi-Fi.",
                         api::host(site)
@@ -893,6 +941,22 @@ impl Terminal {
                     log::info!("site moved to {url}, restarting");
                     self.store.move_site(&url)?;
                     reset::restart();
+                }
+                Next::Input(Input::WifiSetup) => {
+                    log::info!("Wi-Fi setup asked, restarting into it");
+                    self.store.ask_wifi_setup(true)?;
+                    reset::restart();
+                }
+                Next::Input(Input::ForgetNetwork(ssid)) => {
+                    // The one in use stays joined until it goes.
+                    match self.store.forget_wifi(&ssid)? {
+                        true => log::info!("Wi-Fi {ssid:?} forgotten"),
+                        false => log::warn!("Wi-Fi {ssid:?} is not kept"),
+                    }
+                }
+                Next::Input(Input::Networks) => {
+                    let networks = self.store.networks()?;
+                    log::info!("Wi-Fi: {} kept, joined last first: {}", networks.len(), networks.names());
                 }
             }
         }
@@ -1483,8 +1547,13 @@ impl Terminal {
 
     /// Sends queued takes and badges, then fetches state and draws its screen data.
     fn try_sync(&mut self, redraw: bool) -> Result<()> {
-        wifi::reconnect(&mut self.wifi)?;
+        let ssid = wifi::reconnect(&mut self.wifi, &self.store.networks()?)?;
         sleep::keep_access_point(wifi::access_point());
+        if ssid != self.ssid {
+            // Another network kept answered: tried first from now on.
+            self.store.joined_wifi(&ssid)?;
+            self.ssid = ssid;
+        }
         if !self.queue.takes().is_empty() {
             let reply = self.api.takes(self.queue.takes())?;
             for rejected in &reply.rejected {

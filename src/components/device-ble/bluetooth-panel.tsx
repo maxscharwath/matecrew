@@ -23,6 +23,7 @@ import {
   MonitorOff,
   RefreshCw,
   Timer,
+  Trash2,
   Wifi,
   WifiPen,
 } from "lucide-react";
@@ -58,6 +59,8 @@ import { signalBand } from "@/components/device-console/readings";
 const LINK_POLL_MS = 3000;
 const LINK_WAIT_MS = 10 * 60 * 1000;
 const OTHER = "__other__";
+/** `WifiCard`'s busy state while a network is being added (otherwise the SSID being forgotten). */
+const ADDING = "__adding__";
 
 type SetupState =
   | { step: "form" }
@@ -190,6 +193,9 @@ function Panel({ officeId, badges }: Readonly<{ officeId: string; badges: BadgeO
         />
       )}
       {info && !info.setupOpen && !settingUp && <LinkedNotice officeId={officeId} info={info} />}
+      {device && info?.wifiOpen && !info.setupOpen && !settingUp && (
+        <WifiCard device={device} info={info} onChanged={session.refresh} onError={report} />
+      )}
       {device && <Debugger device={device} badges={badges} session={session} onError={report} />}
     </div>
   );
@@ -351,18 +357,25 @@ function SetupCard({
   );
 }
 
+/** `link`: Wi-Fi and the terminal's name, to set it up and link it; `wifi`: a network alone. */
 function SetupForm({
   networks,
   sending,
   onSubmit,
+  variant = "link",
 }: Readonly<{
   networks: string[];
   sending: boolean;
   onSubmit: (values: { ssid: string; password: string; name: string }) => void;
+  variant?: "link" | "wifi";
 }>) {
   const t = useTranslations("deviceBluetooth.setup");
+  const tWifi = useTranslations("deviceBluetooth.wifi");
   const [network, setNetwork] = useState(networks[0] ?? OTHER);
   const [reveal, setReveal] = useState(false);
+
+  const icon = variant === "link" ? <Link2 /> : <Wifi />;
+  const label = variant === "link" ? t("submit") : tWifi("add");
 
   function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -434,14 +447,16 @@ function SetupForm({
           </div>
           <p className="text-xs text-muted-foreground">{t("passwordHint")}</p>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="ble-name">{t("name")}</Label>
-          <Input id="ble-name" name="name" maxLength={60} placeholder={t("defaultName")} />
-        </div>
+        {variant === "link" && (
+          <div className="space-y-2">
+            <Label htmlFor="ble-name">{t("name")}</Label>
+            <Input id="ble-name" name="name" maxLength={60} placeholder={t("defaultName")} />
+          </div>
+        )}
       </div>
       <Button type="submit" disabled={sending}>
-        {sending ? <LoaderCircle className="animate-spin" /> : <Link2 />}
-        {sending ? t("sending") : t("submit")}
+        {sending ? <LoaderCircle className="animate-spin" /> : icon}
+        {sending ? t("sending") : label}
       </Button>
     </form>
   );
@@ -507,6 +522,85 @@ function StepIcon({ state }: Readonly<{ state: StepState }>) {
       </span>
     );
   return <span className={base} />;
+}
+
+/**
+ * A linked terminal's networks: those it keeps, the one it is on, and another to add. When its
+ * network goes, it tries the others in turn; with none left, setup opens at its next start.
+ */
+function WifiCard({
+  device,
+  info,
+  onChanged,
+  onError,
+}: Readonly<{ device: BleDevice; info: DeviceInfo; onChanged: () => void; onError: (error: LinkError) => void }>) {
+  const t = useTranslations("deviceBluetooth.wifi");
+  // ADDING, or the network being forgotten.
+  const [busy, setBusy] = useState<string | null>(null);
+  // A new key empties the form once a network is added.
+  const [added, setAdded] = useState(0);
+  const saved = info.saved ?? [];
+  // The terminal reports the signal only while it is on the network it joined last.
+  const current = info.wifi?.rssi == null ? null : info.wifi.ssid;
+
+  const add = async (values: { ssid: string; password: string }) => {
+    setBusy(ADDING);
+    const sent = await device.provision({ ssid: values.ssid, password: values.password });
+    setBusy(null);
+    if (!sent.ok) return onError(sent.error);
+    // On no network, the terminal restarts onto the new one (Bluetooth drops meanwhile).
+    toast.success(t(current ? "added" : "addedJoining", { network: values.ssid }));
+    setAdded((count) => count + 1);
+    onChanged();
+  };
+
+  const forget = async (ssid: string) => {
+    setBusy(ssid);
+    const done = await device.forgetWifi(ssid);
+    setBusy(null);
+    if (!done.ok) return onError(done.error);
+    toast.success(t("forgotten", { network: ssid }));
+    onChanged();
+  };
+
+  return (
+    <section className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
+      <div className="space-y-1">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <Wifi className="size-5 text-muted-foreground" /> {t("title")}
+        </h2>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
+      </div>
+      {saved.length > 0 ? (
+        <ul className="divide-y rounded-lg border">
+          {saved.map((ssid, index) => (
+            <li key={ssid} className="flex min-w-0 items-center gap-3 px-3 py-2 text-sm">
+              <Wifi className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{ssid}</span>
+              {ssid === current && <Badge variant="secondary">{t("current")}</Badge>}
+              {index === 0 && ssid !== current && <Badge variant="outline">{t("last")}</Badge>}
+              <Button size="sm" variant="ghost" className="ml-auto" disabled={busy !== null} onClick={() => void forget(ssid)}>
+                {busy === ssid ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+                {t("forget")}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("none")}</p>
+      )}
+      <div className="space-y-3 border-t pt-5">
+        <h3 className="text-sm font-medium">{t("addTitle")}</h3>
+        <SetupForm
+          key={added}
+          variant="wifi"
+          networks={info.networks.filter((name) => !saved.includes(name))}
+          sending={busy === ADDING}
+          onSubmit={(values) => void add(values)}
+        />
+      </div>
+    </section>
+  );
 }
 
 /** A terminal that already has a site: its console here when it is this office's. */
