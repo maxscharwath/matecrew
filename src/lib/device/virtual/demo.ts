@@ -126,7 +126,7 @@ export class DemoTerminal {
   static async start(strings: DemoStrings, locale: string, office?: DemoOffice): Promise<DemoTerminal> {
     const wasm = await DeviceWasm.load();
     if (!office) return new DemoTerminal(wasm, demoState(strings, locale), null);
-    const badges = [{ uid: DEMO_UID, name: office.account.name }];
+    const badges = [{ uid: DEMO_UID, name: office.account.name, items: [] }];
     return new DemoTerminal(wasm, { ...office.state, badges }, office.account);
   }
 

@@ -35,6 +35,8 @@ export function downloadableApp(): (typeof DOWNLOADABLE_APPS)[number] | null {
 const CHART_DAYS = 14;
 /** Items with their own line on the chart: as many as the main screen shows. */
 const CHART_MAX_ITEMS = 6;
+/** Days of consumption, today included, that order each member's picker. */
+const FAVOURITE_DAYS = 30;
 const DAY_MS = 86_400_000;
 
 function wifiBars(rssi: number | null): number | null {
@@ -80,13 +82,14 @@ function base64(bits: Uint8Array): string {
 
 export async function buildDeviceState(device: AuthenticatedDevice): Promise<DeviceState> {
   const { office } = device;
-  const [items, badges, labels] = await Promise.all([
+  const [items, badges, labels, favourites] = await Promise.all([
     loadItems(office.id),
     prisma.badge.findMany({
       where: { officeId: office.id, userId: { not: null } },
-      select: { uid: true, user: { select: { name: true } } },
+      select: { uid: true, userId: true, user: { select: { name: true } } },
     }),
     keyLabels(device),
+    favouriteItems(office.id, office.timezone),
   ]);
   const release = await prisma.firmwareRelease.findFirst({ orderBy: { createdAt: "desc" } });
   const relayUrl = platform.relay.terminalUrl();
@@ -105,7 +108,7 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
       picture: base64(withOpacity(itemImage(i.terminalImage, i.terminalPhoto))),
     })),
     // Names only: what each one drank stays on the site (`/api/device/account`).
-    badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "" })),
+    badges: badges.map((b) => ({ uid: b.uid, name: b.user?.name ?? "", items: (b.userId && favourites.get(b.userId)) || [] })),
     syncTimes: await syncTimes(office.id, office.timezone, parseSyncTimes(device.syncTimes)),
     serverTime: new Date().toISOString(),
     screen: await buildScreenData(device, { items, labels }),
@@ -124,6 +127,31 @@ export async function buildDeviceState(device: AuthenticatedDevice): Promise<Dev
     sounds: parseSounds(device.sounds),
     clock: deviceClock(device),
   };
+}
+
+/**
+ * Per member, the ids of the items they drank over the last FAVOURITE_DAYS days (cancelled takes
+ * left out), most first; a tie goes to the one drunk last. The terminal's picker shows them first.
+ */
+async function favouriteItems(officeId: string, timezone: string): Promise<Map<string, string[]>> {
+  const today = getDateInTimezone(new Date(), timezone);
+  const totals = await prisma.consumptionEntry.groupBy({
+    by: ["userId", "itemId"],
+    where: { officeId, cancelledAt: null, date: { gt: new Date(today.getTime() - FAVOURITE_DAYS * DAY_MS) } },
+    _sum: { qty: true },
+    _max: { date: true },
+  });
+  const byUser = new Map<string, typeof totals>();
+  for (const total of totals) byUser.set(total.userId, [...(byUser.get(total.userId) ?? []), total]);
+  return new Map(
+    [...byUser].map(([userId, own]) => [
+      userId,
+      own
+        .filter((t) => (t._sum.qty ?? 0) > 0)
+        .sort((a, b) => (b._sum.qty ?? 0) - (a._sum.qty ?? 0) || (b._max.date?.getTime() ?? 0) - (a._max.date?.getTime() ?? 0))
+        .map((t) => t.itemId),
+    ]),
+  );
 }
 
 /** Its office hours now, in its time zone; closed, when its night screen says it wakes up. */

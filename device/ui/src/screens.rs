@@ -18,6 +18,7 @@ pub const DEFINITIONS: &[(&str, &[u8])] = &[
     ("leave", include_bytes!("../../dist/mate/leave.dui")),
     ("link", include_bytes!("../../dist/mate/link.dui")),
     ("linked", include_bytes!("../../dist/mate/linked.dui")),
+    ("menu", include_bytes!("../../dist/mate/menu.dui")),
     ("pick", include_bytes!("../../dist/mate/pick.dui")),
     ("preparation", include_bytes!("../../dist/mate/preparation.dui")),
     ("purchases", include_bytes!("../../dist/mate/purchases.dui")),

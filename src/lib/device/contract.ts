@@ -115,7 +115,17 @@ export const deviceState = z.object({
    * Assigned badges only: an UID missing here is unknown to the terminal. What the holder drank
    * and bought stays on the site: "Mon compte" asks for it live (`POST /api/device/account`).
    */
-  badges: z.array(z.object({ uid: z.string(), name: z.string() })),
+  badges: z.array(
+    z.object({
+      uid: z.string(),
+      name: z.string(),
+      /**
+       * Ids of the items the holder drank over the last 30 days, most first: the picker shows them
+       * before the others, which keep the order of `items`.
+       */
+      items: z.array(z.string()).default([]),
+    }),
+  ),
   syncTimes: z.array(z.string()),
   serverTime: z.string(),
   screen: deviceScreen,

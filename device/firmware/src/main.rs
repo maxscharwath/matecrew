@@ -846,7 +846,15 @@ impl Terminal {
                     stepped?
                 }
                 Next::Input(Input::Flow(event)) => {
-                    self.touch();
+                    // The reader polls whenever the terminal is awake: a badge left on it does not
+                    // keep the terminal from its deep sleep.
+                    let heeded = match &event {
+                        Event::Badge { uid } => self.flow.heeds_badge(uid, self.started.elapsed().as_millis() as u64),
+                        _ => true,
+                    };
+                    if heeded {
+                        self.touch();
+                    }
                     // Keys from the console or the site beep here, the touch keys did already.
                     self.pressed = matches!(event, Event::Key { .. } | Event::LongKey { .. } | Event::BothKeys);
                     if self.pressed {

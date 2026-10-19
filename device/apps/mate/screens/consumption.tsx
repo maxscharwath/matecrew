@@ -20,10 +20,11 @@ import {
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, ClockIcon, DoorOpenIcon } from "@matecrew/device-ui/icons/lucide";
 import { BadgeOverReader } from "../art";
-import { Frame, PageDots, Picture, useT, view } from "./shared";
+import { Avatar, Frame, PageDots, Picture, useT, view } from "./shared";
 
 /**
- * After a key: the badge goes on the reader, right under the middle of the screen. With
+ * After a key (it also wakes the terminal, whose reader sleeps with it): the badge goes on the
+ * reader, right under the middle of the screen, then the menu opens. With
  * `account`, the right key: the badge whose account to show (`account.tsx`); with `purchases`,
  * it was held: the badge whose purchases to list (`purchases.tsx`).
  */
@@ -46,6 +47,21 @@ export function badge() {
       <BadgeOverReader width={240} height={200} />
       <H1 align="center">{t("badge.heading")}</H1>
       <Lead align="center">{cond(purchases, t("purchases.badgeHint"), cond(account, t("account.badgeHint"), t("badge.hint")))}</Lead>
+    </Frame>
+  );
+}
+
+/**
+ * After a badge: whose it is, and what each key does. The left key takes (the picker), the right
+ * one shows the account, or serves the preparation ("Servi").
+ */
+export function menu() {
+  const t = useT();
+  return (
+    <Frame title={view("title")} keys primary="left" align="center" justify="center" gap={16}>
+      <Avatar person="person" size={128} />
+      <H1 align="center">{t("menu.heading", { name: view("first") })}</H1>
+      <Lead align="center">{t("menu.hint")}</Lead>
     </Frame>
   );
 }

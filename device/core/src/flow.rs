@@ -2,18 +2,26 @@
 //! (the firmware, or the virtual device in device/web) feeds it events with
 //! the time, and carries out the effects it returns.
 //!
-//! Left key → "put your badge" → badge → the items one by one: the left key
-//! shows the next one, the right key takes it. After the last item comes a
-//! card to leave without taking anything.
-//! Right key → "put your badge" → badge → "Mon compte", live from the site
-//! (`Effect::FetchAccount`; the runtime answers with an event): what the person
-//! drank today, this week and this month, the last days and the latest
-//! purchases. Its left key lists the purchases, a page at a time: the left key
-//! moves through them, the right key cancels the selected one after a second
-//! press (`Effect::CancelPurchase`), the way back returns to the account.
-//! While the site shows a preparation, the right key is "Servi": a runner's
-//! badge closes the session (`Effect::Serve`).
-//! Right key held → "put your badge" → badge → the purchases straight away.
+//! The badge comes first. On the main screen the reader listens: a badge opens
+//! the menu with the person's name (`Screen::Menu`). A key on the main screen
+//! (it also wakes the terminal from deep sleep, where the reader is off) asks
+//! for the badge, then opens the same menu. A badge still lying on the reader
+//! after a take or an account does not open it again (`BADGE_GONE_MS`).
+//! Menu, left key → the items one by one, what the person drank most over the
+//! last 30 days first (`DeviceState::items_for`): the left key shows the next
+//! one, the right key takes it. After the last item comes a card to leave
+//! without taking anything.
+//! Menu, right key → "Mon compte", live from the site (`Effect::FetchAccount`;
+//! the runtime answers with an event): what the person drank today, this week
+//! and this month, the last days and the latest purchases. Its left key lists
+//! the purchases, a page at a time: the left key moves through them, the right
+//! key cancels the selected one after a second press (`Effect::CancelPurchase`),
+//! the way back returns to the account. Held, the right key of the menu goes
+//! straight to the purchases.
+//! While the site shows a preparation, the menu's right key is "Servi": it
+//! closes the session for the person who badged (`Effect::Serve`).
+//! Right key held on the main screen → "put your badge" → badge → the
+//! purchases straight away.
 //! Either key held on the purchases leaves them for the main screen, a
 //! cancellation waiting for its second press included. A long press anywhere
 //! else is the short one.
@@ -29,8 +37,13 @@ use serde::{Deserialize, Serialize};
 
 /// How long the terminal waits for a badge after a key press.
 pub const BADGE_WAIT_MS: u64 = 15_000;
+/// How long the menu after a badge stays without a key press.
+pub const MENU_MS: u64 = 15_000;
 /// How long the item picker stays without a key press.
 pub const PICK_MS: u64 = 20_000;
+/// A badge read again within this time of its last read is the same one still on the reader:
+/// it does not open the menu again from the main screen. The runtime reads every 150 ms or so.
+pub const BADGE_GONE_MS: u64 = 2_000;
 /// How long a message (taken, unknown badge, not ready) stays before the main screen returns.
 pub const MESSAGE_MS: u64 = 5_000;
 /// How long the account and the purchases stay without a key press.
@@ -183,8 +196,17 @@ pub struct Context<'a> {
 pub enum Screen {
     /// The site's screen. After a queued take, the runtime fetches it again.
     Main,
+    /// After a key: the badge goes on the reader. `key_label` is the screen's title (the
+    /// office's name since the badge comes first).
     Badge {
         key_label: String,
+    },
+    /// After a badge: whose it is, and what each key does (`left` takes, `right` shows the
+    /// account, or serves the preparation).
+    Menu {
+        name: String,
+        left: String,
+        right: String,
     },
     /// One item to take; `picture` as in `contract::Item`.
     Pick {
@@ -333,6 +355,8 @@ pub enum Effect {
 #[derive(Debug, Default)]
 pub struct Flow {
     stage: Stage,
+    /// The last badge read, and when (`now_ms`): see `BADGE_GONE_MS`.
+    seen: Option<(String, u64)>,
 }
 
 #[derive(Debug, Default)]
@@ -340,7 +364,11 @@ enum Stage {
     #[default]
     Idle,
     AwaitBadge {
-        side: Side,
+        until: u64,
+    },
+    Menu {
+        uid: String,
+        name: String,
         until: u64,
     },
     Pick {
@@ -355,9 +383,8 @@ enum Stage {
     About {
         until: u64,
     },
-    /// `list`: the right key was held, the purchases come first.
+    /// The right key was held on the main screen: the purchases come first.
     AwaitAccountBadge {
-        list: bool,
         until: u64,
     },
     /// Waiting for the site. `list` is the purchase to select once the account arrives, None
@@ -401,16 +428,36 @@ impl Flow {
         matches!(self.stage, Stage::Idle)
     }
 
-    /// The runtime should poll the NFC reader.
+    /// The runtime should poll the NFC reader: whenever it is awake, the about page aside. Where
+    /// no badge is expected, a read only tells that the last one is still on the reader.
     pub fn wants_badge(&self) -> bool {
-        matches!(self.stage, Stage::AwaitBadge { .. } | Stage::AwaitAccountBadge { .. })
+        !matches!(self.stage, Stage::About { .. })
+    }
+
+    /// Whether reading this badge now does something. A badge where none is expected, or the
+    /// same one still on the reader, only tells the flow that it is there: the runtime keeps such
+    /// a read from postponing its deep sleep.
+    pub fn heeds_badge(&self, uid: &str, now_ms: u64) -> bool {
+        match self.stage {
+            Stage::AwaitBadge { .. } | Stage::AwaitAccountBadge { .. } => true,
+            Stage::Idle | Stage::Message { .. } => !self.lingers(uid, now_ms),
+            _ => false,
+        }
+    }
+
+    /// The same badge, read again without a pause: it never left the reader.
+    fn lingers(&self, uid: &str, now_ms: u64) -> bool {
+        self.seen
+            .as_ref()
+            .is_some_and(|(last, at)| last == uid && now_ms.saturating_sub(*at) < BADGE_GONE_MS)
     }
 
     /// When to send a `Tick` at the latest, in `now_ms` time.
     pub fn deadline(&self) -> Option<u64> {
         match self.stage {
             Stage::Idle => None,
-            Stage::AwaitBadge { until, .. }
+            Stage::AwaitBadge { until }
+            | Stage::Menu { until, .. }
             | Stage::Pick { until, .. }
             | Stage::Message { until }
             | Stage::About { until }
@@ -424,12 +471,21 @@ impl Flow {
 
     pub fn handle(&mut self, event: Event, cx: Context) -> Vec<Effect> {
         let expired = self.deadline().is_some_and(|until| cx.now_ms >= until);
-        // A long press is the short one, except the right key's from the main screen and either
-        // key's on the purchases.
+        let lingering = match &event {
+            Event::Badge { uid } => {
+                let again = self.lingers(uid, cx.now_ms);
+                self.seen = Some((uid.clone(), cx.now_ms));
+                again
+            }
+            _ => false,
+        };
+        // A long press is the short one, except the right key's from the main screen and the
+        // menu, and either key's on the purchases.
         let event = match (&self.stage, event) {
             (Stage::Idle | Stage::Message { .. }, Event::LongKey { side: Side::Right }) => {
-                return self.ask_for_account_badge(true, cx);
+                return self.ask_for_account_badge(cx);
             }
+            (Stage::Menu { .. }, event @ Event::LongKey { side: Side::Right }) => event,
             // Out of the list at once, without stepping through it to the way back; nothing is cancelled.
             (Stage::Purchases { .. }, Event::LongKey { .. }) => {
                 self.stage = Stage::Idle;
@@ -448,15 +504,23 @@ impl Flow {
             }
             (Stage::About { .. }, Event::Key { .. }) => vec![beep(Beep::Key), show(Screen::Main)],
 
-            (Stage::Idle | Stage::Message { .. }, Event::Key { side }) => {
-                self.ask_for_badge(side, cx)
+            (Stage::Idle | Stage::Message { .. }, Event::Key { .. }) => self.ask_for_badge(cx),
+            // The reader listens on the main screen, and on a message: the next person goes on.
+            (stage @ (Stage::Idle | Stage::Message { .. }), Event::Badge { .. }) if lingering => {
+                self.stage = stage;
+                Vec::new()
             }
-
-            (Stage::AwaitBadge { side, .. }, Event::Badge { uid }) => {
-                self.read_badge(side, uid, cx)
+            (Stage::Idle | Stage::Message { .. } | Stage::AwaitBadge { .. }, Event::Badge { uid }) => {
+                self.read_badge(uid, cx)
             }
             (Stage::AwaitBadge { .. }, Event::Key { .. }) => {
                 vec![beep(Beep::Key), show(Screen::Main)]
+            }
+
+            (Stage::Menu { uid, name, .. }, Event::Key { side: Side::Left }) => self.start_picking(uid, name, cx),
+            (Stage::Menu { uid, name, .. }, Event::Key { side: Side::Right }) => self.right_of_menu(uid, name, None, cx),
+            (Stage::Menu { uid, name, .. }, Event::LongKey { side: Side::Right }) => {
+                self.right_of_menu(uid, name, Some(0), cx)
             }
 
             // The items, then the card to leave: one more stop than there are items.
@@ -481,7 +545,7 @@ impl Flow {
                 Event::Key { side: Side::Right },
             ) => self.take(uid, name, index, cx),
 
-            (Stage::AwaitAccountBadge { list, .. }, Event::Badge { uid }) => self.read_account_badge(uid, list, cx),
+            (Stage::AwaitAccountBadge { .. }, Event::Badge { uid }) => self.read_account_badge(uid, cx),
             (Stage::AwaitAccountBadge { .. }, Event::Key { .. }) => vec![beep(Beep::Key), show(Screen::Main)],
             (Stage::AccountLoading { uid, list: None, .. }, Event::Account { account }) => {
                 self.account(uid, account, cx, None)
@@ -539,6 +603,7 @@ impl Flow {
 
             (
                 Stage::AwaitBadge { .. }
+                | Stage::Menu { .. }
                 | Stage::Pick { .. }
                 | Stage::Message { .. }
                 | Stage::About { .. }
@@ -566,48 +631,47 @@ impl Flow {
         };
     }
 
-    fn ask_for_badge(&mut self, side: Side, cx: Context) -> Vec<Effect> {
-        // Outside a preparation, the right key is the account: it needs the badges, not the clock.
-        if side == Side::Right && cx.state.is_some_and(|state| preparing(state).is_none()) {
-            return self.ask_for_account_badge(false, cx);
-        }
-        let Some(state) = cx.state.filter(|_| cx.unix.is_some()) else {
+    /// A key on the main screen: the badge, then the menu. Telling badges apart needs the state.
+    fn ask_for_badge(&mut self, cx: Context) -> Vec<Effect> {
+        let Some(state) = cx.state else {
             self.message(cx, MESSAGE_MS);
             return vec![beep(Beep::Error), show(Screen::NotReady)];
         };
         self.stage = Stage::AwaitBadge {
-            side,
             until: cx.now_ms + BADGE_WAIT_MS,
         };
         vec![
             beep(Beep::Key),
             show(Screen::Badge {
-                key_label: match (side, preparing(state)) {
-                    (Side::Right, Some(preparation)) => preparation.serve_label.clone(),
-                    _ => state.key(side).label.clone(),
-                },
+                key_label: state.office.name.clone(),
             }),
         ]
     }
 
-    fn ask_for_account_badge(&mut self, list: bool, cx: Context) -> Vec<Effect> {
+    /// The right key held on the main screen: the badge whose purchases to list.
+    fn ask_for_account_badge(&mut self, cx: Context) -> Vec<Effect> {
         if cx.state.is_none() {
             self.message(cx, MESSAGE_MS);
             return vec![beep(Beep::Error), show(Screen::NotReady)];
         }
-        self.stage = Stage::AwaitAccountBadge { list, until: cx.now_ms + BADGE_WAIT_MS };
-        vec![beep(Beep::Key), show(Screen::AccountBadge { purchases: list })]
+        self.stage = Stage::AwaitAccountBadge { until: cx.now_ms + BADGE_WAIT_MS };
+        vec![beep(Beep::Key), show(Screen::AccountBadge { purchases: true })]
     }
 
-    /// A known badge asks the site for its account; with `list`, for the purchases first.
-    fn read_account_badge(&mut self, uid: String, list: bool, cx: Context) -> Vec<Effect> {
+    /// A known badge asks the site for its purchases.
+    fn read_account_badge(&mut self, uid: String, cx: Context) -> Vec<Effect> {
         let Some(name) = cx.state.and_then(|state| state.badge(&uid)).map(|badge| badge.name.clone()) else {
             // As for a take: a badge nobody has is linked first.
             return self.unknown_badge(uid, cx);
         };
-        let list = list.then_some(0);
+        self.fetch_account(uid, name, Some(0), Beep::Badge, cx)
+    }
+
+    /// Ask the site for the account; `list` is the purchase to select once it arrives, None for
+    /// the account screen.
+    fn fetch_account(&mut self, uid: String, name: String, list: Option<usize>, sound: Beep, cx: Context) -> Vec<Effect> {
         self.stage = Stage::AccountLoading { uid: uid.clone(), name: name.clone(), list, cancelling: false, until: cx.now_ms + LOAD_MS };
-        vec![beep(Beep::Badge), show(Screen::AccountLoading { name, cancelling: false }), Effect::FetchAccount { uid }]
+        vec![beep(sound), show(Screen::AccountLoading { name, cancelling: false }), Effect::FetchAccount { uid }]
     }
 
     /// The account screen, and the stage that waits for a key.
@@ -675,35 +739,54 @@ impl Flow {
         ]
     }
 
-    fn read_badge(&mut self, side: Side, uid: String, cx: Context) -> Vec<Effect> {
-        // ask_for_badge only gets here with a state.
+    /// A badge: the menu for whoever it belongs to.
+    fn read_badge(&mut self, uid: String, cx: Context) -> Vec<Effect> {
         let Some(state) = cx.state else {
-            return vec![show(Screen::Main)];
+            self.message(cx, MESSAGE_MS);
+            return vec![beep(Beep::Error), show(Screen::NotReady)];
         };
         let Some(badge) = state.badge(&uid) else {
             return self.unknown_badge(uid, cx);
         };
-        if let (Side::Right, Some(preparation)) = (side, preparing(state)) {
+        let name = badge.name.clone();
+        let right = match preparing(state) {
+            Some(preparation) => preparation.serve_label.clone(),
+            None => state.key(Side::Right).label.clone(),
+        };
+        let screen = Screen::Menu { name: name.clone(), left: state.key(Side::Left).label.clone(), right };
+        self.stage = Stage::Menu { uid, name, until: cx.now_ms + MENU_MS };
+        vec![beep(Beep::Badge), show(screen)]
+    }
+
+    /// The menu's left key: the picker, which needs items and the clock (a take is dated).
+    fn start_picking(&mut self, uid: String, name: String, cx: Context) -> Vec<Effect> {
+        if cx.unix.is_none() {
+            self.message(cx, MESSAGE_MS);
+            return vec![beep(Beep::Error), show(Screen::NotReady)];
+        }
+        if cx.state.is_none_or(|state| state.items.is_empty()) {
+            self.message(cx, MESSAGE_MS);
+            return vec![beep(Beep::Error), show(Screen::NoItems)];
+        }
+        self.pick(uid, name, 0, cx, Beep::Key)
+    }
+
+    /// The menu's right key: "Servi" during a preparation, else the account (`list`: held, the
+    /// purchases first).
+    fn right_of_menu(&mut self, uid: String, name: String, list: Option<usize>, cx: Context) -> Vec<Effect> {
+        if let Some(preparation) = cx.state.and_then(preparing) {
             // The runtime answers with the site's count; the message stage brings the main screen back.
             self.message(cx, MESSAGE_MS);
             return vec![
-                beep(Beep::Badge),
+                beep(Beep::Key),
                 Effect::Serve {
                     uid,
-                    name: badge.name.clone(),
+                    name,
                     session_id: preparation.session_id.clone(),
                 },
             ];
         }
-        match side {
-            // The preparation was served meanwhile: the right key is the account again.
-            Side::Right => self.read_account_badge(uid, false, cx),
-            Side::Left if state.items.is_empty() => {
-                self.message(cx, MESSAGE_MS);
-                vec![beep(Beep::Error), show(Screen::NoItems)]
-            }
-            Side::Left => self.pick(uid, badge.name.clone(), 0, cx, Beep::Badge),
-        }
+        self.fetch_account(uid, name, list, Beep::Key, cx)
     }
 
     fn pick(
@@ -717,7 +800,8 @@ impl Flow {
         let Some(state) = cx.state else {
             return vec![show(Screen::Main)];
         };
-        let Some(item) = state.items.get(index) else {
+        let items = state.items_for(&uid);
+        let Some(item) = items.get(index) else {
             self.stage = Stage::Pick {
                 uid,
                 name: name.clone(),
@@ -732,7 +816,7 @@ impl Flow {
             stock: item.stock,
             picture: item.picture.clone(),
             index: index as u32,
-            count: cx.state.map_or(0, |s| s.items.len()) as u32,
+            count: items.len() as u32,
         };
         self.stage = Stage::Pick {
             uid,
@@ -744,7 +828,7 @@ impl Flow {
     }
 
     fn take(&mut self, uid: String, name: String, index: usize, cx: Context) -> Vec<Effect> {
-        let (Some(item), Some(unix)) = (cx.state.and_then(|s| s.items.get(index)), cx.unix) else {
+        let (Some(item), Some(unix)) = (cx.state.and_then(|s| s.items_for(&uid).get(index).copied()), cx.unix) else {
             return vec![show(Screen::Main)];
         };
         let take = Take {
@@ -817,6 +901,7 @@ mod tests {
             badges: vec![Badge {
                 uid: "04A1B2C3D4E5F6".into(),
                 name: "Alex".into(),
+                items: vec![],
             }],
             sync_times: vec![],
             server_time: "2026-10-09T18:25:00Z".into(),
@@ -865,8 +950,21 @@ mod tests {
         })
     }
 
+    const UID: &str = "04A1B2C3D4E5F6";
+
+    /// Alex's menu after a badge; `right` is "Mon compte", or the preparation's "Servi".
+    fn menu(right: &str) -> Effect {
+        show(Screen::Menu { name: "Alex".into(), left: "Prendre".into(), right: right.into() })
+    }
+
+    /// Alex badges on the main screen at `at`, then presses `side` on the menu.
+    fn badge_then(flow: &mut Flow, s: &DeviceState, side: Side, at: u64) -> Vec<Effect> {
+        flow.handle(badge(UID), cx(s, at));
+        flow.handle(key(side), cx(s, at + 100))
+    }
+
     #[test]
-    fn during_a_preparation_the_right_key_serves_it_with_a_badge() {
+    fn during_a_preparation_the_menu_serves_it() {
         let mut s = state();
         s.screen.preparation = serde_json::from_value(serde_json::json!({
             "title": "À préparer", "total": "8 matés", "items": [],
@@ -874,16 +972,13 @@ mod tests {
         }))
         .unwrap();
         let mut flow = Flow::default();
+        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), [beep(Beep::Badge), menu("Servi")]);
         assert_eq!(
-            flow.handle(key(Side::Right), cx(&s, 0)),
-            [beep(Beep::Key), show(Screen::Badge { key_label: "Servi".into() })]
-        );
-        assert_eq!(
-            flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
+            flow.handle(key(Side::Right), cx(&s, 1_000)),
             [
-                beep(Beep::Badge),
+                beep(Beep::Key),
                 Effect::Serve {
-                    uid: "04A1B2C3D4E5F6".into(),
+                    uid: UID.into(),
                     name: "Alex".into(),
                     session_id: Some("s1".into()),
                 }
@@ -891,10 +986,8 @@ mod tests {
         );
         assert_eq!(flow.handle(Event::Tick, cx(&s, 1_000 + MESSAGE_MS)), [show(Screen::Main)]);
         // The left key still takes.
-        assert_eq!(
-            flow.handle(key(Side::Left), cx(&s, 20_000)),
-            [beep(Beep::Key), show(Screen::Badge { key_label: "Prendre".into() })]
-        );
+        flow.handle(badge(UID), cx(&s, 20_000));
+        assert_eq!(flow.handle(key(Side::Left), cx(&s, 20_100)), [beep(Beep::Key), pick("Maté", 36, 0)]);
         assert_eq!(
             serde_json::to_value(Effect::Serve { uid: "U".into(), name: "A".into(), session_id: None }).unwrap(),
             serde_json::json!({"type":"serve","uid":"U","name":"A","sessionId":null})
@@ -931,22 +1024,16 @@ mod tests {
     }
 
     #[test]
-    fn left_key_badge_then_pick_an_item_and_take_it() {
+    fn a_badge_opens_the_menu_and_its_left_key_picks_an_item_to_take() {
         let s = state();
         let mut flow = Flow::default();
-        assert_eq!(
-            flow.handle(key(Side::Left), cx(&s, 0)),
-            [
-                beep(Beep::Key),
-                show(Screen::Badge {
-                    key_label: "Prendre".into()
-                })
-            ]
-        );
+        // The reader listens on the main screen.
         assert!(flow.wants_badge());
+        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.deadline(), Some(MENU_MS));
         assert_eq!(
-            flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
-            [beep(Beep::Badge), pick("Maté", 36, 0)]
+            flow.handle(key(Side::Left), cx(&s, 1_000)),
+            [beep(Beep::Key), pick("Maté", 36, 0)]
         );
         assert_eq!(
             flow.handle(key(Side::Left), cx(&s, 2_000)),
@@ -979,11 +1066,68 @@ mod tests {
     }
 
     #[test]
+    fn a_key_on_the_main_screen_asks_for_the_badge_then_opens_the_menu() {
+        let s = state();
+        let mut flow = Flow::default();
+        assert_eq!(
+            flow.handle(key(Side::Right), cx(&s, 0)),
+            [beep(Beep::Key), show(Screen::Badge { key_label: "Lausanne".into() })]
+        );
+        assert!(flow.wants_badge());
+        assert_eq!(flow.handle(badge(UID), cx(&s, 1_000)), [beep(Beep::Badge), menu("Mon compte")]);
+    }
+
+    #[test]
+    fn a_badge_left_on_the_reader_does_not_open_the_menu_again() {
+        let s = state();
+        let mut flow = Flow::default();
+        badge_then(&mut flow, &s, Side::Left, 0);
+        flow.handle(key(Side::Right), cx(&s, 200));
+        // The reader keeps seeing it through the confirmation and back on the main screen; such a
+        // read does not keep the terminal awake.
+        for at in (300..6_000).step_by(500) {
+            flow.handle(Event::Tick, cx(&s, at));
+            assert!(!flow.heeds_badge(UID, at), "at {at}");
+            assert_eq!(flow.handle(badge(UID), cx(&s, at)), [], "at {at}");
+        }
+        assert!(flow.is_idle());
+        // Taken off, then back: the menu again.
+        assert!(flow.heeds_badge(UID, 5_800 + BADGE_GONE_MS));
+        assert_eq!(flow.handle(badge(UID), cx(&s, 5_800 + BADGE_GONE_MS)), [beep(Beep::Badge), menu("Mon compte")]);
+        // Someone else during the confirmation goes on at once.
+        let mut flow = Flow::default();
+        badge_then(&mut flow, &s, Side::Left, 0);
+        flow.handle(key(Side::Right), cx(&s, 200));
+        let mut other = state();
+        other.badges.push(Badge { uid: "04B1B2C3D4E5F6".into(), name: "Sam".into(), items: vec![] });
+        let effects = flow.handle(badge("04B1B2C3D4E5F6"), cx(&other, 300));
+        assert!(matches!(&effects[1], Effect::Show { screen: Screen::Menu { name, .. } } if name == "Sam"), "{effects:?}");
+        // After a key, the badge counts even if it never left the reader.
+        let mut flow = Flow::default();
+        badge_then(&mut flow, &s, Side::Left, 0);
+        flow.handle(key(Side::Right), cx(&s, 200));
+        for at in (1_000..=5_000).step_by(1_000) {
+            assert_eq!(flow.handle(badge(UID), cx(&s, at)), [], "at {at}");
+        }
+        flow.handle(Event::Tick, cx(&s, 200 + MESSAGE_MS));
+        flow.handle(key(Side::Left), cx(&s, 5_300));
+        assert_eq!(flow.handle(badge(UID), cx(&s, 5_400)), [beep(Beep::Badge), menu("Mon compte")]);
+    }
+
+    #[test]
+    fn the_menu_goes_away_without_a_key() {
+        let s = state();
+        let mut flow = Flow::default();
+        flow.handle(badge(UID), cx(&s, 0));
+        assert_eq!(flow.handle(Event::Tick, cx(&s, MENU_MS)), [show(Screen::Main)]);
+        assert!(flow.is_idle());
+    }
+
+    #[test]
     fn after_the_last_item_the_right_key_leaves() {
         let s = state();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Left), cx(&s, 0));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000));
+        badge_then(&mut flow, &s, Side::Left, 0);
         flow.handle(key(Side::Left), cx(&s, 2_000));
         assert_eq!(
             flow.handle(key(Side::Left), cx(&s, 3_000)),
@@ -1000,8 +1144,7 @@ mod tests {
         );
         assert!(flow.is_idle());
 
-        flow.handle(key(Side::Left), cx(&s, 5_000));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 6_000));
+        badge_then(&mut flow, &s, Side::Left, 6_000);
         flow.handle(key(Side::Left), cx(&s, 7_000));
         flow.handle(key(Side::Left), cx(&s, 8_000));
         assert_eq!(
@@ -1011,11 +1154,24 @@ mod tests {
     }
 
     #[test]
+    fn the_picker_starts_with_what_the_person_drinks_most() {
+        let mut s = state();
+        s.badges[0].items = vec!["i2".into(), "gone".into()];
+        let mut flow = Flow::default();
+        assert_eq!(badge_then(&mut flow, &s, Side::Left, 0), [beep(Beep::Key), pick("Zero", 12, 0)]);
+        assert_eq!(
+            flow.handle(key(Side::Left), cx(&s, 2_000)),
+            [beep(Beep::Key), pick("Maté", 36, 1)]
+        );
+        let effects = flow.handle(key(Side::Right), cx(&s, 3_000));
+        assert!(matches!(&effects[0], Effect::Queue { take } if take.item_id.as_deref() == Some("i1")));
+    }
+
+    #[test]
     fn the_picker_gives_up_without_a_key() {
         let s = state();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Left), cx(&s, 0));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000));
+        badge_then(&mut flow, &s, Side::Left, 900);
         assert_eq!(flow.handle(Event::Tick, cx(&s, 1_000 + PICK_MS - 1)), []);
         assert_eq!(
             flow.handle(Event::Tick, cx(&s, 1_000 + PICK_MS)),
@@ -1052,15 +1208,11 @@ mod tests {
     }
 
     #[test]
-    fn right_key_shows_the_account_live_from_the_site() {
+    fn the_menus_right_key_shows_the_account_live_from_the_site() {
         let s = state();
         let mut flow = Flow::default();
-        assert_eq!(
-            flow.handle(key(Side::Right), cx(&s, 0)),
-            [beep(Beep::Key), show(Screen::AccountBadge { purchases: false })]
-        );
-        assert!(flow.wants_badge());
-        assert_eq!(flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)), [beep(Beep::Badge), loading(false), fetch()]);
+        flow.handle(badge(UID), cx(&s, 0));
+        assert_eq!(flow.handle(key(Side::Right), cx(&s, 1_000)), [beep(Beep::Key), loading(false), fetch()]);
         assert_eq!(flow.deadline(), Some(1_000 + LOAD_MS));
         assert_eq!(
             flow.handle(Event::Account { account: account(5) }, cx(&s, 1_500)),
@@ -1082,8 +1234,7 @@ mod tests {
         assert_eq!(flow.handle(key(Side::Right), cx(&s, 2_000)), [beep(Beep::Key), show(Screen::Main)]);
         assert!(flow.is_idle());
         // Without a key, the account goes away too.
-        flow.handle(key(Side::Right), cx(&s, 3_000));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 3_100));
+        badge_then(&mut flow, &s, Side::Right, 3_000);
         flow.handle(Event::Account { account: account(0) }, cx(&s, 3_200));
         assert_eq!(flow.handle(Event::Tick, cx(&s, 3_200 + ACCOUNT_MS)), [show(Screen::Main)]);
     }
@@ -1093,9 +1244,13 @@ mod tests {
         let s = state();
         let mut flow = Flow::default();
         let no_clock = Context { unix: None, ..cx(&s, 0) };
-        assert_eq!(flow.handle(key(Side::Right), no_clock), [beep(Beep::Key), show(Screen::AccountBadge { purchases: false })]);
+        assert_eq!(flow.handle(badge(UID), no_clock), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(key(Side::Right), no_clock), [beep(Beep::Key), loading(false), fetch()]);
+        // Without the state, no badge is known.
+        let mut flow = Flow::default();
         let no_state = Context { state: None, ..cx(&s, 100) };
-        assert_eq!(flow.handle(key(Side::Left), no_state), [beep(Beep::Key), show(Screen::Main)]);
+        assert_eq!(flow.handle(badge(UID), no_state), [beep(Beep::Error), show(Screen::NotReady)]);
+        let mut flow = Flow::default();
         assert_eq!(flow.handle(key(Side::Right), no_state), [beep(Beep::Error), show(Screen::NotReady)]);
     }
 
@@ -1180,23 +1335,11 @@ mod tests {
     }
 
     #[test]
-    fn a_badge_without_a_key_is_ignored() {
-        let s = state();
-        let mut flow = Flow::default();
-        assert_eq!(flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 0)), []);
-        assert!(flow.is_idle());
-    }
-
-    #[test]
     fn no_items_no_picker() {
         let mut s = state();
         s.items.clear();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Left), cx(&s, 0));
-        assert_eq!(
-            flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 1_000)),
-            [beep(Beep::Error), show(Screen::NoItems)]
-        );
+        assert_eq!(badge_then(&mut flow, &s, Side::Left, 0), [beep(Beep::Error), show(Screen::NoItems)]);
     }
 
     #[test]
@@ -1226,6 +1369,8 @@ mod tests {
             unix: None,
             ..cx(&s, 0)
         };
+        // A take is dated: the picker waits for the clock.
+        flow.handle(badge(UID), no_clock);
         assert_eq!(
             flow.handle(key(Side::Left), no_clock),
             [beep(Beep::Error), show(Screen::NotReady)]
@@ -1253,12 +1398,10 @@ mod tests {
     fn the_account_lists_the_purchases_without_a_second_badge_and_one_is_cancelled_after_a_second_press() {
         let s = state();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Right), cx(&s, 0));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 500));
+        badge_then(&mut flow, &s, Side::Right, 400);
         flow.handle(Event::Account { account: account(5) }, cx(&s, 900));
         // "Mes achats": five purchases, two pages of four, the way back ending the second.
         let effects = flow.handle(key(Side::Left), cx(&s, 1_000));
-        assert!(!flow.wants_badge());
         let Some(Effect::Show { screen: Screen::Purchases { name, rows, selected, back, page, pages, confirm, avatar } }) = effects.last() else {
             panic!("{effects:?}");
         };
@@ -1327,8 +1470,7 @@ mod tests {
         let mut s = state();
         s.items[1].picture = "WmVybw==".into();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Left), cx(&s, 0));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 100));
+        badge_then(&mut flow, &s, Side::Left, 0);
         flow.handle(key(Side::Left), cx(&s, 200));
         let effects = flow.handle(key(Side::Right), cx(&s, 300));
         assert_eq!(
@@ -1373,8 +1515,7 @@ mod tests {
     fn each_failure_says_what_went_wrong_and_the_left_key_tries_again() {
         let s = state();
         let mut flow = Flow::default();
-        flow.handle(key(Side::Right), cx(&s, 0));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 100));
+        badge_then(&mut flow, &s, Side::Right, 0);
         let offline = Failure::Offline { cause: Cause::Timeout };
         assert_eq!(
             flow.handle(Event::AccountFailed { failure: offline }, cx(&s, 200)),
@@ -1410,8 +1551,7 @@ mod tests {
         assert_eq!(flow.handle(key(Side::Left), cx(&s, 30_300)), [beep(Beep::Key), show(Screen::Main)]);
 
         // Nothing waits for the site past its deadline, and a late answer is dropped.
-        flow.handle(key(Side::Right), cx(&s, 40_000));
-        flow.handle(badge("04A1B2C3D4E5F6"), cx(&s, 40_100));
+        badge_then(&mut flow, &s, Side::Right, 40_000);
         assert_eq!(flow.handle(Event::Tick, cx(&s, 40_100 + LOAD_MS)), [show(Screen::Main)]);
         assert_eq!(flow.handle(Event::Account { account: account(1) }, cx(&s, 40_100 + LOAD_MS + 1)), []);
     }

@@ -72,6 +72,10 @@ pub struct Item {
 pub struct Badge {
     pub uid: String,
     pub name: String,
+    /// Ids of the items the holder drank over the last 30 days, most first: the picker shows them
+    /// before the others. Absent (an older site): the office's order.
+    #[serde(default)]
+    pub items: Vec<String>,
 }
 
 /// What the terminal needs to work until the next sync. It keeps a copy in
@@ -284,6 +288,15 @@ impl DeviceState {
     /// Name of the person the badge belongs to.
     pub fn badge_holder(&self, uid: &str) -> Option<&str> {
         self.badge(uid).map(|b| b.name.as_str())
+    }
+
+    /// The items as the picker shows them to this badge: what its holder drinks most first, then
+    /// the others in the office's order.
+    pub fn items_for(&self, uid: &str) -> Vec<&Item> {
+        let own = self.badge(uid).map_or(&[][..], |b| b.items.as_slice());
+        let favourites = own.iter().filter_map(|id| self.items.iter().find(|item| &item.id == id));
+        let others = self.items.iter().filter(|item| !own.contains(&item.id));
+        favourites.chain(others).collect()
     }
 }
 

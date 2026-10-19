@@ -249,6 +249,20 @@ pub fn badge_screen<D: DrawTarget<Color = BinaryColor>>(
         json!({"title":label,"left":"Annuler","right":"Annuler"}),
     )
 }
+/// After a badge: whose it is (initials: the terminal keeps no avatar), and the two keys.
+pub fn menu_screen<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    name: &str,
+    left: &str,
+    right: &str,
+) -> Result<(), D::Error> {
+    let first = name.split_whitespace().next().unwrap_or(name);
+    render(
+        d,
+        "menu",
+        json!({"title":name,"first":first,"left":left,"right":right,"person":person(name, None, AVATAR_SERVED)}),
+    )
+}
 pub fn pick_screen<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     info: &PickInfo,
@@ -539,6 +553,7 @@ where
             avatar,
         } => purchases_screen(d, name, rows, *selected, *back, *page, *pages, *confirm, avatar.as_deref()),
         Screen::Badge { key_label } => badge_screen(d, key_label),
+        Screen::Menu { name, left, right } => menu_screen(d, name, left, right),
         Screen::Pick {
             name,
             item,

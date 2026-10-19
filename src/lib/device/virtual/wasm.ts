@@ -28,6 +28,8 @@ type PurchaseRow = { item: string; when: string; price: string | null; image: st
 export type FlowScreen =
   | { type: "main" }
   | { type: "badge"; keyLabel: string }
+  /** After a badge: `left` takes, `right` shows the account or serves the preparation. */
+  | { type: "menu"; name: string; left: string; right: string }
   | {
       type: "pick";
       name: string;

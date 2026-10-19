@@ -60,13 +60,15 @@ export const useT = () => useI18n(messages);
 /**
  * Every maté screen: status bar, content, then the keys when the host labels them
  * (`view.left`, `view.right`, or the screen's own `left` / `right`). `primary` marks the
- * expected key.
+ * expected key. With `start` instead (the main screens), no key tab: only "badge to start" over
+ * the reader, since a badge opens the menu.
  */
 export function Frame({
   title,
   leading,
   trailing,
   keys = false,
+  start = false,
   left = view("left"),
   right = view("right"),
   primary,
@@ -81,6 +83,7 @@ export function Frame({
   leading?: Children;
   trailing?: Children;
   keys?: boolean;
+  start?: boolean;
   left?: TextChildren;
   right?: TextChildren;
   primary?: "left" | "right";
@@ -111,6 +114,7 @@ export function Frame({
           <Key side="right" primary={primary === "right"} onPress={emit("right")}><Styled style="leadStrong" fit>{right}</Styled></Key>
         </Keys>
       )}
+      {start && !keys && <Keys reader={t("start")} />}
     </Screen>
   );
 }
