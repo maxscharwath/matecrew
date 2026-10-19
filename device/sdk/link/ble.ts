@@ -12,6 +12,7 @@ import {
   decodeInfo,
   encodeCommand,
   encodeForgetWifi,
+  encodeSite,
   encodeProvisioning,
   fail,
   imageVersion,
@@ -317,6 +318,13 @@ export class BleDevice implements DeviceRemote {
   /** Forgets one of the networks the device keeps (`info().saved`); refused if it keeps no such network. */
   async forgetWifi(ssid: string): Promise<Result<void>> {
     const bytes = encodeForgetWifi(ssid);
+    if (!bytes.ok) return bytes;
+    return this.write("control", bytes.value);
+  }
+
+  /** Moves the device to the same site at a new address; it keeps its token and restarts. */
+  async moveSite(url: string): Promise<Result<void>> {
+    const bytes = encodeSite(url);
     if (!bytes.ok) return bytes;
     return this.write("control", bytes.value);
   }

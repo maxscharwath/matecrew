@@ -16,6 +16,7 @@ export {
   encodeCommand,
   encodeProvisioning,
   encodeForgetWifi,
+  encodeSite,
   imageVersion,
   otaBegin,
   otaChunks,

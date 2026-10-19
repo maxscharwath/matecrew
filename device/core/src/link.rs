@@ -20,7 +20,7 @@
 //!
 //! `SCREEN` came later within protocol 1: an addition an older peer does not misread (an older
 //! terminal has no such characteristic). So did several networks: `Info::wifi_open` and
-//! `Info::saved`, which an older terminal leaves out, and `Control::ForgetWifi`.
+//! `Info::saved`, which an older terminal leaves out, `Control::ForgetWifi` and `Control::Site`.
 
 use serde::{Deserialize, Serialize};
 
@@ -147,6 +147,9 @@ pub enum Control {
     Notify { text: String },
     /// Forget one of the networks kept.
     ForgetWifi { ssid: String },
+    /// The same site at a new address (the serial console's `site <url>`): the token stays, and
+    /// a site that does not know it answers 401, which links the terminal again. Restarts.
+    Site { url: String },
 }
 
 impl Control {
@@ -155,6 +158,9 @@ impl Control {
         match &control {
             Self::Notify { text } if text.is_empty() || text.len() > 256 => Err(LinkError::Invalid("text")),
             Self::ForgetWifi { ssid } if ssid.is_empty() || ssid.len() > 32 => Err(LinkError::Invalid("wifi")),
+            Self::Site { url } if url.len() > 128 || !(url.starts_with("https://") || url.starts_with("http://")) => {
+                Err(LinkError::Invalid("site"))
+            }
             _ => Ok(control),
         }
     }
@@ -470,6 +476,8 @@ mod tests {
         assert_eq!(Control::parse(br#"{"cmd":"format"}"#), Err(LinkError::Malformed));
         assert_eq!(Control::parse(br#"{"cmd":"forgetWifi","ssid":"Office"}"#).unwrap(), Control::ForgetWifi { ssid: "Office".into() });
         assert_eq!(Control::parse(br#"{"cmd":"forgetWifi","ssid":""}"#), Err(LinkError::Invalid("wifi")));
+        assert_eq!(Control::parse(br#"{"cmd":"site","url":"https://x.test"}"#).unwrap(), Control::Site { url: "https://x.test".into() });
+        assert_eq!(Control::parse(br#"{"cmd":"site","url":"x.test"}"#), Err(LinkError::Invalid("site")));
     }
 
     #[test]

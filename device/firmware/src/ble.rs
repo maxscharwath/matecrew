@@ -556,6 +556,16 @@ fn apply_control(inputs: &Sender<Input>, store: &Mutex<Store>, bytes: &[u8]) -> 
         log::info!("ble: Wi-Fi {ssid:?} forgotten");
         return Ok(());
     }
+    if let Control::Site { url } = &control {
+        let site = crate::api::normalize_site(url).ok_or("not a web address")?;
+        let store = store.lock().map_err(|_| "busy".to_owned())?;
+        // As the serial console's `site <url>`: the token stays (a site that does not know it
+        // answers 401, and the terminal links again). Restarted after the answer is out.
+        store.move_site(&site).map_err(|e| e.to_string())?;
+        log::info!("ble: site moved to {site}, restarting");
+        restart_in(Duration::from_millis(1500));
+        return Ok(());
+    }
     let action = Action::from_control(control).ok_or("not a badge UID, or a tap off the screen")?;
     // Restarted from here, after the answer is out (`Done`), rather than by the main loop.
     if action == Action::Restart {

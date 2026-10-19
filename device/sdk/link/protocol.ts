@@ -149,6 +149,15 @@ export function encodeForgetWifi(ssid: string): Result<Uint8Array> {
   return ok(encoder.encode(JSON.stringify({ cmd: "forgetWifi", ssid })));
 }
 
+/**
+ * Moves the device to the same site at a new address (a `CONTROL` write): it keeps its token and
+ * restarts. A site that does not know the token answers 401, and the device links again.
+ */
+export function encodeSite(url: string): Result<Uint8Array> {
+  if (url.length > 128 || !/^https?:\/\/\S+$/.test(url)) return fail("invalid", "the site is an http(s) address of at most 128 characters");
+  return ok(encoder.encode(JSON.stringify({ cmd: "site", url })));
+}
+
 export function decodeInfo(bytes: Uint8Array): Result<DeviceInfo> {
   let info: DeviceInfo;
   try {

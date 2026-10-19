@@ -67,7 +67,7 @@ impl Action {
             Control::Sleep => Self::Sleep,
             Control::Notify { text } => Self::Notify(text),
             // Settings, not an action: the terminal applies it where it gets it (`ble.rs`).
-            Control::ForgetWifi { .. } => return None,
+            Control::ForgetWifi { .. } | Control::Site { .. } => return None,
         })
     }
 }

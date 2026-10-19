@@ -326,7 +326,8 @@ fn app() -> Result<()> {
             // setup, to add one. Those kept stay, and are tried again if nobody adds one.
             log::warn!("Wi-Fi: {e:#}; setup opens");
             boot.fail("wifiOffline", &[]);
-            if !setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth, &inputs, &networks, true, linked)? || !linked {
+            // A new network: start over on it. Not linked yet: nothing to do offline, try again.
+            if setup_wifi(&mut wifi, &mut screen, &store, &site, &bluetooth, &inputs, &networks, true, linked)? || !linked {
                 reset::restart();
             }
             // Later: from the cached state, offline; the syncs try the networks kept in turn.
