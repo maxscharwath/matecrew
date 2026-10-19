@@ -340,13 +340,16 @@ impl Api {
     }
 
     /// Sends on this thread's open connection; a connection the site closed meanwhile gets one
-    /// retry on a new one. The status bar shows the transfer (`net`).
+    /// retry on a new one. The status bar shows the transfer (`net`), except for the menu's
+    /// picture: it shows up by itself, and each change of the arrows costs the panel a refresh
+    /// of about a second, which came before the menu and again before the picture.
     fn send(&self, method: Method, path: &str, body: Body, timeout: Duration) -> Result<Reply> {
         let wait = path.starts_with(WAIT);
         if wait {
             crate::net::pulse(true);
         }
-        let _shown = (!wait).then(|| crate::net::transfer(!matches!(method, Method::Get)));
+        let quiet = wait || path == AVATAR_PATH;
+        let _shown = (!quiet).then(|| crate::net::transfer(!matches!(method, Method::Get)));
         let kept = CONNECTIONS.with(|kept| {
             let mut kept = kept.borrow_mut();
             let at = kept.iter().position(|(t, _)| *t == timeout)?;
