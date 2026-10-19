@@ -197,7 +197,7 @@ export class DemoTerminal {
       case "beep":
         return this.onBeep(this.wasm.buzzerPattern(effect.beep));
       default:
-        // Unknown badges and serving have nothing to answer here.
+        // Unknown badges, serving and the menu's picture (the initials stay) have nothing to answer here.
         return;
     }
   }

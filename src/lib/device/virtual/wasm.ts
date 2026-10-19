@@ -29,7 +29,7 @@ export type FlowScreen =
   | { type: "main" }
   | { type: "badge"; keyLabel: string }
   /** After a badge: `left` takes, `right` shows the account or serves the preparation. */
-  | { type: "menu"; name: string; left: string; right: string }
+  | { type: "menu"; name: string; left: string; right: string; avatar?: string | null }
   | {
       type: "pick";
       name: string;
@@ -84,6 +84,8 @@ export type FlowEvent =
   | { type: "account"; account: DeviceAccount }
   | { type: "accountFailed"; failure: Failure }
   | { type: "purchaseCancelled"; cancelled: boolean }
+  /** The answer to `fetchAvatar`; nothing on a failure. */
+  | { type: "avatar"; uid: string; avatar: string | null }
   | { type: "tick" };
 
 export type Beep = "key" | "accepted" | "error" | "notification" | "badge" | "boot" | "unknown";
@@ -100,7 +102,9 @@ export type Effect =
   /** The badge holder's account, "Mon compte": answer with `account` or `accountFailed`. */
   | { type: "fetchAccount"; uid: string }
   /** Cancel one of their purchases: answer with `purchaseCancelled` or `accountFailed`. */
-  | { type: "cancelPurchase"; uid: string; id: string };
+  | { type: "cancelPurchase"; uid: string; id: string }
+  /** The badge holder's picture for the menu: answer with `avatar`, or nothing on a failure. */
+  | { type: "fetchAvatar"; uid: string };
 
 /** Screens the terminal draws itself, outside the take flow. */
 export type View =

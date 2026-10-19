@@ -6,7 +6,7 @@ import { downloadImage } from "./images";
  * of takes, mirrors its panel to the site and obeys the console, through the
  * same API as the real one.
  */
-import { cancelPurchaseResponse, deviceAccount, deviceCommand, deviceState } from "@/lib/device/contract";
+import { avatarResponse, cancelPurchaseResponse, deviceAccount, deviceCommand, deviceState } from "@/lib/device/contract";
 import type {
   CommandsResponse,
   DeviceState,
@@ -955,6 +955,20 @@ export class VirtualDevice {
       case "cancelPurchase":
         void this.cancelPurchase(effect.uid, effect.id);
         return;
+      case "fetchAvatar":
+        void this.avatar(effect.uid);
+        return;
+    }
+  }
+
+  /** The badge holder's picture for the menu (firmware fetch.rs); a failure leaves the initials. */
+  private async avatar(uid: string): Promise<void> {
+    try {
+      const response = await this.api("POST", "/api/device/avatar", { json: { badgeUid: uid }, errors: true });
+      const reply = avatarResponse.safeParse(response.ok ? await response.json().catch(() => null) : null);
+      if (reply.success) this.dispatch({ type: "avatar", uid, avatar: reply.data.avatar });
+    } catch (error) {
+      this.log("flow", `avatar: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -1,5 +1,6 @@
 //! What the screens fetch while someone uses the terminal, on a thread of its own: an app's data
-//! and images, and the badge holder's account ("Mon compte") with its purchases. A site that does
+//! and images, the badge holder's picture for the menu, and their account ("Mon compte") with its
+//! purchases. A site that does
 //! not answer never holds the keys. Each result comes back to the main loop as an input, and the
 //! screen shows it then.
 
@@ -30,6 +31,7 @@ pub enum Job {
     Image(ImageRequest),
     Account { uid: String },
     CancelPurchase { uid: String, id: String },
+    Avatar { uid: String },
 }
 
 impl Job {
@@ -38,7 +40,7 @@ impl Job {
         match self {
             Job::Data { path, .. } => Some(path),
             Job::Image(request) => Some(&request.src),
-            Job::Account { .. } | Job::CancelPurchase { .. } => None,
+            Job::Account { .. } | Job::CancelPurchase { .. } | Job::Avatar { .. } => None,
         }
     }
 }
@@ -49,6 +51,8 @@ pub enum Fetched {
     /// The account, or what the screen says went wrong (logged here).
     Account(Result<Account, Failure>),
     Cancelled(Result<CancelPurchaseResponse, Failure>),
+    /// The badge holder's picture; None when they have none or the site did not answer (logged).
+    Avatar { uid: String, avatar: Option<String> },
 }
 
 impl Fetched {
@@ -56,7 +60,7 @@ impl Fetched {
         match self {
             Fetched::Data { path, .. } => Some(path),
             Fetched::Image { request, .. } => Some(&request.src),
-            Fetched::Account(_) | Fetched::Cancelled(_) => None,
+            Fetched::Account(_) | Fetched::Cancelled(_) | Fetched::Avatar { .. } => None,
         }
     }
 
@@ -66,6 +70,7 @@ impl Fetched {
             Fetched::Image { bytes, .. } => bytes.is_err(),
             Fetched::Account(reply) => reply.is_err(),
             Fetched::Cancelled(reply) => reply.is_err(),
+            Fetched::Avatar { .. } => false,
         }
     }
 }
@@ -115,6 +120,16 @@ impl Fetcher {
                     }
                     Job::Account { uid } => {
                         Fetched::Account(api.account(&AccountRequest { badge_uid: &uid }).map_err(|e| failure("account", &e)))
+                    }
+                    Job::Avatar { uid } => {
+                        let avatar = match api.avatar(&AccountRequest { badge_uid: &uid }) {
+                            Ok(reply) => reply.avatar,
+                            Err(e) => {
+                                log::warn!("avatar: {e:#}");
+                                None
+                            }
+                        };
+                        Fetched::Avatar { uid, avatar }
                     }
                     Job::CancelPurchase { uid, id } => Fetched::Cancelled(
                         api.cancel_purchase(&CancelPurchaseRequest { badge_uid: &uid, id: &id })

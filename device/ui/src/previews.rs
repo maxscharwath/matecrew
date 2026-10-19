@@ -106,7 +106,7 @@ fn previews() -> Value {
         ]
     })).unwrap());
     all.add("preparation", "Before a session: who takes what; the right key serves it", |d| dashboard_screen(d, &dashboard, false));
-    all.add("menu-serve", "A badge during a preparation: the right key serves it", |d| menu_screen(d, "Alex Martin", "Prendre", "Servi"));
+    all.add("menu-serve", "A badge during a preparation: the right key serves it", |d| menu_screen(d, "Alex Martin", "Prendre", "Servi", None));
     let served = avatar("served");
     all.add("served", "The site served the session: the runner's avatar", |d| served_screen(d, "Alex", 9, served.as_deref()));
     all.add("served-no-avatar", "Served by someone without an avatar", |d| served_screen(d, "Alex", 9, None));
@@ -125,7 +125,9 @@ fn previews() -> Value {
     all.add("connecting", "Joining the office Wi-Fi", |d| connecting_screen(d, "OWT-Office"));
     all.add("connected", "On the network", |d| connected_screen(d, "OWT-Office", "10.0.4.27"));
     all.add("badge", "A key was touched (or woke the terminal): badge now", |d| badge_screen(d, "Lausanne"));
-    all.add("menu", "A badge: take, or my account", |d| menu_screen(d, "Alex Martin", "Prendre", "Mon compte"));
+    all.add("menu", "A badge: take, or my account (initials until the picture arrives)", |d| menu_screen(d, "Alex Martin", "Prendre", "Mon compte", None));
+    let pictured = avatar("served");
+    all.add("menu-avatar", "The menu once the site sent the picture", |d| menu_screen(d, "Alex Martin", "Prendre", "Mon compte", pictured.as_deref()));
     let pick = PickInfo { name: "Alex", item: "Maté Classic", stock: 36, picture: &picture, index: 0, count: 3 };
     all.add("pick", "Choose the item", |d| pick_screen(d, &pick));
     all.add("leave", "Nothing for me", |d| leave_screen(d, "Alex"));
@@ -297,7 +299,7 @@ fn flow(previews: &mut Map<String, Value>) {
     let home = ["stock", "stock-offline", "stock-sleeping", "stock-0", "stock-1", "stock-2", "stock-4", "stock-5", "stock-6", "stock-9", "stock-20", "preparation"];
     // The badge comes first: a badge opens the menu, a key asks for the badge.
     on(&home, &[("left", "badge"), ("right", "badge"), ("rightLong", "purchases-badge"), ("badge", "menu")]);
-    on(&["menu"], &[("left", "pick"), ("right", "account-loading")]);
+    on(&["menu", "menu-avatar"], &[("left", "pick"), ("right", "account-loading")]);
     // The loading screens stand for the site's answer: a key shows it.
     on(&["account-loading"], &[("left", "account"), ("right", "account")]);
     on(&["account", "account-new", "account-en"], &[("left", "purchases-from-account"), ("right", "stock")]);
@@ -323,7 +325,7 @@ fn flow(previews: &mut Map<String, Value>) {
     // Asleep: a key wakes it on the stock.
     on(&["sleep-night", "sleep-weekend", "sleep-night-en", "sleep-weekend-en"], &[("left", "stock"), ("right", "stock")]);
     // Both keys, from any screen once the terminal runs: its about page; a key goes back.
-    let running = ["badge", "menu", "menu-serve", "pick", "leave", "taken", "unknown-badge", "claim-badge", "error", "served", "served-no-avatar"];
+    let running = ["badge", "menu", "menu-avatar", "menu-serve", "pick", "leave", "taken", "unknown-badge", "claim-badge", "error", "served", "served-no-avatar"];
     on(&home, &[("both", "about")]);
     on(&running, &[("both", "about")]);
     let account = ["account-loading", "account", "account-new", "purchases-badge", "purchases-from-account", "purchases", "purchases-last", "purchases-confirm", "purchases-cancelling", "purchases-empty"];

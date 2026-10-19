@@ -1189,11 +1189,18 @@ impl Terminal {
                     Err(failure) => Event::AccountFailed { failure },
                 });
             }
+            // The menu's picture; without one the menu keeps the initials.
+            fetch::Fetched::Avatar { uid, avatar } => {
+                return match avatar {
+                    Some(avatar) => self.step_domain(Event::Avatar { uid, avatar: Some(avatar) }),
+                    None => Ok(()),
+                };
+            }
             fetched => fetched,
         };
         let Some(app) = &mut self.app else { return Ok(()) };
         match fetched {
-            fetch::Fetched::Account(_) | fetch::Fetched::Cancelled(_) => return Ok(()),
+            fetch::Fetched::Account(_) | fetch::Fetched::Cancelled(_) | fetch::Fetched::Avatar { .. } => return Ok(()),
             fetch::Fetched::Data { id, value: Ok(value), .. } => {
                 app.update(&id, value);
             }
@@ -1238,6 +1245,7 @@ impl Terminal {
                 Effect::CancelPurchase { uid, id } => {
                     self.fetcher.request(fetch::Job::CancelPurchase { uid, id })
                 }
+                Effect::FetchAvatar { uid } => self.fetcher.request(fetch::Job::Avatar { uid }),
                 Effect::Beep { beep } => self.beep(beep),
                 Effect::Queue { take } => {
                     log::info!("take {} queued for {}", take.id, take.badge_uid);

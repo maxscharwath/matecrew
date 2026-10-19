@@ -344,6 +344,17 @@ pub const AVATAR_PREPARATION: usize = 32;
 /// Where the terminal asks for a badge holder's account, and cancels a purchase.
 pub const ACCOUNT_PATH: &str = "/api/device/account";
 pub const CANCEL_PURCHASE_PATH: &str = "/api/device/purchases/cancel";
+/// Where the terminal asks for a badge holder's picture, for the menu after a badge. The body is
+/// an [`AccountRequest`].
+pub const AVATAR_PATH: &str = "/api/device/avatar";
+
+/// `POST /api/device/avatar`: the badge holder's picture at [`AVATAR_SERVED`], live, as
+/// [`ServeResponse::avatar`]; None without one. Nothing of it is kept on the terminal.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct AvatarResponse {
+    #[serde(default)]
+    pub avatar: Option<String>,
+}
 
 /// `POST /api/device/account`: the badge holder's account ("Mon compte"), live from the site. The
 /// badge goes in the body, out of URLs and access logs.

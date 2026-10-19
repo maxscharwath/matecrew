@@ -276,6 +276,14 @@ export const serveResponse = z.object({
   avatar: personPicture,
 });
 
+/**
+ * `POST /api/device/avatar` (body: an `accountRequest`): the badge holder's `personPicture` at
+ * 128 px, for the menu the terminal opens after a badge. Asked live: the terminal keeps none.
+ */
+export const avatarResponse = z.object({
+  avatar: personPicture,
+});
+
 export const statusRequest = z.object({
   firmwareVersion: z.string().trim().max(32),
   batteryMv: z.number().int().min(0).max(5000).optional(),
@@ -322,6 +330,7 @@ export type DeviceTake = z.infer<typeof deviceTake>;
 export type TakesResponse = z.infer<typeof takesResponse>;
 export type ServeRequest = z.infer<typeof serveRequest>;
 export type ServeResponse = z.infer<typeof serveResponse>;
+export type AvatarResponse = z.infer<typeof avatarResponse>;
 export type Purchase = z.infer<typeof purchase>;
 export type DeviceAccount = z.infer<typeof deviceAccount>;
 export type CancelPurchaseResponse = z.infer<typeof cancelPurchaseResponse>;

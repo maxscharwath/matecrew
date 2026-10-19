@@ -91,6 +91,12 @@ pub enum Event {
     PurchaseCancelled {
         cancelled: bool,
     },
+    /// The site's answer to `Effect::FetchAvatar`: the badge holder's picture, if they have one.
+    /// A failure sends nothing: the menu keeps the initials.
+    Avatar {
+        uid: String,
+        avatar: Option<String>,
+    },
     /// Nothing happened: lets a deadline pass. Send one at `Flow::deadline`.
     Tick,
 }
@@ -202,11 +208,14 @@ pub enum Screen {
         key_label: String,
     },
     /// After a badge: whose it is, and what each key does (`left` takes, `right` shows the
-    /// account, or serves the preparation).
+    /// account, or serves the preparation). `avatar` as `contract::AvatarResponse` gives it, once
+    /// it arrives; the initials until then.
     Menu {
         name: String,
         left: String,
         right: String,
+        #[serde(default)]
+        avatar: Option<String>,
     },
     /// One item to take; `picture` as in `contract::Item`.
     Pick {
@@ -349,6 +358,11 @@ pub enum Effect {
     CancelPurchase {
         uid: String,
         id: String,
+    },
+    /// Ask the site for the badge holder's picture, for the menu; answer with `Event::Avatar`,
+    /// or nothing on a failure.
+    FetchAvatar {
+        uid: String,
     },
 }
 
@@ -521,6 +535,12 @@ impl Flow {
             (Stage::Menu { uid, name, .. }, Event::Key { side: Side::Right }) => self.right_of_menu(uid, name, None, cx),
             (Stage::Menu { uid, name, .. }, Event::LongKey { side: Side::Right }) => {
                 self.right_of_menu(uid, name, Some(0), cx)
+            }
+            // The picture in place of the initials, for whoever is still on the menu.
+            (Stage::Menu { uid, name, until }, Event::Avatar { uid: whose, avatar: Some(avatar) }) if whose == uid => {
+                let screen = cx.state.map(|state| menu_screen(state, &name, Some(avatar)));
+                self.stage = Stage::Menu { uid, name, until };
+                screen.map(show).into_iter().collect()
             }
 
             // The items, then the card to leave: one more stop than there are items.
@@ -749,13 +769,9 @@ impl Flow {
             return self.unknown_badge(uid, cx);
         };
         let name = badge.name.clone();
-        let right = match preparing(state) {
-            Some(preparation) => preparation.serve_label.clone(),
-            None => state.key(Side::Right).label.clone(),
-        };
-        let screen = Screen::Menu { name: name.clone(), left: state.key(Side::Left).label.clone(), right };
-        self.stage = Stage::Menu { uid, name, until: cx.now_ms + MENU_MS };
-        vec![beep(Beep::Badge), show(screen)]
+        let screen = menu_screen(state, &name, None);
+        self.stage = Stage::Menu { uid: uid.clone(), name, until: cx.now_ms + MENU_MS };
+        vec![beep(Beep::Badge), show(screen), Effect::FetchAvatar { uid }]
     }
 
     /// The menu's left key: the picker, which needs items and the clock (a take is dated).
@@ -857,6 +873,15 @@ fn row(purchase: &Purchase, cx: Context) -> PurchaseRow {
     }
 }
 
+/// The menu after a badge: the right key serves a preparation if there is one, else the account.
+fn menu_screen(state: &DeviceState, name: &str, avatar: Option<String>) -> Screen {
+    let right = match preparing(state) {
+        Some(preparation) => preparation.serve_label.clone(),
+        None => state.key(Side::Right).label.clone(),
+    };
+    Screen::Menu { name: name.into(), left: state.key(Side::Left).label.clone(), right, avatar }
+}
+
 /// The site shows a preparation: the right key serves it.
 fn preparing(state: &DeviceState) -> Option<&crate::contract::Preparation> {
     state.screen.preparation.as_ref()
@@ -954,7 +979,12 @@ mod tests {
 
     /// Alex's menu after a badge; `right` is "Mon compte", or the preparation's "Servi".
     fn menu(right: &str) -> Effect {
-        show(Screen::Menu { name: "Alex".into(), left: "Prendre".into(), right: right.into() })
+        show(Screen::Menu { name: "Alex".into(), left: "Prendre".into(), right: right.into(), avatar: None })
+    }
+
+    /// What Alex's badge does on the main screen: the menu, and the picture asked for.
+    fn opened(right: &str) -> [Effect; 3] {
+        [beep(Beep::Badge), menu(right), Effect::FetchAvatar { uid: UID.into() }]
     }
 
     /// Alex badges on the main screen at `at`, then presses `side` on the menu.
@@ -972,7 +1002,7 @@ mod tests {
         }))
         .unwrap();
         let mut flow = Flow::default();
-        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), [beep(Beep::Badge), menu("Servi")]);
+        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), opened("Servi"));
         assert_eq!(
             flow.handle(key(Side::Right), cx(&s, 1_000)),
             [
@@ -1029,7 +1059,7 @@ mod tests {
         let mut flow = Flow::default();
         // The reader listens on the main screen.
         assert!(flow.wants_badge());
-        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(badge(UID), cx(&s, 0)), opened("Mon compte"));
         assert_eq!(flow.deadline(), Some(MENU_MS));
         assert_eq!(
             flow.handle(key(Side::Left), cx(&s, 1_000)),
@@ -1074,7 +1104,7 @@ mod tests {
             [beep(Beep::Key), show(Screen::Badge { key_label: "Lausanne".into() })]
         );
         assert!(flow.wants_badge());
-        assert_eq!(flow.handle(badge(UID), cx(&s, 1_000)), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(badge(UID), cx(&s, 1_000)), opened("Mon compte"));
     }
 
     #[test]
@@ -1093,7 +1123,7 @@ mod tests {
         assert!(flow.is_idle());
         // Taken off, then back: the menu again.
         assert!(flow.heeds_badge(UID, 5_800 + BADGE_GONE_MS));
-        assert_eq!(flow.handle(badge(UID), cx(&s, 5_800 + BADGE_GONE_MS)), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(badge(UID), cx(&s, 5_800 + BADGE_GONE_MS)), opened("Mon compte"));
         // Someone else during the confirmation goes on at once.
         let mut flow = Flow::default();
         badge_then(&mut flow, &s, Side::Left, 0);
@@ -1111,7 +1141,35 @@ mod tests {
         }
         flow.handle(Event::Tick, cx(&s, 200 + MESSAGE_MS));
         flow.handle(key(Side::Left), cx(&s, 5_300));
-        assert_eq!(flow.handle(badge(UID), cx(&s, 5_400)), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(badge(UID), cx(&s, 5_400)), opened("Mon compte"));
+    }
+
+    #[test]
+    fn the_menu_shows_the_picture_once_the_site_sends_it() {
+        let s = state();
+        let mut flow = Flow::default();
+        flow.handle(badge(UID), cx(&s, 0));
+        let avatar = |uid: &str, avatar: Option<&str>| Event::Avatar { uid: uid.into(), avatar: avatar.map(String::from) };
+        assert_eq!(
+            flow.handle(avatar(UID, Some("QUxleA==")), cx(&s, 300)),
+            [show(Screen::Menu {
+                name: "Alex".into(),
+                left: "Prendre".into(),
+                right: "Mon compte".into(),
+                avatar: Some("QUxleA==".into())
+            })]
+        );
+        // The menu's deadline stays the badge's.
+        assert_eq!(flow.deadline(), Some(MENU_MS));
+        // No picture, someone else's, or one too late: the screen stays as it is.
+        assert_eq!(flow.handle(avatar(UID, None), cx(&s, 400)), []);
+        assert_eq!(flow.handle(avatar("04FFFFFFFFFFFF", Some("QQ==")), cx(&s, 500)), []);
+        flow.handle(key(Side::Left), cx(&s, 600));
+        assert_eq!(flow.handle(avatar(UID, Some("QUxleA==")), cx(&s, 700)), []);
+        assert_eq!(
+            serde_json::to_value(Effect::FetchAvatar { uid: UID.into() }).unwrap(),
+            serde_json::json!({"type":"fetchAvatar","uid":UID})
+        );
     }
 
     #[test]
@@ -1244,7 +1302,7 @@ mod tests {
         let s = state();
         let mut flow = Flow::default();
         let no_clock = Context { unix: None, ..cx(&s, 0) };
-        assert_eq!(flow.handle(badge(UID), no_clock), [beep(Beep::Badge), menu("Mon compte")]);
+        assert_eq!(flow.handle(badge(UID), no_clock), opened("Mon compte"));
         assert_eq!(flow.handle(key(Side::Right), no_clock), [beep(Beep::Key), loading(false), fetch()]);
         // Without the state, no badge is known.
         let mut flow = Flow::default();

@@ -6,9 +6,9 @@ use embedded_svc::io::Write;
 use esp_idf_svc::http::client::{Configuration, EspHttpConnection};
 use esp_idf_svc::io::EspIOError;
 use matecrew_core::contract::{
-    Account, AccountRequest, CancelPurchaseRequest, CancelPurchaseResponse, CommandsResponse, DeviceState, LinkError,
-    LinkGranted, LinkStart, ServeRequest, ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
-    ACCOUNT_PATH, CANCEL_PURCHASE_PATH,
+    Account, AccountRequest, AvatarResponse, CancelPurchaseRequest, CancelPurchaseResponse, CommandsResponse, DeviceState,
+    LinkError, LinkGranted, LinkStart, ServeRequest, ServeResponse, StatusReport, Take, TakesRequest, TakesResponse,
+    ACCOUNT_PATH, AVATAR_PATH, CANCEL_PURCHASE_PATH,
 };
 use matecrew_core::flow::Cause;
 use serde::{de::DeserializeOwned, Serialize};
@@ -255,6 +255,11 @@ impl Api {
     /// (`Unreachable`), an error status (`Status`) and an answer that does not parse.
     pub fn account(&self, request: &AccountRequest) -> Result<Account> {
         expect_json(self.send(Method::Post, ACCOUNT_PATH, Body::json(request)?, TIMEOUT)?)
+    }
+
+    /// The badge holder's picture, for the menu after a badge.
+    pub fn avatar(&self, request: &AccountRequest) -> Result<AvatarResponse> {
+        expect_json(self.send(Method::Post, AVATAR_PATH, Body::json(request)?, TIMEOUT)?)
     }
 
     pub fn cancel_purchase(&self, request: &CancelPurchaseRequest) -> Result<CancelPurchaseResponse> {
