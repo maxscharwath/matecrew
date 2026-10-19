@@ -10,7 +10,9 @@ import {
   H1,
   Lead,
   Num,
-  Badge,
+  Alert,
+  AlertTitle,
+  AlertDescription,
   cond,
   or,
   Empty,
@@ -18,7 +20,7 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@matecrew/device-ui";
-import { CircleCheckBigIcon, ClockIcon, DoorOpenIcon } from "@matecrew/device-ui/icons/lucide";
+import { CircleCheckBigIcon, DoorOpenIcon, RefrigeratorIcon } from "@matecrew/device-ui/icons/lucide";
 import { BadgeOverReader } from "../art";
 import { Avatar, Frame, PageDots, Picture, useT, view } from "./shared";
 
@@ -103,19 +105,23 @@ export function leave() {
   );
 }
 
-/** Done: who, what (its picture beside the tick), and the way back. */
+/** Done: what (its picture beside the tick), cheers to whom, and a can to put in the fridge. */
 export function taken() {
   const t = useT();
   return (
-    <Frame title={view("item")}>
+    <Frame title={view("item")} gap={20}>
       <Empty>
         <HStack gap={24} align="center">
-          <Picture value={view("picture", [])} size={128} />
-          <EmptyMedia variant="ink" size={128}><CircleCheckBigIcon size={64} strokeWidth={4} /></EmptyMedia>
+          <Picture value={view("picture", [])} size={112} />
+          <EmptyMedia variant="ink" size={112}><CircleCheckBigIcon size={56} strokeWidth={4} /></EmptyMedia>
         </HStack>
-        <H1 align="center">{t("taken.heading", { name: view("name") })}</H1>
-        <Badge variant="secondary"><ClockIcon size={18} /> {t("taken.back")}</Badge>
+        <H1 align="center">{t("taken.heading", { name: view("first") })}</H1>
       </Empty>
+      <Alert>
+        <RefrigeratorIcon size={56} strokeWidth={3} />
+        <AlertTitle>{t("taken.fridge")}</AlertTitle>
+        <AlertDescription>{t("taken.fridgeHint")}</AlertDescription>
+      </Alert>
     </Frame>
   );
 }

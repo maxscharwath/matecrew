@@ -292,7 +292,8 @@ pub fn taken_screen<D: DrawTarget<Color = BinaryColor>>(
     item: &str,
     picture: &[u8],
 ) -> Result<(), D::Error> {
-    render(d, "taken", json!({"name":name,"item":item,"picture":picture::pictures(picture).0}))
+    let first = name.split_whitespace().next().unwrap_or(name);
+    render(d, "taken", json!({"name":name,"first":first,"item":item,"picture":picture::pictures(picture).0}))
 }
 
 /// What a screen shows for someone: their avatar at `side` (`hasAvatar`), else their initials.
