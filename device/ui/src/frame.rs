@@ -55,7 +55,7 @@ impl Window {
     }
 
     /// The window's bytes out of a whole frame, row by row.
-    pub fn bytes<'a>(&self, frame: &'a [u8]) -> impl Iterator<Item = u8> + 'a {
+    pub fn bytes<'a>(&self, frame: &'a [u8]) -> impl DoubleEndedIterator<Item = u8> + 'a {
         let (x0, x1) = ((self.x / 8) as usize, ((self.x + self.width) / 8) as usize);
         let rows = self.y as usize..(self.y + self.height) as usize;
         rows.flat_map(move |y| frame[y * ROW + x0..y * ROW + x1].iter().copied())

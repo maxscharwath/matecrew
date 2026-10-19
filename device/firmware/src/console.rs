@@ -2,19 +2,18 @@
 //! reader: `l`, `r`, `b <uid>`, `s`. See `matecrew_core::console`.
 
 use anyhow::Result;
-use esp_idf_svc::sys::{
-    esp, esp_vfs_usb_serial_jtag_use_driver, usb_serial_jtag_driver_config_t,
-    usb_serial_jtag_driver_install,
+use esp_idf_svc::{
+    hal::delay::BLOCK,
+    sys::{
+        esp, esp_vfs_usb_serial_jtag_use_driver, usb_serial_jtag_driver_config_t,
+        usb_serial_jtag_driver_install, usb_serial_jtag_read_bytes,
+    },
 };
 use matecrew_core::{
     console::{self, Command},
     flow::Event,
 };
-use std::{
-    io::{self, Read},
-    sync::mpsc::Sender,
-    thread,
-};
+use std::{sync::mpsc::Sender, thread};
 
 use crate::Input;
 
@@ -31,8 +30,7 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
     crate::cores::stacks_in_psram(|| thread::Builder::new().stack_size(4096).spawn(move || {
         log::info!("console: {}", console::HELP);
         let mut line = Vec::new();
-        for byte in io::stdin().lock().bytes() {
-            let Ok(byte) = byte else { continue };
+        for byte in bytes() {
             if byte != b'\r' && byte != b'\n' {
                 line.push(byte);
                 continue;
@@ -68,4 +66,21 @@ pub fn watch(inputs: Sender<Input>) -> Result<()> {
         }
     }))?;
     Ok(())
+}
+
+/// The console's bytes, out of the driver's buffer. Without a USB host (on a wall charger)
+/// stdin fails at once, every time: read in a loop, it took a whole core and the boot stopped
+/// at its first screen. The driver's read waits for bytes instead.
+fn bytes() -> impl Iterator<Item = u8> {
+    let mut buf = [0u8; 64];
+    let (mut at, mut len) = (0, 0);
+    std::iter::from_fn(move || {
+        while at == len {
+            // SAFETY: `watch` installed the driver, and `buf` outlives the call.
+            let read = unsafe { usb_serial_jtag_read_bytes(buf.as_mut_ptr().cast(), buf.len() as u32, BLOCK) };
+            (at, len) = (0, read.max(0) as usize);
+        }
+        at += 1;
+        Some(buf[at - 1])
+    })
 }

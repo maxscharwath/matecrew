@@ -14,6 +14,9 @@
 //! turning it back on is far quicker than waking it from deep sleep (reset,
 //! settings, the old image sent again, about 350 ms). `sleep` puts it in deep
 //! sleep, for when nobody uses the terminal.
+//!
+//! The panel sits in the case flex cable up, upside down for the controller:
+//! frames turn 180° on their way to it (`turned`).
 
 use anyhow::{bail, Result};
 use esp_idf_svc::hal::{
@@ -21,7 +24,7 @@ use esp_idf_svc::hal::{
     gpio::{Input, Output, PinDriver},
     spi::{SpiDeviceDriver, SpiDriver},
 };
-use matecrew_ui::frame::Window;
+use matecrew_ui::{frame::Window, HEIGHT, WIDTH};
 use std::time::{Duration, Instant};
 
 type Spi = SpiDeviceDriver<'static, SpiDriver<'static>>;
@@ -32,6 +35,12 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 /// In partial mode the data interval setting (0x50 = A9) flips the meaning of
 /// a bit: 0 is ink. Full mode (0x50 = 10) takes 1 as ink, like our frames.
 const PARTIAL_INVERTS: bool = true;
+
+/// Where `window` lands on the panel once the frame is turned 180°. Its bytes go in reverse,
+/// each with its bits reversed: windows sit on byte boundaries, so whole bytes swap places.
+fn turned(window: Window) -> Window {
+    Window { x: WIDTH - window.x - window.width, y: HEIGHT - window.y - window.height, ..window }
+}
 
 /// Bytes per SPI transaction; the driver moves them by DMA.
 pub const CHUNK: usize = 4096;
@@ -81,7 +90,7 @@ impl Epd {
             self.command(0x60, &[0x22])?; // TCON
             self.command(0x50, &[0x10, 0x07])?;
         }
-        self.data_command(0x13, frame.iter().copied())?;
+        self.data_command(0x13, frame.iter().rev().map(|b| b.reverse_bits()))?;
         self.command(0x12, &[])?; // refresh
         FreeRtos::delay_ms(1);
         self.wait()?;
@@ -91,7 +100,7 @@ impl Epd {
     /// Refreshes only `window`, from `before` to `after` (whole frames), `passes` times: a second
     /// pass drives the changed pixels again, so the old screen no longer shows through.
     pub fn partial(&mut self, window: Window, before: &[u8], after: &[u8], passes: u32) -> Result<()> {
-        let ink = |b: u8| if PARTIAL_INVERTS { !b } else { b };
+        let ink = |b: u8| if PARTIAL_INVERTS { !b.reverse_bits() } else { b.reverse_bits() };
         let started = Instant::now();
         let waking = self.state == State::Asleep;
         if waking {
@@ -109,9 +118,10 @@ impl Epd {
         }
         let woken = started.elapsed();
         self.command(0x91, &[])?; // partial in
-        let (x_end, y_end) = (window.x + window.width - 1, window.y + window.height - 1);
+        let panel = turned(window);
+        let (x_end, y_end) = (panel.x + panel.width - 1, panel.y + panel.height - 1);
         let mut area = Vec::with_capacity(9);
-        for v in [window.x, x_end, window.y, y_end] {
+        for v in [panel.x, x_end, panel.y, y_end] {
             area.extend_from_slice(&[(v >> 8) as u8, (v & 0xFF) as u8]);
         }
         area.push(0x01); // scan inside the window only
@@ -123,9 +133,9 @@ impl Epd {
             if waking || pass > 0 {
                 // Its memory did not survive the sleep, or the first pass made the new image
                 // the old one: tell it what to drive from.
-                self.data_command(0x10, window.bytes(before).map(ink))?;
+                self.data_command(0x10, window.bytes(before).rev().map(ink))?;
             }
-            self.data_command(0x13, window.bytes(after).map(ink))?;
+            self.data_command(0x13, window.bytes(after).rev().map(ink))?;
             sending += at.elapsed();
             self.command(0x12, &[])?;
             FreeRtos::delay_ms(1);

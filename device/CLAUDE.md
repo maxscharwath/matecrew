@@ -47,7 +47,7 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 | Buzzer piézo passif | D5 | PWM (LEDC) vers 4 kHz, l'autre fil à GND ; partage D5 avec la mesure batterie (un piézo ne laisse passer aucun courant continu) : sortie le temps d'un bip, flottante sinon |
 | Mesure batterie | D5 (ADC1) | point milieu d'un pont 1 MΩ / 1 MΩ entre BAT+ et GND : Vbat ≈ 2 × Vmesurée, à calibrer ; optionnel, sans pont la batterie ne s'affiche pas |
 
-- **Écran** : dalle 7,5" 800 × 480 noir et blanc du kit « Seeed XIAO 7.5" ePaper Panel ». Elle est montée nappe en haut, donc il faudra peut-être tourner l'affichage de 180°.
+- **Écran** : dalle 7,5" 800 × 480 noir et blanc du kit « Seeed XIAO 7.5" ePaper Panel ». Elle est montée nappe en haut : `firmware/src/epd.rs` tourne l'image de 180° en l'envoyant.
 - **Lecteur NFC** : PN532 V3, mini-interrupteurs en I2C, adresse 0x24. IRQ et RSTO ne sont pas câblés.
 - **Alimentation** : LiPo 1S 2000 mAh (654060) soudée sur les pastilles BAT+/BAT− du XIAO, qui la charge par son USB-C. Il n'y a pas d'interrupteur.
   La broche 5V du XIAO n'est volontairement pas reliée à la carte driver, pour isoler sa puce ETA9740 qui vide la batterie en veille. Tout fonctionne en 3,3 V.

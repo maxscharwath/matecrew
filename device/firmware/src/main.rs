@@ -78,8 +78,6 @@ const RESYNC_AFTER: Duration = Duration::from_secs(60);
 const OFFLINE_RETRY: Duration = Duration::from_secs(30);
 /// How often the NFC reader is asked for a badge while the flow waits for one.
 const BADGE_POLL: Duration = Duration::from_millis(150);
-/// The reader is also polled while idle, more slowly: a badge put on it shows in a toast.
-const IDLE_BADGE_POLL: Duration = Duration::from_millis(400);
 /// Before this (November 2023) the clock has not been set by a sync yet.
 const CLOCK_SET_AFTER: i64 = 1_700_000_000;
 
@@ -102,8 +100,6 @@ pub enum Input {
     Networks,
     /// An app's data or image, from the fetching thread.
     Fetched(fetch::Fetched),
-    /// A badge put on the reader while nobody asked for one.
-    BadgeSeen(String),
     /// A touch key, already beeped by the keys thread the moment it was touched.
     Pressed(Event),
     /// A transfer with the site started or ended: the status bar's arrows may change.
@@ -208,7 +204,6 @@ fn app() -> Result<()> {
     };
     boot.start("screen", &[]);
     boot.done("screenReady", &[]);
-    boot.start("reader", &[]);
     if !warm {
         screen.show(|d| boot.render(d))?;
     }
@@ -259,18 +254,21 @@ fn app() -> Result<()> {
     cores::on(Core::Core1, || {
         keys::watch(p.pins.gpio5, p.pins.gpio8, sender.clone(), buzzer.clone(), woken)
     })?;
+    // The reader stays asleep until a badge is wanted, unless it is kept awake.
     let nfc = match Nfc::new(p.i2c0, p.pins.gpio43, p.pins.gpio44) {
-        Ok(nfc) => Some(nfc),
+        Ok(mut nfc) => {
+            if nfc::ALWAYS_AWAKE {
+                if let Err(e) = nfc.wake() {
+                    log::warn!("NFC: {e:#}");
+                }
+            }
+            Some(nfc)
+        }
         Err(e) => {
-            log::warn!("no NFC reader ({e:#}): badges come from the console, `b <uid>`");
-            nfc::diagnose();
+            log::warn!("no NFC bus ({e:#}): badges come from the console, `b <uid>`");
             None
         }
     };
-    match &nfc {
-        Some(nfc) => boot.done("readerReady", &[("version", nfc.version())]),
-        None => boot.fail("readerMissing", &[]),
-    }
 
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(p.modem, sys_loop.clone(), Some(nvs.clone()))?,
@@ -414,7 +412,6 @@ fn app() -> Result<()> {
         _sntp: sntp,
         _ble: ble,
         bluetooth,
-        badge_on_reader: None,
         pressed: false,
         net_drawn: (false, false),
         ble_drawn: (false, false),
@@ -704,8 +701,6 @@ struct Terminal {
     /// Its name and this boot's passkey, for the about page.
     bluetooth: String,
     fetcher: fetch::Fetcher,
-    /// The badge on the reader while idle, toasted once until it is taken away.
-    badge_on_reader: Option<String>,
     /// A key press being handled already beeped: the key beep its screen asks for is that one.
     pressed: bool,
     /// The network arrows (up, down) the last drawn screen shows.
@@ -837,10 +832,6 @@ impl Terminal {
                     if pairing || ble::linked() != self.ble_drawn {
                         self.redraw_current()?;
                     }
-                }
-                Next::Input(Input::BadgeSeen(uid)) => {
-                    self.touch();
-                    self.badge_seen(&uid)?
                 }
                 Next::Input(Input::Tap(x, y)) => {
                     self.touch();
@@ -1013,12 +1004,12 @@ impl Terminal {
                     Next::Tick
                 });
             }
-            let idle_reader = self.flow.is_idle() && self.nfc.is_some();
             let wait = if self.flow.wants_badge() {
                 BADGE_POLL.min(deadline - now)
-            } else if idle_reader {
-                IDLE_BADGE_POLL.min(deadline - now)
             } else {
+                if let Some(Err(e)) = self.nfc.as_mut().map(Nfc::rest) {
+                    log::warn!("NFC: {e:#}");
+                }
                 deadline - now
             };
             // Wake when the network arrows go out (the top of this loop redraws them).
@@ -1032,16 +1023,6 @@ impl Terminal {
                 match nfc.read_uid() {
                     Ok(Some(uid)) => return Ok(Next::Input(Input::Flow(Event::Badge { uid }))),
                     Ok(None) => {}
-                    Err(e) => log::warn!("NFC: {e:#}"),
-                }
-            } else if let (true, Some(nfc)) = (idle_reader, &mut self.nfc) {
-                match nfc.read_uid() {
-                    Ok(Some(uid)) if self.badge_on_reader.as_ref() != Some(&uid) => {
-                        self.badge_on_reader = Some(uid.clone());
-                        return Ok(Next::Input(Input::BadgeSeen(uid)));
-                    }
-                    Ok(Some(_)) => {}
-                    Ok(None) => self.badge_on_reader = None,
                     Err(e) => log::warn!("NFC: {e:#}"),
                 }
             }
@@ -1171,18 +1152,6 @@ impl Terminal {
 
     /// A badge on the reader while nobody asked for one: a toast says whose it is, with the
     /// badge tone, so a badge can be tried at any time.
-    fn badge_seen(&mut self, uid: &str) -> Result<()> {
-        let name = self.state.as_ref().and_then(|state| state.badge(uid)).map(|badge| badge.name.clone());
-        log::info!("badge seen: {}", if name.is_some() { "known" } else { "unknown" });
-        self.buzzer.beep(matecrew_core::flow::Beep::Badge);
-        let message = match name {
-            Some(name) => format!("Badge de {name}"),
-            None => format!("Badge inconnu · {uid}"),
-        };
-        ui::notifications::notify(&message, 4000, self.started.elapsed().as_millis() as u64);
-        self.redraw_current()
-    }
-
     fn request_images(&mut self) {
         if let Some(app) = &self.app {
             for request in app.image_requests() {
