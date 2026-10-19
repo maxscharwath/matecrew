@@ -66,6 +66,10 @@ release: ui
 publish:
     cd .. && url=$(sed -n 's/^DATABASE_URL=//p' .env.local | tr -d '"' | sed -E 's#/[^/?]+(\?|$)#/matecrew_prod\1#') && DATABASE_URL="$url" DIRECT_URL="$url" LOCAL_STORAGE_DIR=.data/storage bun scripts/publish-firmware.ts device/release/matecrew-{{version}}.bin
 
+# Publish that image on the production site (Cloudflare R2 and D1, with the wrangler login): terminals install it at their next sync.
+publish-cloudflare:
+    cd .. && bun scripts/publish-firmware.ts device/release/matecrew-{{version}}.bin --cloudflare
+
 # Forget the Wi-Fi, the token and the screen: the device starts setup again.
 forget:
     espflash erase-region 0x9000 0x6000
