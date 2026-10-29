@@ -56,7 +56,8 @@ Le firmware est en Rust : il utilise les numéros de GPIO. Correspondance XIAO E
 ## Comportement attendu
 
 ### Repos
-- L'appareil est en deep sleep. L'écran e-ink garde le stock et les libellés des deux actions, chacun au-dessus de sa touche.
+- Pendant les heures d'ouverture, l'appareil reste éveillé et le PN532 cherche un badge : on badge sans toucher de touche (demande de l'utilisateur, firmware 0.6.5).
+- En dehors, l'appareil est en deep sleep. L'écran e-ink garde son image (écran de nuit) sans courant.
 
 ### Prise
 1. Toucher une touche réveille le XIAO (ext1, `ESP_EXT1_WAKEUP_ANY_HIGH` sur D4 et D9). Un bip court, puis l'écran demande le badge (rafraîchissement partiel).

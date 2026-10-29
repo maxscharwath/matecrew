@@ -2,9 +2,9 @@ import { getDateInTimezone } from "@/lib/date";
 import { formatTime, type TimeFormat } from "@/lib/device/clock";
 
 /**
- * A terminal's office hours (`Device.openFrom`, `openUntil`, `openDays`): inside them it sleeps
- * between uses with the stock on its screen, outside them it shows its night screen and sleeps
- * until they start again.
+ * A terminal's office hours (`Device.openFrom`, `openUntil`, `openDays`): inside them it stays
+ * awake so a badge works without a key, outside them it shows its night screen and sleeps until
+ * they start again.
  */
 export type OfficeHours = {
   /** Local "HH:MM", office timezone. */

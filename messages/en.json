@@ -1651,7 +1651,7 @@
     },
     "hours": {
       "title": "Opening hours",
-      "hint": "During these hours the terminal sleeps between uses, the stock on its screen and a moon in its status bar; a key wakes it. Outside them it shows its night screen and wakes up when the office opens.",
+      "hint": "During these hours the terminal stays awake: a badge opens its menu, no key needed. Outside them it shows its night screen, sleeps, and wakes up when the office opens.",
       "from": "Opens",
       "until": "Closes",
       "days": "Days",
@@ -1784,7 +1784,7 @@
         },
         "sleep": {
           "title": "Deep sleep",
-          "text": "Between uses the XIAO goes into deep sleep and keeps only its clock running. The e-paper keeps its image without power."
+          "text": "Outside office hours the XIAO goes into deep sleep and keeps only its clock running. The e-paper keeps its image without power."
         },
         "sync": {
           "title": "Sync",

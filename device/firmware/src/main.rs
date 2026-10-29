@@ -1746,7 +1746,17 @@ impl Terminal {
             return Some("in use");
         }
         let overlay = ui::notifications::deadline().or_else(|| self.app.as_ref().and_then(|app| app.overlay_deadline()));
-        overlay.map(|_| "a message on screen")
+        if overlay.is_some() {
+            return Some("a message on screen");
+        }
+        // The reader only polls awake: inside the hours a badge alone opens the menu, no key first.
+        self.office_open().then_some("office hours")
+    }
+
+    /// Inside the office hours the last sync gave, and they have not changed since.
+    fn office_open(&self) -> bool {
+        let hours = self.state.as_ref().and_then(|state| state.hours.as_ref());
+        hours.is_some_and(|hours| hours.open && time::parse_iso(&hours.until).is_some_and(|until| until > now()))
     }
 
     /// While asleep through closed hours: the night screen's words. `None` awake, inside the
@@ -1792,11 +1802,12 @@ impl Terminal {
         }
     }
 
-    /// Deep sleep, with the stock and the moon inside office hours (waking up every DAY_WAKE to
-    /// sync, when the site's state changes by itself, and at closing), with the night screen
-    /// outside them (waking up when they open). A key wakes it. `forced`: asked for (a console,
-    /// the serial one), even without office hours or for a short while; `cap`: its timer at the
-    /// latest. Returns only when it did not sleep: a key meanwhile, or too soon to be worth it.
+    /// Deep sleep, with the night screen outside office hours (waking up when they open). Inside
+    /// them only when asked for, or when the site cannot say they still hold: the stock and the
+    /// moon (waking up every DAY_WAKE to sync, when the site's state changes by itself, and at
+    /// closing). A key wakes it. `forced`: asked for (a console, the serial one), even without
+    /// office hours or for a short while; `cap`: its timer at the latest. Returns only when it did
+    /// not sleep: open after all, a key meanwhile, or too soon to be worth it.
     fn doze(&mut self, forced: bool, cap: Option<Duration>) -> Result<()> {
         let stale = |terminal: &Self| {
             let until = terminal.state.as_ref().and_then(|s| s.hours.as_ref()).and_then(|h| time::parse_iso(&h.until));
@@ -1805,6 +1816,12 @@ impl Terminal {
         if stale(self) {
             // The office opened or closed since the last sync: what now?
             self.sync(false);
+            if !forced && self.office_open() {
+                // Open: awake, the clock back, the reader waiting for a badge.
+                self.wake_up();
+                self.dirty = true;
+                return Ok(());
+            }
         }
         let hours = self.state.as_ref().and_then(|s| s.hours.clone());
         if hours.is_none() && !forced {

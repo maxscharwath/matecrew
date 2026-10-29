@@ -109,10 +109,13 @@ Les heures d'ouverture se règlent par terminal (Admin > Appareils > un terminal
 jours ; 07:30 à 19:00 du lundi au vendredi par défaut). L'état les donne dans `hours` : ouvert ou fermé, jusqu'à
 quand, et pour l'écran de nuit le jour (vide pour le lendemain matin) et l'heure du réveil.
 
-- **Pendant les heures** : deux minutes sans touche, badge ni commande, le terminal se met en deep sleep. L'écran
-  garde le stock, avec une lune à la place de l'heure dans la barre d'état. Il se réveille toutes les 15 min pour se
-  synchroniser, ainsi qu'à `refreshAt` et à la fermeture. Après ce réveil, il se rendort 1,5 s après l'ouverture du
-  relais, ou au bout de 10 s : le relais a eu le temps de livrer les commandes en attente.
+- **Pendant les heures** : le terminal reste éveillé. Le PN532 cherche un badge en continu : un badge ouvre le
+  menu sans toucher de touche. À la fermeture, le terminal se synchronise, puis passe à l'écran de nuit.
+- **Veille pendant les heures** : seulement sur demande (`sleep` d'une console), ou si le site ne répond pas après
+  la fermeture prévue. L'écran garde le stock, avec une lune à la place de l'heure dans la barre d'état. Le terminal
+  se réveille toutes les 15 min pour se synchroniser, ainsi qu'à `refreshAt` et à la fermeture. Après ce réveil, il
+  se rendort 1,5 s après l'ouverture du relais, ou au bout de 10 s : le relais a eu le temps de livrer les commandes
+  en attente.
 - **En dehors** : l'écran de nuit (« Bonne nuit », ou « Bon week-end », avec l'heure du réveil). Le terminal dort
   jusqu'à l'ouverture et se réveille toutes les 2 h pour remettre son horloge à l'heure, car le RTC dérive.
 - **Une touche le réveille** (ext1 sur D4 et D9). Sur le stock, l'appui compte, même s'il est déjà relâché quand le
@@ -121,8 +124,9 @@ quand, et pour l'écran de nuit le jour (vide pour le lendemain matin) et l'heur
   avec son empreinte, et l'usure de l'image. Le premier rafraîchissement est alors un partiel. Si l'écran redessiné
   diffère du panneau, ce premier rafraîchissement est complet. Le Wi-Fi reprend le point d'accès mémorisé, sans
   scan, et la dernière adresse DHCP. Après une touche, il se connecte en arrière-plan.
-- **Ce qui empêche la veille** : un ordinateur sur l'USB (sinon le port disparaît), une console qui regarde, un
-  navigateur connecté en Bluetooth, un écran en cours ou un message affiché, ou un site qui ne donne pas d'heures.
+- **Ce qui empêche la veille** : les heures d'ouverture, un ordinateur sur l'USB (sinon le port disparaît), une
+  console qui regarde, un navigateur connecté en Bluetooth, un écran en cours ou un message affiché, ou un site qui
+  ne donne pas d'heures.
 - **Avant de dormir** : le terminal dit au relais `sleep` (avec l'heure du réveil) puis ferme le WebSocket. La
   console affiche « En veille · réveil à 14:30 ». Les commandes attendent son réveil (24 h au plus). Le PN532 passe
   en power-down et le contrôleur de l'écran en veille.

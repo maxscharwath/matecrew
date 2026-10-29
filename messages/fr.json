@@ -1651,7 +1651,7 @@
     },
     "hours": {
       "title": "Heures d'ouverture",
-      "hint": "Pendant ces heures, le terminal dort entre deux usages, le stock à l'écran, une lune dans sa barre d'état ; une touche le réveille. En dehors, il affiche son écran de nuit et se réveille à l'ouverture.",
+      "hint": "Pendant ces heures, le terminal reste éveillé : un badge ouvre son menu, sans toucher de touche. En dehors, il affiche son écran de nuit, dort et se réveille à l'ouverture.",
       "from": "Ouverture",
       "until": "Fermeture",
       "days": "Jours",
@@ -1784,7 +1784,7 @@
         },
         "sleep": {
           "title": "Sommeil profond",
-          "text": "Entre deux usages, le XIAO passe en sommeil profond et ne garde que son horloge. L'e-paper garde son image sans courant."
+          "text": "En dehors des heures d'ouverture, le XIAO passe en sommeil profond et ne garde que son horloge. L'e-paper garde son image sans courant."
         },
         "sync": {
           "title": "Synchronisation",
