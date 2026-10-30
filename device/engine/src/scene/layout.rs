@@ -50,7 +50,8 @@ pub struct Layout {
     pub align: u8,
     /// Main axis: 0 start, 1 center, 2 end, 3 space-between, 4 space-around, 5 space-evenly.
     pub justify: u8,
-    pub gap: u16,
+    /// Space between children; negative overlaps them, later ones on top (an avatar stack).
+    pub gap: i16,
     /// Top, right, bottom, left.
     pub padding: [u16; 4],
 }
@@ -59,11 +60,15 @@ impl Layout {
         self.direction <= 1
             && self.align <= 3
             && self.justify <= 5
-            && u32::from(self.gap) <= MAX_VIEWPORT
+            && u32::from(self.gap.unsigned_abs()) <= MAX_VIEWPORT
             && self.padding.iter().all(|p| u32::from(*p) <= MAX_VIEWPORT)
     }
     fn row(&self) -> bool {
         self.direction == 1
+    }
+    /// The gaps between `count` children: negative when they overlap.
+    fn gaps(&self, count: u32) -> i64 {
+        i64::from(self.gap) * i64::from(count.saturating_sub(1))
     }
     fn inner(&self, area: Rectangle) -> Rectangle {
         let [top, right, bottom, left] = self.padding.map(u32::from);
@@ -331,7 +336,7 @@ fn flex_content(children: &[Node], layout: &Layout, width: Option<u32>, env: Env
     let weights: u32 = shown.iter().map(|c| weight(c)).sum();
     let room = inner.filter(|_| layout.row() && weights > 0).map(|inner| {
         let others: u32 = shown.iter().zip(&natural).filter(|(c, _)| weight(c) == 0).map(|(_, w)| *w).sum();
-        inner.saturating_sub(others + u32::from(layout.gap) * (shown.len() as u32).saturating_sub(1))
+        (i64::from(inner) - i64::from(others) - layout.gaps(shown.len() as u32)).clamp(0, i64::from(u32::MAX)) as u32
     });
     for (index, child) in shown.iter().enumerate() {
         let rect = child.rect();
@@ -365,7 +370,7 @@ fn flex_content(children: &[Node], layout: &Layout, width: Option<u32>, env: Env
         cross = cross.max(c);
         count += 1;
     }
-    main += u32::from(layout.gap) * count.saturating_sub(1);
+    let main = (i64::from(main) + layout.gaps(count)).max(0) as u32;
     if layout.row() {
         Size::new(main + left + right, cross + top + bottom)
     } else {
@@ -439,9 +444,8 @@ fn flex(children: &[Node], layout: &Layout, area: Rectangle, env: Env, item: Opt
         })
         .collect();
     let visible = items.iter().filter(|i| i.visible).count() as u32;
-    let gaps = u32::from(layout.gap) * visible.saturating_sub(1);
-    let used: u32 = items.iter().map(|i| i.main).sum::<u32>() + gaps;
-    let mut free = inner_main as i64 - used as i64;
+    let used = items.iter().map(|i| i64::from(i.main)).sum::<i64>() + layout.gaps(visible);
+    let mut free = inner_main as i64 - used;
     let weights: u32 = items.iter().map(|i| i.weight).sum();
     if free > 0 && weights > 0 {
         let mut left = free as u32;
@@ -492,7 +496,7 @@ fn flex(children: &[Node], layout: &Layout, area: Rectangle, env: Env, item: Opt
         0
     };
     let free = free.max(0) as u32;
-    let (mut cursor, spacing) = match layout.justify {
+    let (cursor, spacing) = match layout.justify {
         1 if row => (free / 2, 0),
         1 => (0, 0),
         2 => (free, 0),
@@ -501,13 +505,15 @@ fn flex(children: &[Node], layout: &Layout, area: Rectangle, env: Env, item: Opt
         5 if visible > 0 => (free / (visible + 1), free / (visible + 1)),
         _ => (0, 0),
     };
+    // Signed: a negative gap steps back over the previous child.
+    let mut cursor = start + cursor as i32;
     children
         .iter()
         .zip(items)
         .map(|(child, it)| {
             let offset = Point::new(child.rect().x, child.rect().y);
             if !it.visible {
-                let at = if row { Point::new(start + cursor as i32, 0) } else { Point::new(0, start + cursor as i32) };
+                let at = if row { Point::new(cursor, 0) } else { Point::new(0, cursor) };
                 return Rectangle::new(inner.top_left + at, Size::zero());
             }
             let cross_at = match layout.align {
@@ -516,13 +522,13 @@ fn flex(children: &[Node], layout: &Layout, area: Rectangle, env: Env, item: Opt
                 2 => inner_cross.saturating_sub(it.cross) as i32,
                 _ => 0,
             };
-            let main_at = start + cursor as i32;
+            let main_at = cursor;
             let (at, size) = if row {
                 (Point::new(main_at, cross_at), Size::new(it.main, it.cross))
             } else {
                 (Point::new(cross_at, main_at), Size::new(it.cross, it.main))
             };
-            cursor += it.main + u32::from(layout.gap) + spacing;
+            cursor += (it.main + spacing) as i32 + i32::from(layout.gap);
             Rectangle::new(inner.top_left + at + offset, size)
         })
         .collect()
@@ -615,5 +621,17 @@ mod tests {
         assert_eq!(placed[0].top_left.x, 45);
         assert_eq!(placed[1].size, Size::zero());
         assert_eq!(placed[2].top_left.x, 105);
+    }
+    #[test]
+    fn negative_gap_overlaps_and_the_row_hugs_what_shows() {
+        let data = json!({});
+        let env = Env { data: &data, theme: Theme::Paper };
+        let box36 = || Node::Group { rect: Rect { x: 0, y: 0, width: 36, height: 36 }, children: vec![], layout: None };
+        let stack = |n: usize| group(Layout { direction: 1, gap: -12, ..Layout::default() }, HUG, HUG, (0..n).map(|_| box36()).collect());
+        // Each one 24 px after the last: three are 36 + 2 × 24 wide, one is its own width.
+        assert_eq!(content(&stack(3), None, env, None), Size::new(84, 36));
+        assert_eq!(content(&stack(1), None, env, None), Size::new(36, 36));
+        let placed = place(&stack(3), Rectangle::new(Point::zero(), Size::new(84, 36)), env, None);
+        assert_eq!(placed.iter().map(|r| r.top_left.x).collect::<Vec<_>>(), [0, 24, 48]);
     }
 }

@@ -10,6 +10,7 @@ import {
   Separator,
   Show,
   Card,
+  Surface,
   Badge,
   Stat,
   StatLabel,
@@ -31,12 +32,22 @@ import {
   lt,
   ne,
   not,
+  type Children,
 } from "@matecrew/device-ui";
 import { CircleCheckBigIcon, HandPlatterIcon, PackageOpenIcon, TriangleAlertIcon } from "@matecrew/device-ui/icons/lucide";
 import { Avatar, Frame, Picture, useT, view } from "./shared";
 
 /** People with their avatar on an order's card: as many as the site sends (PREPARATION_PEOPLE). */
 const PEOPLE = 5;
+/** How far each avatar of an order's stack covers the one before: initials stay whole. */
+const STACK_OVERLAP = 6;
+
+/** A 32 px avatar on a ring of paper: in a stack, the ring parts it from the one it covers. */
+const Ring = ({ children }: { children: Children }) => (
+  <Surface variant="paper" radius={18} width={36} height={36} align="center" justify="center">
+    {children}
+  </Surface>
+);
 
 const item = (index: number, field: string, fallback: unknown = "") => view(`items.${index}.${field}`, fallback);
 
@@ -240,26 +251,34 @@ export function preparation() {
   const row = (i: number, field: string, fallback: unknown = "") => view(`prepRows.${i}.${field}`, fallback);
   const order = (i: number) => (
     <Show when={row(i, "visible", false)}>
-      <Card variant="outline" width="fill" height={128} direction="row" gap={16} padding={[6, 16]} align="center">
-        <Picture value={row(i, "picture48", [])} size={64} half />
-        <VStack gap={4} width="fill">
-          <HStack gap={10}>
+      <Card variant="outline" width="fill" height="fill" gap={8} padding={[10, 14]} justify="center">
+        <HStack gap={16} align="center">
+          <Picture value={row(i, "picture48", [])} size={64} half />
+          {/* The product's whole name: two lines, then smaller, before an ellipsis. */}
+          <HStack gap={10} align="start" width="fill">
             <Num size="sm">{row(i, "count", 0)}</Num>
-            <Large lines={1} width="fill">{row(i, "name")}</Large>
+            <Large lines={2} fit width="fill">{row(i, "name")}</Large>
           </HStack>
-          {/* Who: their avatars (or initials), the rest counted, then their names. */}
-          <HStack gap={4} align="center">
+        </HStack>
+        {/* Who, across the card: their avatars (or initials) stacked, the rest counted, their names
+            8 px away (6, and the ring's 2 px of paper). */}
+        <HStack gap={6} align="center">
+          <HStack gap={-STACK_OVERLAP} align="center">
             {Array.from({ length: PEOPLE }, (_, j) => (
               <Show key={j} when={lt(j, row(i, "peopleCount", 0))}>
-                <Avatar person={`prepRows.${i}.people.${j}`} size={32} />
+                <Ring><Avatar person={`prepRows.${i}.people.${j}`} size={32} /></Ring>
               </Show>
             ))}
             <Show when={ne(row(i, "more", 0), 0)}>
-              <Small>{concat("+", row(i, "more", 0))}</Small>
+              <Ring>
+                <Surface variant="outline" radius={16} width={32} height={32} align="center" justify="center">
+                  <Small align="center">{concat("+", row(i, "more", 0))}</Small>
+                </Surface>
+              </Ring>
             </Show>
           </HStack>
-          <Muted lines={1} fit width="fill">{row(i, "names")}</Muted>
-        </VStack>
+          <Muted lines={1} width="fill">{row(i, "names")}</Muted>
+        </HStack>
       </Card>
     </Show>
   );
@@ -270,8 +289,8 @@ export function preparation() {
         <H3 width="fill">{view("preparation.title")}</H3>
         <Badge>{view("preparation.total")}</Badge>
       </HStack>
-      <HStack gap={16}>{[0, 1].map(order)}</HStack>
-      <HStack gap={16}>{[2, 3].map(order)}</HStack>
+      <HStack gap={16} height="fill">{[0, 1].map(order)}</HStack>
+      <HStack gap={16} height="fill">{[2, 3].map(order)}</HStack>
     </Frame>
   );
 }

@@ -197,7 +197,7 @@ impl<'a> Reader<'a> {
             direction: self.u8()?,
             align: self.u8()?,
             justify: self.u8()?,
-            gap: self.u16()?,
+            gap: self.i16()?,
             padding: [self.u16()?, self.u16()?, self.u16()?, self.u16()?],
         };
         if layout.valid() { Ok(layout) } else { Err("invalid layout") }

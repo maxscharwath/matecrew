@@ -95,14 +95,17 @@ fn previews() -> Value {
     // Who: an avatar for most, initials for those without one; past five, only counted.
     let initials = |s: &str| json!({"initials": s, "avatar": null});
     let with = |s: &str, i: usize| json!({"initials": s, "avatar": face(i)});
+    // Names as long as the office's real ones: the product must still read in full.
     dashboard.preparation = Some(serde_json::from_value(json!({
-        "title":"À préparer · Après-midi","total":"11 à préparer","sessionId":"s1","serveLabel":"Servi",
+        "title":"À préparer · Après-midi","total":"13 à préparer","sessionId":"s1","serveLabel":"Servi",
         "items":[
-            {"name":"Maté Classic","count":7,"names":"Alex, Sam, Chris, Jo, Max, Kim, Noa","picture":drawn(0),
+            {"name":"El Tony · Mate & Ginger","count":7,"names":"Alex, Sam, Chris, Jo, Max, Kim, Noa","picture":drawn(0),
              "people":[with("AM", 0), initials("SB"), with("CR", 2), initials("JD"), with("MK", 1)]},
-            {"name":"Maté Zero","count":3,"names":"Pat, Robin, Mika","picture":drawn(1),
-             "people":[with("PL", 1), initials("RV"), with("MS", 0)]},
-            {"name":"Maté Ginger","count":1,"names":"Lou","picture":drawn(2),"people":[initials("LG")]}
+            {"name":"El Tony · Mate Original","count":3,"names":"Clémence, Mathis, Robin","picture":drawn(1),
+             "people":[with("CL", 1), initials("MR"), with("RB", 0)]},
+            {"name":"El Tony · Mate Ginger (silver)","count":1,"names":"Gabriel","picture":drawn(2),"people":[initials("GL")]},
+            {"name":"Maté Classic","count":2,"names":"Adam, Carla","picture":drawn(0),
+             "people":[with("AD", 2), initials("CB")]}
         ]
     })).unwrap());
     all.add("preparation", "Before a session: who takes what; the right key serves it", |d| dashboard_screen(d, &dashboard, false));

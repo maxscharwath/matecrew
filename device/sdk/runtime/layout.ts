@@ -47,6 +47,7 @@ export type Padding = number | [number, number] | [number, number, number, numbe
 export type LayoutProps = {
   /** Children as a flex line: `column` (default) or `row`. */
   direction?: "row" | "column";
+  /** Space between children; negative overlaps them, later ones on top. */
   gap?: number;
   padding?: Padding;
   /** Cross axis; `stretch` (default) makes content-sized children span it. */

@@ -282,12 +282,12 @@ class SceneEncoder {
     const align = ["start", "center", "end", "stretch"].indexOf(input.align);
     const justify = ["start", "center", "end", "between", "around", "evenly"].indexOf(input.justify);
     if (direction < 0 || align < 0 || justify < 0) throw new Error("Invalid layout");
-    integer(input.gap, 0, LIMITS.viewport, "layout gap");
+    integer(input.gap, -LIMITS.viewport, LIMITS.viewport, "layout gap");
     input.padding.forEach((p) => integer(p, 0, LIMITS.viewport, "layout padding"));
     this.payload.u8(direction);
     this.payload.u8(align);
     this.payload.u8(justify);
-    this.payload.u16(input.gap);
+    this.payload.i16(input.gap);
     input.padding.forEach((p) => this.payload.u16(p));
   }
 

@@ -174,7 +174,8 @@ export function Picture({ value, size, half = false }: Readonly<{ value: unknown
 
 /**
  * Someone a screen names, `size` px: their avatar as the site dithers it, in a disc ringed in
- * ink, else their initials in an outlined disc. `person` is where the host puts them in the view
+ * ink, else their initials in an outlined disc, 4 px clear of its edge (wide ones get smaller):
+ * a stack covers the right of each disc. `person` is where the host puts them in the view
  * (`hasAvatar`, `avatar`, `initials`).
  */
 export function Avatar({ person, size }: Readonly<{ person: string; size: number }>) {
@@ -186,7 +187,7 @@ export function Avatar({ person, size }: Readonly<{ person: string; size: number
       </Show>
       <Show when={not(has)}>
         <Surface variant="outline" radius={Math.floor(size / 2)} width={size} height={size} align="center" justify="center">
-          <Small align="center">{view(`${person}.initials`)}</Small>
+          <Small align="center" fit width={size - 8}>{view(`${person}.initials`)}</Small>
         </Surface>
       </Show>
     </Group>

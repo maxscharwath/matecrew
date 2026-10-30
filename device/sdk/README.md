@@ -188,7 +188,8 @@ export default function Stock() {
 **Layout** is a flex engine on the device: sizes are pixels, `"fill"`, `{ fill: weight }`,
 `{ percent }` or content-sized by default; `Stack`, `HStack`, `VStack`, `Group`, `Card` and `Surface`
 take `direction`, `align` (`start` `center` `end` `stretch`), `justify` (`start` `center` `end`
-`between` `around` `evenly`), `gap` and `padding`. `Spacer` takes the free space. Hidden `When`/`Show`
+`between` `around` `evenly`), `gap` and `padding`. A negative `gap` overlaps the children, later ones
+on top (an avatar stack). `Spacer` takes the free space. Hidden `When`/`Show`
 children take no room. Text centres on its capitals, not its box (the box keeps room for accents and
 descenders), so an icon beside a label, or a figure in a disc, sits optically centred.
 
